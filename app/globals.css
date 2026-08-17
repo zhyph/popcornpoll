@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: 24 20% 6%;
+  --velvet: 350 45% 12%;
+  --marquee: 36 90% 58%;
+  --ticket: 42 47% 90%;
+  --brass: 33 30% 46%;
+  --exit-red: 5 60% 51%;
+
+  --background: var(--ink);
+  --foreground: var(--ticket);
+  --card: var(--velvet);
+  --card-foreground: var(--ticket);
+  --primary: var(--marquee);
+  --primary-foreground: var(--ink);
+  --destructive: var(--exit-red);
+  --destructive-foreground: var(--ticket);
+  --border: var(--brass);
+  --muted: 350 30% 18%;
+  --muted-foreground: 42 20% 70%;
+  --radius: 0.4rem;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-body);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ticket-stub silhouette used by the swipe card */
+.ticket-edge {
+  border-image: repeating-linear-gradient(
+    to bottom,
+    hsl(var(--brass)) 0 8px,
+    transparent 8px 16px
+  ) 1;
+  border-left-width: 3px;
+  border-left-style: solid;
+}

@@ -1,0 +1,67 @@
+// lib/wsClient.ts
+import type { ClientMessage, ServerMessage } from '../server/ws/protocol'
+
+export interface WsClient {
+  send(message: ClientMessage): void
+  on<T extends ServerMessage['type']>(
+    type: T,
+    handler: (msg: Extract<ServerMessage, { type: T }>) => void,
+  ): () => void
+  close(): void
+}
+
+const INITIAL_BACKOFF_MS = 1000
+const MAX_BACKOFF_MS = 30_000
+
+export function createWsClient(url: string): WsClient {
+  let socket: WebSocket
+  let backoff = INITIAL_BACKOFF_MS
+  let closedByCaller = false
+  const handlers = new Map<string, Set<(msg: ServerMessage) => void>>()
+  const queue: ClientMessage[] = []
+
+  function dispatch(message: ServerMessage) {
+    const set = handlers.get(message.type)
+    if (!set) return
+    for (const handler of [...set]) handler(message)
+  }
+
+  function connect() {
+    socket = new WebSocket(url)
+    socket.addEventListener('open', () => {
+      backoff = INITIAL_BACKOFF_MS
+      const pending = queue.splice(0, queue.length)
+      for (const msg of pending) socket.send(JSON.stringify(msg))
+    })
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data as string) as ServerMessage
+      dispatch(message)
+    })
+    socket.addEventListener('close', () => {
+      if (closedByCaller) return
+      setTimeout(connect, backoff)
+      backoff = Math.min(backoff * 2, MAX_BACKOFF_MS)
+    })
+  }
+  connect()
+
+  return {
+    send(message) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message))
+      } else {
+        queue.push(message)
+      }
+    },
+    on(type, handler) {
+      const set = handlers.get(type) ?? new Set()
+      set.add(handler as (msg: ServerMessage) => void)
+      handlers.set(type, set)
+      return () => set.delete(handler as (msg: ServerMessage) => void)
+    },
+    close() {
+      closedByCaller = true
+      socket.close()
+    },
+  }
+}
