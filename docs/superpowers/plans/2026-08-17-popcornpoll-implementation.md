@@ -4118,7 +4118,7 @@ git commit -m "feat: room store with hostClaimToken-gated join, reconnect, kick,
   ```ts
   function nextRngForRoom(room: RoomState): Rng
   function startRoom(store: RoomStore, code: string, callerIsHost: boolean, db: Database.Database, tmdb: TmdbClient):
-    ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; initialPendingCards: Map<string, number | null> }>
+    ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[] }>
   function swipeAction(store: RoomStore, code: string, participantId: string, movieId: number, vote: 'yes' | 'no'):
     ActionResult<{ consumed: boolean; newMatches: number[]; nextCardForParticipant: number | null; exhaustedNow: boolean }>
   ```
