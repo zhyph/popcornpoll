@@ -21,6 +21,14 @@
   --border: var(--brass);
   --muted: 350 30% 18%;
   --muted-foreground: 42 20% 70%;
+  --secondary: 350 30% 22%;
+  --secondary-foreground: var(--ticket);
+  --input: var(--brass);
+  --ring: var(--marquee);
+  --accent: 33 25% 22%;
+  --accent-foreground: var(--ticket);
+  --popover: var(--velvet);
+  --popover-foreground: var(--ticket);
   --radius: 0.4rem;
 }
 

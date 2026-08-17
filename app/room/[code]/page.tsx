@@ -30,10 +30,39 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       if (msg.room.pool) setPool(msg.room.pool)
       if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
       if (msg.hostToken) setIsHost(true)
+      sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
     })
-    const unsubState = ws.on('state_update', (msg) => setParticipants(msg.participants))
+    // state_update carries every field that changes over a room's life except
+    // pool/pendingCardId/topCandidates (those arrive via room_started/next_card/
+    // exhausted) — apply it with a merge, not a replace, or status/matches/
+    // exhausted never reach snapshot and the UI can never leave the lobby view.
+    const unsubState = ws.on('state_update', (msg) => {
+      setParticipants(msg.participants)
+      setSnapshot((prev) =>
+        prev && {
+          ...prev,
+          status: msg.status,
+          participants: msg.participants,
+          matches: msg.matches,
+          exhausted: msg.exhausted,
+          matchThreshold: msg.matchThreshold,
+          candidateSource: msg.candidateSource,
+          seq: msg.seq,
+        },
+      )
+    })
     const unsubStarted = ws.on('room_started', (msg) => setPool(msg.pool))
     const unsubNextCard = ws.on('next_card', (msg) => setPendingCardId(msg.movieId))
+    // match/exhausted arrive alongside a state_update in the same toRoom batch;
+    // state_update already updates snapshot.matches/exhausted, but the movie
+    // itself (match) and the ranked runner-up list (exhausted) only ever
+    // arrive on these two message types.
+    const unsubMatch = ws.on('match', (msg) =>
+      setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie])),
+    )
+    const unsubExhausted = ws.on('exhausted', (msg) =>
+      setSnapshot((prev) => prev && { ...prev, topCandidates: msg.topCandidates }),
+    )
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
@@ -52,10 +81,6 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       }
     }, 0)
 
-    ws.on('joined', (msg) => {
-      sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
-    })
-
     const heartbeat = setInterval(() => ws.send({ type: 'heartbeat' }), 15_000)
 
     return () => {
@@ -63,6 +88,8 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       unsubState()
       unsubStarted()
       unsubNextCard()
+      unsubMatch()
+      unsubExhausted()
       clearInterval(heartbeat)
       ws.close()
     }
