@@ -4200,8 +4200,17 @@ describe('startRoom', () => {
     const store = createRoomStore()
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     const host = joinRoom(store, code, 'Host', hostClaimToken)
+    // A third participant, in addition to host + flaky, so that excluding
+    // the one disconnected participant still leaves 2 connected — this test
+    // is specifically about exclusion behavior, not the separate minimum-
+    // participant gate (MIN_PARTICIPANTS_TO_START=2 is checked against the
+    // POST-exclusion count, per spec's "(disconnected-filtered) participant
+    // count" — conflating the two in one test with only 2 total joiners
+    // would make "excludes 1 of 2" and "needs at least 2 remaining"
+    // contradict each other).
+    const other = joinRoom(store, code, 'Other')
     const flaky = joinRoom(store, code, 'Flaky')
-    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    if (!host.ok || !other.ok || !flaky.ok) throw new Error('setup failed')
     store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
     seedPlexRows(10)
 
