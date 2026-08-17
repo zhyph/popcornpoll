@@ -66,6 +66,7 @@ export function SwipeDeck({
         onDrag={(_, info) => setDragDirection(info.offset.x > 0 ? 'yes' : info.offset.x < 0 ? 'no' : null)}
         onDragEnd={handleDragEnd}
         data-drag-direction={dragDirection ?? undefined}
+        data-testid="swipe-card"
       >
         {card.posterPath && (
           <img

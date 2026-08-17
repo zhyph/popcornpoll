@@ -48,7 +48,10 @@ export function createRoomStore(): RoomStore {
         totalVotes: 0,
         reputationC: 6.5,
         reputationM: 50,
-        rngSeed: Math.floor(Math.random() * 2 ** 31),
+        rngSeed:
+          process.env.FAKE_EXTERNAL_APIS === 'true' && process.env.ROOM_RNG_SEED
+            ? Number.parseInt(process.env.ROOM_RNG_SEED, 10)
+            : Math.floor(Math.random() * 2 ** 31),
         rngCallCount: 0,
         lastActivityAt: Date.now(),
         seq: 0,

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
-import { buildPool } from './buildPool'
+import { buildPool, getPoolCap } from './buildPool'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
 
@@ -52,7 +52,7 @@ describe('buildPool', () => {
   it('builds a plex-only pool capped at 100, with in_library=true for every entry', async () => {
     seedPlexRows(150)
     const result = await buildPool(db, noOpTmdb, 'plex', {}, 1)
-    expect(result.pool.length).toBe(100)
+    expect(result.pool.length).toBe(getPoolCap())
     expect(result.pool.every((e) => e.inLibrary)).toBe(true)
     expect(result.tooSmall).toBe(false)
   })

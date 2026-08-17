@@ -146,10 +146,14 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
-      {latestMatch && <MarqueeReveal movie={latestMatch} />}
+      {latestMatch && (
+        <div data-testid="match-banner">
+          <MarqueeReveal movie={latestMatch} />
+        </div>
+      )}
       <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
       {snapshot.exhausted && snapshot.matches.length === 0 && (
-        <Card className="w-full border-2 border-brass bg-velvet">
+        <Card data-testid="fallback" className="w-full border-2 border-brass bg-velvet">
           <CardHeader className="font-display text-xl text-ticket">No unanimous pick — closest picks</CardHeader>
           <CardContent className="flex flex-col gap-1">
             {(snapshot.topCandidates ?? []).map((entry) => (

@@ -6,7 +6,12 @@ import { computeCAndM, reputationScore } from '../ranking/reputation'
 import { createRng, weightedSampleWithoutReplacement } from '../ranking/rng'
 import { TMDB_DISCOVER_PAGE_CAP, type TmdbClient } from '../tmdb/client'
 
-export const POOL_CAP = 100
+export function getPoolCap(): number {
+  if (process.env.FAKE_EXTERNAL_APIS === 'true' && process.env.POOL_SIZE_CAP) {
+    return Number.parseInt(process.env.POOL_SIZE_CAP, 10)
+  }
+  return 100
+}
 export const POOL_MIN_SIZE = 5
 const TMDB_SHARE = 0.7
 
@@ -115,8 +120,9 @@ export async function buildPool(
   const { c, m } = computeCAndM(eligible)
   const rng = createRng(rngSeed)
 
-  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(POOL_CAP * (1 - TMDB_SHARE)) : POOL_CAP
-  let targetTmdbCount = candidateSource === 'plex+tmdb' ? POOL_CAP - targetPlexCount : 0
+  const poolCap = getPoolCap()
+  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(poolCap * (1 - TMDB_SHARE)) : poolCap
+  let targetTmdbCount = candidateSource === 'plex+tmdb' ? poolCap - targetPlexCount : 0
 
   const plexEligible = eligible.filter((r) => r.plexRatingKey !== null)
   const tmdbEligible = eligible.filter((r) => r.plexRatingKey === null)
@@ -132,7 +138,7 @@ export async function buildPool(
   const pickedPlex = weightedSampleWithoutReplacement(plexEligible, weight, targetPlexCount, rng)
   const pickedTmdb = weightedSampleWithoutReplacement(tmdbEligible, weight, targetTmdbCount, rng)
 
-  const finalRows = [...pickedPlex, ...pickedTmdb].slice(0, POOL_CAP)
+  const finalRows = [...pickedPlex, ...pickedTmdb].slice(0, poolCap)
   stampLastUsed(db, finalRows.map((r) => r.id), new Date().toISOString())
 
   return {
