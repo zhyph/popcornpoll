@@ -20,6 +20,7 @@
 - Pool cap 100 candidates, minimum pool size 5, minimum participant count 2.
 - 30-minute inactivity timeout (reset by join/swipe/host action/any connected participant's heartbeat); 10-minute eviction after `ended`.
 - TypeScript strict mode throughout. Vitest for unit tests, Playwright for end-to-end.
+- All UI work goes through the frontend-design skill's process, not default component styling — shadcn/ui (Radix-based) for structural components, react-bits (via the shadcn CLI's `@react-bits` registry) for ambient motion, hand-authored components for the bespoke signature element. Design tokens (palette, type, structural devices) are fixed in Task 22 — later UI work extends that system rather than introducing a new one.
 - Plex/TMDB clients are always called through an interface with a fake implementation, selected via `FAKE_EXTERNAL_APIS=true`, so no task's tests require network access or real credentials.
 
 ---
@@ -6220,19 +6221,19 @@ git commit -m "feat: server entry point wiring HTTP, WS, sync, enrichment, and s
 
 ---
 
-## Task 22: Frontend — WS client, room creation, lobby, swipe deck
+## Task 22: Frontend — design system, WS client, room creation, lobby, swipe deck
 
 **Files:**
+- Create: `app/globals.css`, `tailwind.config.ts`, `postcss.config.mjs`, `components.json`, `lib/utils.ts`
+- Create: `components/ui/*` (via shadcn CLI — button, card, avatar, badge, dialog, input, label, select, separator, sonner, skeleton, tooltip, form)
+- Create: `components/MarqueeReveal.tsx`, `components/TicketAvatar.tsx`
 - Create: `lib/wsClient.ts`
-- Create: `app/page.tsx`
-- Create: `app/join/[code]/page.tsx`
-- Create: `app/room/[code]/page.tsx`
-- Create: `components/SwipeDeck.tsx`
-- Create: `components/RoomShare.tsx`
+- Create: `app/layout.tsx`, `app/page.tsx`, `app/join/[code]/page.tsx`, `app/room/[code]/page.tsx`
+- Create: `components/SwipeDeck.tsx`, `components/RoomShare.tsx`
 - Test: `lib/wsClient.test.ts`
 
 **Interfaces:**
-- Consumes: `ClientMessage`, `ServerMessage` (Task 18, re-exported for client use — see Step 1)
+- Consumes: `ClientMessage`, `ServerMessage` (Task 18, re-exported for client use — see Step 4)
 - Produces:
   ```ts
   interface WsClient {
@@ -6243,9 +6244,227 @@ git commit -m "feat: server entry point wiring HTTP, WS, sync, enrichment, and s
   function createWsClient(url: string): WsClient
   ```
 
-This task is scoped to a **functionally complete, real interaction flow** — create a room, share it, join, see the lobby roster, swipe, see a match — not final visual polish. Given the project's UI-quality goal, treat this as the base to iterate on with real browser feedback afterward (a visual pass belongs in its own follow-up work, not a one-shot code diff).
+### Design direction
 
-- [ ] **Step 1: Write the failing `wsClient` test** (uses a real in-process `ws` server as the target, same pattern as Task 19)
+Every UI file in this task is built through the **frontend-design** skill's process, not ad hoc — load that skill before writing any component, and hold every screen against the design plan below rather than default shadcn/Tailwind styling. The subject is a movie theater at night, not a generic swipe app: ticket stubs, marquee bulbs, brass fixtures, velvet curtains. That vernacular is where every distinctive choice below comes from — component styling that doesn't trace back to one of these materials is the wrong choice.
+
+**Tokens** (defined as CSS variables in `app/globals.css`, consumed by `tailwind.config.ts`):
+
+| Token | Hex | Role |
+|---|---|---|
+| `--ink` | `#17110E` | Base background — curtain-shadow near-black, warm not neutral |
+| `--velvet` | `#2C1116` | Surface — card/panel background, deep burgundy |
+| `--marquee` | `#F5A623` | Primary accent — marquee-bulb amber; CTAs, "yes," active state |
+| `--ticket` | `#F3E9D2` | Primary text-on-dark, light surface — cream ticket paper |
+| `--brass` | `#9C7A4A` | Borders, dividers, ticket-perforation — bronze fixture metal |
+| `--exit-red` | `#D0463A` | Secondary accent — "no"/reject/error, theater EXIT-sign red |
+
+**Type**: display face **Anton** (tall condensed poster/marquee lettering — room codes, match-reveal title, page H1, used sparingly per the skill's restraint principle, never for body text); body face **Work Sans** (warm geometric humanist sans — everything else); utility face **JetBrains Mono** (ticket-serial-style numerals — the digit portion of room codes, timestamps). Load all three via `next/font/google` in `app/layout.tsx`, exposed as CSS variables (`--font-display`, `--font-body`, `--font-mono`) so Tailwind's `font-display`/`font-body`/`font-mono` utilities resolve to them.
+
+**Structural devices** (the vocabulary every component draws from, not decoration bolted on after):
+- **Swipe card** — a torn admit-one ticket silhouette: a dashed perforation line down one edge (`repeating-linear-gradient` border), a clipped torn-corner notch, resting at a slight rotation like a ticket tossed on a table.
+- **Lobby roster** — each participant is a ticket-stub chip ("admit one" per guest), not a plain list row.
+- **Host controls** — grouped in a brass-bordered panel read as a box-office window, not a bare button row.
+- **Ambient background** — a slow, low-opacity spotlight-beam sweep behind the swipe deck (a react-bits background component, retinted to the palette above) — quiet, present, never competing with the deck.
+
+**Signature** (the one memorable element, per the skill's "spend your boldness in one place"): the **marquee chase-light match reveal** — `components/MarqueeReveal.tsx`. When a match fires, the matched title appears inside a frame ringed with small bulbs that light up in a traveling chase sequence (amber glow, brief flicker on first light), title sliding up like a marquee display. This is the one place the UI gets loud; the swipe deck and lobby stay disciplined around it so the reveal actually reads as special.
+
+- [ ] **Step 1: Initialize Tailwind + shadcn/ui**
+
+```bash
+npx shadcn@latest init -d
+```
+
+This scaffolds `tailwind.config.ts`, `postcss.config.mjs`, `components.json`, `lib/utils.ts`, and a starter `app/globals.css` with shadcn's default (neutral) tokens. The next two steps replace those defaults with the palette above — the init's job here is only to wire the build pipeline (Tailwind, CVA, `cn()`) correctly, not to pick the final look.
+
+- [ ] **Step 2: Replace the generated tokens with the design plan's palette**
+
+Overwrite the `:root` block `shadcn init` generated in `app/globals.css` with:
+
+```css
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: 24 20% 6%;
+  --velvet: 350 45% 12%;
+  --marquee: 36 90% 58%;
+  --ticket: 42 47% 90%;
+  --brass: 33 30% 46%;
+  --exit-red: 5 60% 51%;
+
+  --background: var(--ink);
+  --foreground: var(--ticket);
+  --card: var(--velvet);
+  --card-foreground: var(--ticket);
+  --primary: var(--marquee);
+  --primary-foreground: var(--ink);
+  --destructive: var(--exit-red);
+  --destructive-foreground: var(--ticket);
+  --border: var(--brass);
+  --muted: 350 30% 18%;
+  --muted-foreground: 42 20% 70%;
+  --radius: 0.4rem;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-body);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ticket-stub silhouette used by the swipe card */
+.ticket-edge {
+  border-image: repeating-linear-gradient(
+    to bottom,
+    hsl(var(--brass)) 0 8px,
+    transparent 8px 16px
+  ) 1;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+```
+
+(shadcn's `-d` init writes HSL triples without the `hsl()` wrapper for its own tokens; the values above follow that same convention so every existing shadcn component — installed in Step 3 — picks them up with zero per-component overrides.)
+
+- [ ] **Step 3: Install the shadcn components this task needs**
+
+```bash
+npx shadcn@latest add @shadcn/button @shadcn/card @shadcn/avatar @shadcn/badge @shadcn/dialog @shadcn/input @shadcn/label @shadcn/select @shadcn/separator @shadcn/sonner @shadcn/skeleton @shadcn/tooltip @shadcn/form
+```
+
+This writes `components/ui/*.tsx`, already reading from the palette wired in Step 2 — no code sample needed here, the CLI output is the deliverable.
+
+- [ ] **Step 4: Register the react-bits registry and install the ambient background**
+
+Add the registry to `components.json` (merge into the existing file the init wrote):
+
+```json
+{
+  "registries": {
+    "@react-bits": "https://reactbits.dev/r/{name}.json"
+  }
+}
+```
+
+```bash
+npx shadcn@latest add @react-bits/Aurora-TS-TW
+```
+
+Retint it to the palette in `components/SpotlightBackground.tsx` — a thin wrapper around the installed `Aurora` component rather than editing the vendored file directly, so a future `shadcn add` re-pull doesn't clobber the retint:
+
+```tsx
+// components/SpotlightBackground.tsx
+'use client'
+
+import Aurora from './ui/Aurora'
+
+export function SpotlightBackground() {
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-10 opacity-30">
+      <Aurora colorStops={['#2C1116', '#F5A623', '#17110E']} amplitude={0.6} speed={0.3} />
+    </div>
+  )
+}
+```
+
+- [ ] **Step 5: Write `components/MarqueeReveal.tsx`** (the signature element)
+
+```tsx
+// components/MarqueeReveal.tsx
+'use client'
+
+import { motion } from 'framer-motion'
+import type { PoolEntry } from '../server/pool/buildPool'
+
+const BULB_COUNT = 20
+
+export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
+  return (
+    <motion.div
+      role="alert"
+      className="relative border-2 border-brass bg-velvet p-8 text-center"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+    >
+      {Array.from({ length: BULB_COUNT }).map((_, i) => (
+        <motion.span
+          key={i}
+          className="absolute h-2 w-2 rounded-full bg-marquee"
+          style={bulbPosition(i, BULB_COUNT)}
+          animate={{ opacity: [0.25, 1, 0.25] }}
+          transition={{ duration: 1.2, repeat: Infinity, delay: (i / BULB_COUNT) * 1.2, ease: 'easeInOut' }}
+        />
+      ))}
+      <p className="font-mono text-xs uppercase tracking-widest text-brass">It's a match</p>
+      <motion.h2
+        className="font-display text-4xl text-ticket"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
+        {movie.title}
+      </motion.h2>
+      {movie.inLibrary && <p className="mt-2 text-sm text-marquee">Ready to watch in your library</p>}
+    </motion.div>
+  )
+}
+
+// Places bulb i of n evenly around a rectangle's perimeter, expressed as
+// inset-based absolute positioning (no layout dependency on the frame's
+// exact pixel size).
+function bulbPosition(i: number, n: number): React.CSSProperties {
+  const perimeterFraction = i / n
+  const side = Math.floor(perimeterFraction * 4)
+  const t = (perimeterFraction * 4) % 1
+  const pct = `${t * 100}%`
+  switch (side) {
+    case 0: return { top: '-4px', left: pct }
+    case 1: return { top: pct, right: '-4px' }
+    case 2: return { bottom: '-4px', left: pct }
+    default: return { top: pct, left: '-4px' }
+  }
+}
+```
+
+- [ ] **Step 6: Write `components/TicketAvatar.tsx`** (roster chip)
+
+```tsx
+// components/TicketAvatar.tsx
+import { Avatar, AvatarFallback } from './ui/avatar'
+import { Badge } from './ui/badge'
+import type { ParticipantView } from '../server/ws/protocol'
+
+export function TicketAvatar({ participant }: { participant: ParticipantView }) {
+  const initials = participant.displayName.slice(0, 2).toUpperCase()
+  return (
+    <div className="flex items-center gap-2 rounded border border-brass/50 bg-velvet px-3 py-1.5">
+      <Avatar className="h-6 w-6">
+        <AvatarFallback className="bg-marquee text-xs text-ink">{initials}</AvatarFallback>
+      </Avatar>
+      <span className="font-mono text-sm text-ticket">{participant.displayName}</span>
+      {participant.connectionStatus === 'disconnected' && (
+        <Badge variant="outline" className="border-exit-red text-exit-red">away</Badge>
+      )}
+      {participant.finished && <Badge className="bg-marquee text-ink">done</Badge>}
+    </div>
+  )
+}
+```
+
+- [ ] **Step 7: Write the failing `wsClient` test** (uses a real in-process `ws` server as the target, same pattern as Task 19)
 
 ```ts
 // lib/wsClient.test.ts
@@ -6311,12 +6530,12 @@ describe('createWsClient', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 8: Run test to verify it fails**
 
 Run: `npx vitest run lib/wsClient.test.ts`
 Expected: FAIL — `lib/wsClient.ts` does not exist yet.
 
-- [ ] **Step 3: Write `lib/wsClient.ts`**
+- [ ] **Step 9: Write `lib/wsClient.ts`**
 
 ```ts
 // lib/wsClient.ts
@@ -6388,12 +6607,12 @@ export function createWsClient(url: string): WsClient {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 10: Run test to verify it passes**
 
 Run: `npx vitest run lib/wsClient.test.ts`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Write `components/SwipeDeck.tsx`**
+- [ ] **Step 11: Write `components/SwipeDeck.tsx`**
 
 ```tsx
 // components/SwipeDeck.tsx
@@ -6401,6 +6620,8 @@ Expected: PASS (2 tests)
 
 import { motion, useAnimation, type PanInfo } from 'framer-motion'
 import { useEffect, useState } from 'react'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
 import type { PoolEntry } from '../server/pool/buildPool'
 
 const SWIPE_THRESHOLD_PX = 120
@@ -6438,7 +6659,7 @@ export function SwipeDeck({
   })
 
   if (!card) {
-    return <div className="swipe-deck swipe-deck--empty">No more cards</div>
+    return <p className="font-display text-xl text-brass">No more cards</p>
   }
 
   async function handleDragEnd(_: unknown, info: PanInfo) {
@@ -6453,9 +6674,10 @@ export function SwipeDeck({
   }
 
   return (
-    <div className="swipe-deck" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
+    <div className="flex flex-col items-center gap-6" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
       <motion.div
-        className="swipe-card"
+        className="ticket-edge relative w-80 origin-bottom -rotate-1 rounded bg-velvet p-4 shadow-xl"
+        style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 12px 100%, 0 calc(100% - 12px))' }}
         drag="x"
         animate={controls}
         onDrag={(_, info) => setDragDirection(info.offset.x > 0 ? 'yes' : info.offset.x < 0 ? 'no' : null)}
@@ -6464,24 +6686,42 @@ export function SwipeDeck({
       >
         {card.posterPath && (
           <img
+            className="mb-3 aspect-[2/3] w-full rounded object-cover"
             src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `https://image.tmdb.org/t/p/w342${card.posterPath}`}
             alt={card.title}
           />
         )}
-        <h2>{card.title}</h2>
-        <p>{card.overview}</p>
-        {card.inLibrary && <span className="badge">In your library</span>}
+        <h2 className="font-display text-2xl text-ticket">{card.title}</h2>
+        <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{card.overview}</p>
+        {card.inLibrary && (
+          <Badge className="mt-2 bg-marquee text-ink">In your library</Badge>
+        )}
       </motion.div>
-      <div className="swipe-controls">
-        <button onClick={() => onDecide('no')} aria-label="No">✕</button>
-        <button onClick={() => onDecide('yes')} aria-label="Yes">♥</button>
+      <div className="flex gap-6">
+        <Button
+          size="icon"
+          variant="outline"
+          className="h-14 w-14 rounded-full border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
+          onClick={() => animateDecision('no')}
+          aria-label="No"
+        >
+          ✕
+        </Button>
+        <Button
+          size="icon"
+          className="h-14 w-14 rounded-full bg-marquee text-ink hover:bg-marquee/90"
+          onClick={() => animateDecision('yes')}
+          aria-label="Yes"
+        >
+          ♥
+        </Button>
       </div>
     </div>
   )
 }
 ```
 
-- [ ] **Step 6: Write `components/RoomShare.tsx`**
+- [ ] **Step 12: Write `components/RoomShare.tsx`**
 
 ```tsx
 // components/RoomShare.tsx
@@ -6489,6 +6729,9 @@ export function SwipeDeck({
 
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { Button } from './ui/button'
+import { Card, CardContent } from './ui/card'
 
 export function RoomShare({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
@@ -6497,7 +6740,11 @@ export function RoomShare({ code }: { code: string }) {
 
   useEffect(() => {
     if (!joinUrl || !canvasRef.current) return
-    QRCode.toCanvas(canvasRef.current, joinUrl, { width: 200, margin: 1 })
+    QRCode.toCanvas(canvasRef.current, joinUrl, {
+      width: 180,
+      margin: 1,
+      color: { dark: '#17110E', light: '#F3E9D2' },
+    })
   }, [joinUrl])
 
   async function copyLink() {
@@ -6512,25 +6759,63 @@ export function RoomShare({ code }: { code: string }) {
       document.body.removeChild(input)
     }
     setCopied(true)
+    toast('Link copied')
     setTimeout(() => setCopied(false), 2000)
   }
 
   return (
-    <div className="room-share">
-      <p className="room-code">{code}</p>
-      <canvas ref={canvasRef} aria-label={`QR code for ${joinUrl}`} />
-      <button onClick={copyLink}>{copied ? 'Copied!' : 'Copy link'}</button>
-      {typeof navigator !== 'undefined' && 'share' in navigator && (
-        <button onClick={() => navigator.share({ title: 'Join my movie night', url: joinUrl })}>
-          Share
-        </button>
-      )}
-    </div>
+    <Card className="border-2 border-brass bg-velvet">
+      <CardContent className="flex flex-col items-center gap-4 p-6">
+        <p className="font-mono text-3xl tracking-widest text-marquee">{code}</p>
+        <canvas ref={canvasRef} aria-label={`QR code for ${joinUrl}`} className="rounded bg-ticket p-2" />
+        <div className="flex gap-2">
+          <Button variant="outline" className="border-brass text-ticket" onClick={copyLink}>
+            {copied ? 'Copied!' : 'Copy link'}
+          </Button>
+          {typeof navigator !== 'undefined' && 'share' in navigator && (
+            <Button
+              className="bg-marquee text-ink hover:bg-marquee/90"
+              onClick={() => navigator.share({ title: 'Join my movie night', url: joinUrl })}
+            >
+              Share
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 ```
 
-- [ ] **Step 7: Write `app/page.tsx`** (create room)
+- [ ] **Step 13: Write `app/layout.tsx`** (loads the three fonts, mounts the ambient background)
+
+```tsx
+// app/layout.tsx
+import { Anton, JetBrains_Mono, Work_Sans } from 'next/font/google'
+import { SpotlightBackground } from '../components/SpotlightBackground'
+import { Toaster } from '../components/ui/sonner'
+import './globals.css'
+
+const display = Anton({ subsets: ['latin'], weight: '400', variable: '--font-display' })
+const body = Work_Sans({ subsets: ['latin'], variable: '--font-body' })
+const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' })
+
+export const metadata = { title: 'PopcornPoll' }
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+      <body>
+        <SpotlightBackground />
+        {children}
+        <Toaster />
+      </body>
+    </html>
+  )
+}
+```
+
+- [ ] **Step 14: Write `app/page.tsx`** (create room)
 
 ```tsx
 // app/page.tsx
@@ -6538,6 +6823,12 @@ export function RoomShare({ code }: { code: string }) {
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '../components/ui/button'
+import { Card, CardContent, CardHeader } from '../components/ui/card'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Separator } from '../components/ui/separator'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/room/types'
 
 export default function CreateRoomPage() {
@@ -6571,65 +6862,95 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <main>
-      <h1>PopcornPoll</h1>
-      <label>
-        Candidate source
-        <select value={candidateSource} onChange={(e) => setCandidateSource(e.target.value as CandidateSource)}>
-          <option value="plex">Plex library only</option>
-          <option value="plex+tmdb">Plex + TMDB discover</option>
-        </select>
-      </label>
-      <label>
-        Match rule
-        <select value={thresholdKind} onChange={(e) => setThresholdKind(e.target.value as MatchThreshold['kind'])}>
-          <option value="all">Everyone must say yes</option>
-          <option value="majority">Majority</option>
-          <option value="atLeast">At least N</option>
-        </select>
-      </label>
-      {thresholdKind === 'atLeast' && (
-        <label>
-          N
-          <input
-            type="number"
-            min={1}
-            value={atLeastN}
-            onChange={(e) => setAtLeastN(Number.parseInt(e.target.value, 10) || 1)}
-          />
-        </label>
-      )}
-      <fieldset>
-        <legend>Filters (applied to both Plex and TMDB candidates)</legend>
-        <label>
-          Genre
-          <input value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="e.g. Comedy" />
-        </label>
-        <label>
-          Year, from
-          <input type="number" value={yearMin} onChange={(e) => setYearMin(e.target.value)} />
-        </label>
-        <label>
-          Year, to
-          <input type="number" value={yearMax} onChange={(e) => setYearMax(e.target.value)} />
-        </label>
-        <label>
-          Minimum rating
-          <input type="number" step={0.1} min={0} max={10} value={ratingMin} onChange={(e) => setRatingMin(e.target.value)} />
-        </label>
-      </fieldset>
-      <button onClick={createRoom}>Create room</button>
-      {candidateSource === 'plex+tmdb' && (
-        <p className="tmdb-attribution">
-          This product uses the TMDB API but is not endorsed or certified by TMDB.
-        </p>
-      )}
+    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4">
+      <h1 className="font-display text-5xl text-marquee">POPCORNPOLL</h1>
+      <Card className="w-full border-2 border-brass bg-velvet">
+        <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+          Tonight's showing
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label>Candidate source</Label>
+            <Select value={candidateSource} onValueChange={(v) => setCandidateSource(v as CandidateSource)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="plex">Plex library only</SelectItem>
+                <SelectItem value="plex+tmdb">Plex + TMDB discover</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Match rule</Label>
+            <Select value={thresholdKind} onValueChange={(v) => setThresholdKind(v as MatchThreshold['kind'])}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Everyone must say yes</SelectItem>
+                <SelectItem value="majority">Majority</SelectItem>
+                <SelectItem value="atLeast">At least N</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {thresholdKind === 'atLeast' && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="atLeastN">N</Label>
+              <Input
+                id="atLeastN"
+                type="number"
+                min={1}
+                value={atLeastN}
+                onChange={(e) => setAtLeastN(Number.parseInt(e.target.value, 10) || 1)}
+              />
+            </div>
+          )}
+
+          <Separator className="bg-brass/40" />
+          <p className="font-mono text-xs uppercase tracking-widest text-brass">Filters</p>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="genre">Genre</Label>
+            <Input id="genre" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="e.g. Comedy" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="yearMin">Year, from</Label>
+              <Input id="yearMin" type="number" value={yearMin} onChange={(e) => setYearMin(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="yearMax">Year, to</Label>
+              <Input id="yearMax" type="number" value={yearMax} onChange={(e) => setYearMax(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="ratingMin">Minimum rating</Label>
+            <Input
+              id="ratingMin"
+              type="number"
+              step={0.1}
+              min={0}
+              max={10}
+              value={ratingMin}
+              onChange={(e) => setRatingMin(e.target.value)}
+            />
+          </div>
+
+          <Button className="mt-2 bg-marquee text-ink hover:bg-marquee/90" onClick={createRoom}>
+            Create room
+          </Button>
+          {candidateSource === 'plex+tmdb' && (
+            <p className="text-center text-xs text-muted-foreground">
+              This product uses the TMDB API but is not endorsed or certified by TMDB.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </main>
   )
 }
 ```
 
-- [ ] **Step 8: Write `app/join/[code]/page.tsx`**
+- [ ] **Step 15: Write `app/join/[code]/page.tsx`**
 
 ```tsx
 // app/join/[code]/page.tsx
@@ -6637,35 +6958,52 @@ export default function CreateRoomPage() {
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '../../../components/ui/button'
+import { Card, CardContent, CardHeader } from '../../../components/ui/card'
+import { Input } from '../../../components/ui/input'
+import { Label } from '../../../components/ui/label'
 
 export default function JoinRoomPage({ params }: { params: { code: string } }) {
   const router = useRouter()
   const [displayName, setDisplayName] = useState('')
 
   return (
-    <main>
-      <h1>Join {params.code}</h1>
-      <input
-        value={displayName}
-        onChange={(e) => setDisplayName(e.target.value)}
-        maxLength={24}
-        placeholder="Your name"
-      />
-      <button
-        disabled={displayName.length === 0}
-        onClick={() => {
-          sessionStorage.setItem('pendingDisplayName', displayName)
-          router.push(`/room/${params.code}`)
-        }}
-      >
-        Join
-      </button>
+    <main className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-6 px-4">
+      <p className="font-mono text-xs uppercase tracking-widest text-brass">You're invited to</p>
+      <h1 className="font-display text-3xl tracking-widest text-marquee">{params.code}</h1>
+      <Card className="w-full border-2 border-brass bg-velvet">
+        <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+          Your name on the ticket
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="displayName">Name</Label>
+            <Input
+              id="displayName"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={24}
+              placeholder="Your name"
+            />
+          </div>
+          <Button
+            className="bg-marquee text-ink hover:bg-marquee/90"
+            disabled={displayName.length === 0}
+            onClick={() => {
+              sessionStorage.setItem('pendingDisplayName', displayName)
+              router.push(`/room/${params.code}`)
+            }}
+          >
+            Join
+          </Button>
+        </CardContent>
+      </Card>
     </main>
   )
 }
 ```
 
-- [ ] **Step 9: Write `app/room/[code]/page.tsx`** (lobby + active swipe screen, driven entirely by `state_update`/`joined`/`next_card`)
+- [ ] **Step 16: Write `app/room/[code]/page.tsx`** (lobby + active swipe screen, driven entirely by `state_update`/`joined`/`next_card`)
 
 ```tsx
 // app/room/[code]/page.tsx
@@ -6673,8 +7011,12 @@ export default function JoinRoomPage({ params }: { params: { code: string } }) {
 
 import { useEffect, useState } from 'react'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
+import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
 import { SwipeDeck } from '../../../components/SwipeDeck'
+import { TicketAvatar } from '../../../components/TicketAvatar'
+import { Button } from '../../../components/ui/button'
+import { Card, CardContent, CardHeader } from '../../../components/ui/card'
 import type { ParticipantView, RoomSnapshot } from '../../../server/ws/protocol'
 import type { PoolEntry } from '../../../server/pool/buildPool'
 
@@ -6734,68 +7076,89 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     }
   }, [params.code])
 
-  if (!snapshot) return <p>Connecting…</p>
+  if (!snapshot) return <p className="p-8 font-mono text-brass">Connecting…</p>
 
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
     return (
-      <main>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center gap-6 px-4 py-10">
         <RoomShare code={params.code} />
-        <h2>Who's here</h2>
-        <ul>
-          {participants.map((p) => (
-            <li key={p.id}>
-              {p.displayName} {p.connectionStatus === 'disconnected' && '(away)'}
-              {isHost && (
-                <button onClick={() => client?.send({ type: 'kick', participantId: p.id })}>Remove</button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <Card className="w-full border border-brass/50 bg-velvet">
+          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+            Admitted
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {participants.map((p) => (
+              <div key={p.id} className="flex items-center justify-between">
+                <TicketAvatar participant={p} />
+                {isHost && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-exit-red hover:bg-exit-red/10"
+                    onClick={() => client?.send({ type: 'kick', participantId: p.id })}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
         {isHost && snapshot.status === 'lobby' && (
-          <button onClick={() => client?.send({ type: 'start' })}>Start</button>
+          <Button
+            size="lg"
+            className="bg-marquee text-ink hover:bg-marquee/90"
+            onClick={() => client?.send({ type: 'start' })}
+          >
+            Start
+          </Button>
         )}
-        {snapshot.status === 'starting' && <p>Building your pool…</p>}
+        {snapshot.status === 'starting' && (
+          <p className="font-mono text-sm text-brass">Building your pool…</p>
+        )}
       </main>
     )
   }
 
   const currentCard = pool.find((entry) => entry.movieId === pendingCardId) ?? null
+  const latestMatch = snapshot.matches.length > 0
+    ? pool.find((e) => e.movieId === snapshot.matches[snapshot.matches.length - 1])
+    : null
 
   return (
-    <main>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
+      {latestMatch && <MarqueeReveal movie={latestMatch} />}
       <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
-      {snapshot.matches.length > 0 && (
-        <div className="matches">
-          <h2>Matches</h2>
-          <ul>
-            {snapshot.matches.map((movieId) => (
-              <li key={movieId}>{pool.find((e) => e.movieId === movieId)?.title}</li>
-            ))}
-          </ul>
-        </div>
-      )}
       {snapshot.exhausted && snapshot.matches.length === 0 && (
-        <div className="fallback">
-          <h2>No unanimous pick — closest picks:</h2>
-          <ul>
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-display text-xl text-ticket">No unanimous pick — closest picks</CardHeader>
+          <CardContent className="flex flex-col gap-1">
             {(snapshot.topCandidates ?? []).map((entry) => (
-              <li key={entry.movieId}>{entry.title}</li>
+              <p key={entry.movieId} className="font-mono text-sm text-ticket">{entry.title}</p>
             ))}
-          </ul>
-        </div>
+          </CardContent>
+        </Card>
       )}
-      {isHost && <button onClick={() => client?.send({ type: 'end_room' })}>End session</button>}
+      {isHost && (
+        <Button
+          variant="outline"
+          className="border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
+          onClick={() => client?.send({ type: 'end_room' })}
+        >
+          End session
+        </Button>
+      )}
     </main>
   )
 }
 ```
 
-- [ ] **Step 10: Run the full frontend + backend test suite**
+- [ ] **Step 17: Run the full frontend + backend test suite**
 
 Run: `npx vitest run`
 Expected: PASS — all tests from Tasks 1–22.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 18: Commit**
 
 ```bash
 git add lib components app
