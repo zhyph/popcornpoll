@@ -4970,7 +4970,7 @@ function participantViews(room: RoomState): ParticipantView[] {
   }))
 }
 
-function stateUpdate(room: RoomState): ServerMessage {
+function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_update' }> {
   room.seq++
   return {
     type: 'state_update',
@@ -5142,12 +5142,18 @@ export async function handleMessage(
         return { ...emptyOutput(state), toSender: [{ type: 'error', code: result.code, message: result.code }] }
       }
       const room = store.get(state.roomCode)!
-      room.seq++
+      // stateUpdate() is the sole seq-incrementing call — build it first and
+      // reuse its seq on room_started, so both messages in this toRoom batch
+      // carry the identical value (the invariant the WS protocol section
+      // documents: "every message describing [a] change carries that same
+      // value"). Incrementing seq a second time here, before stateUpdate,
+      // would desync the two — a real bug this exact fix closes.
+      const update = stateUpdate(room)
       return {
         ...emptyOutput(state),
         toRoom: [
-          { type: 'room_started', pool: room.pool, seq: room.seq },
-          stateUpdate(room),
+          { type: 'room_started', pool: room.pool, seq: update.seq },
+          update,
         ],
       }
     }
@@ -5196,8 +5202,11 @@ export async function handleMessage(
         return { ...emptyOutput(state), toSender: [{ type: 'error', code: result.code, message: result.code }] }
       }
       const room = store.get(state.roomCode)!
-      room.seq++
-      return { ...emptyOutput(state), toRoom: [{ type: 'room_ended', reason: 'host_ended', seq: room.seq }, stateUpdate(room)] }
+      const update = stateUpdate(room) // same reasoning as the 'start' case above — one seq source, reused
+      return {
+        ...emptyOutput(state),
+        toRoom: [{ type: 'room_ended', reason: 'host_ended', seq: update.seq }, update],
+      }
     }
 
     case 'heartbeat': {
