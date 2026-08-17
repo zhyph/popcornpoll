@@ -7492,9 +7492,11 @@ git commit -m "feat: WS client, room creation/join/lobby pages, swipe deck"
 - Create: `e2e/exhaustion.spec.ts`
 - Create: `e2e/authorization.spec.ts`
 - Create: `e2e/exclusion.spec.ts`
+- Modify: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`, `server/room/roomStore.ts` (test-only env overrides, Step 1)
+- Modify: `components/SwipeDeck.tsx`, `app/room/[code]/page.tsx` (add `data-testid` hooks — attribute-only, no behavior change, Step 1)
 
 **Interfaces:**
-- Consumes: `createApp` (Task 21), running against `FAKE_EXTERNAL_APIS=true` with `POOL_SIZE_CAP` and `ROOM_RNG_SEED` overrides threaded through `buildPool`'s cap constant and `startRoom`'s rng seeding respectively (extend `buildPool`'s exported `POOL_CAP` to instead read `Number(process.env.POOL_SIZE_CAP) || 100` when `FAKE_EXTERNAL_APIS` is set, and `roomStore.create` to accept an optional seed override from `process.env.ROOM_RNG_SEED` under the same flag — small additions to Tasks 12 and 15's files, made as part of this task's Step 1).
+- Consumes: `createApp` (Task 21), running against `FAKE_EXTERNAL_APIS=true` with `POOL_SIZE_CAP` and `ROOM_RNG_SEED` overrides threaded through `buildPool`'s cap constant and `startRoom`'s rng seeding respectively (extend `buildPool`'s exported `POOL_CAP` to instead read `Number(process.env.POOL_SIZE_CAP) || 100` when `FAKE_EXTERNAL_APIS` is set, and `roomStore.create` to accept an optional seed override from `process.env.ROOM_RNG_SEED` under the same flag — small additions to Tasks 12 and 15's files, made as part of this task's Step 1). Also consumes `data-testid="swipe-card"` (Task 22's `SwipeDeck.tsx`) and `data-testid="match-banner"`/`data-testid="fallback"` (Task 22's `app/room/[code]/page.tsx`) as e2e test hooks — none of these existed before this task; the e2e specs are their only consumer.
 
 - [ ] **Step 1: Wire the two test-only overrides**
 
@@ -7522,11 +7524,51 @@ rngSeed:
     : Math.floor(Math.random() * 2 ** 31),
 ```
 
-Run `npx vitest run` once more to confirm the whole suite is still green, then commit this wiring on its own:
+Run `npx vitest run` once more to confirm the whole suite is still green.
+
+The e2e specs below (Steps 4, 6, 8) also need three inert `data-testid` hooks added to already-shipped Task 22 components — the components render no other stable, style-independent selector for these three states (a visible swipe card, a fresh match, the exhausted-fallback panel). These are attribute-only additions with zero behavior change; nothing they touch was previously reviewed against these hooks because they didn't exist yet.
+
+In `components/SwipeDeck.tsx`, add `data-testid="swipe-card"` to the draggable card div (the one with `className="ticket-edge relative w-80 ..."`, already carrying `data-drag-direction`):
+
+```tsx
+// components/SwipeDeck.tsx — add data-testid alongside the existing data-drag-direction prop:
+<motion.div
+  className="ticket-edge relative w-80 origin-bottom -rotate-1 rounded bg-velvet p-4 shadow-xl"
+  style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 12px 100%, 0 calc(100% - 12px))' }}
+  drag="x"
+  animate={controls}
+  onDrag={(_, info) => setDragDirection(info.offset.x > 0 ? 'yes' : info.offset.x < 0 ? 'no' : null)}
+  onDragEnd={handleDragEnd}
+  data-drag-direction={dragDirection ?? undefined}
+  data-testid="swipe-card"
+>
+```
+
+In `app/room/[code]/page.tsx`, add `data-testid="match-banner"` to the wrapper around `MarqueeReveal`, and `data-testid="fallback"` to the exhausted-fallback `Card`:
+
+```tsx
+// app/room/[code]/page.tsx — replace:
+//   {latestMatch && <MarqueeReveal movie={latestMatch} />}
+// with:
+{latestMatch && (
+  <div data-testid="match-banner">
+    <MarqueeReveal movie={latestMatch} />
+  </div>
+)}
+```
+
+```tsx
+// app/room/[code]/page.tsx — replace:
+//   <Card className="w-full border-2 border-brass bg-velvet">
+// (the one inside the `snapshot.exhausted && snapshot.matches.length === 0` block) with:
+<Card data-testid="fallback" className="w-full border-2 border-brass bg-velvet">
+```
+
+Run `npx vitest run` once more (component tests don't assert on these attributes, so this confirms nothing broke), then commit this wiring on its own:
 
 ```bash
-git add server/pool/buildPool.ts server/pool/buildPool.test.ts server/room/roomStore.ts
-git commit -m "test: env-gated pool-size and rng-seed overrides for e2e determinism"
+git add server/pool/buildPool.ts server/pool/buildPool.test.ts server/room/roomStore.ts components/SwipeDeck.tsx app/room/[code]/page.tsx
+git commit -m "test: env-gated pool-size/rng-seed overrides and data-testid hooks for e2e"
 ```
 
 - [ ] **Step 2: Write `playwright.config.ts`**
@@ -7591,7 +7633,8 @@ test('two participants reach a match', async ({ baseURL }) => {
   const browser = await chromium.launch()
   const hostPage = await (await browser.newContext()).newPage()
   await hostPage.goto('/')
-  await hostPage.selectOption('select >> nth=0', 'plex')
+  // Candidate source defaults to 'plex' (CreateRoomPage's initial state) — no
+  // interaction with the shadcn Select needed for this scenario.
   await hostPage.click('text=Create room')
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
@@ -7603,21 +7646,21 @@ test('two participants reach a match', async ({ baseURL }) => {
   await guestPage.waitForURL(/\/room\//)
 
   await hostPage.click('text=Start')
-  await hostPage.waitForSelector('.swipe-card')
-  await guestPage.waitForSelector('.swipe-card')
+  await hostPage.waitForSelector('[data-testid="swipe-card"]')
+  await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   // Both swipe yes on every card in front of them until a match appears —
   // deterministic given ROOM_RNG_SEED, so both land on the same card order.
   for (const page of [hostPage, guestPage]) {
     for (let i = 0; i < 6; i++) {
-      const card = page.locator('.swipe-card')
+      const card = page.locator('[data-testid="swipe-card"]')
       if ((await card.count()) === 0) break
       await page.click('button[aria-label="Yes"]')
-      if (await page.locator('.matches li').count() > 0) break
+      if (await page.locator('[data-testid="match-banner"]').count() > 0) break
     }
   }
 
-  await expect(hostPage.locator('.matches li').first()).toBeVisible()
+  await expect(hostPage.locator('[data-testid="match-banner"]')).toBeVisible()
   await browser.close()
 })
 ```
@@ -7645,12 +7688,12 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
   await hostPage.click('text=Start')
-  await guestPage.waitForSelector('.swipe-card')
+  await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
-  const titleBeforeDisconnect = await guestPage.locator('.swipe-card h2').textContent()
+  const titleBeforeDisconnect = await guestPage.locator('[data-testid="swipe-card"] h2').textContent()
   await guestPage.reload()
-  await guestPage.waitForSelector('.swipe-card')
-  const titleAfterReconnect = await guestPage.locator('.swipe-card h2').textContent()
+  await guestPage.waitForSelector('[data-testid="swipe-card"]')
+  const titleAfterReconnect = await guestPage.locator('[data-testid="swipe-card"] h2').textContent()
 
   expect(titleAfterReconnect).toBe(titleBeforeDisconnect)
   await browser.close()
@@ -7669,7 +7712,8 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   const browser = await chromium.launch()
   const hostPage = await (await browser.newContext()).newPage()
   await hostPage.goto('/')
-  await hostPage.selectOption('select >> nth=1', 'all') // require unanimity — one "no" prevents any match
+  // Match rule defaults to 'all' (CreateRoomPage's initial state) — require
+  // unanimity, so one "no" prevents any match. No Select interaction needed.
   await hostPage.click('text=Create room')
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
@@ -7679,19 +7723,19 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
   await hostPage.click('text=Start')
-  await guestPage.waitForSelector('.swipe-card')
+  await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   for (const page of [hostPage, guestPage]) {
     for (let i = 0; i < 6; i++) {
-      const card = page.locator('.swipe-card')
+      const card = page.locator('[data-testid="swipe-card"]')
       if ((await card.count()) === 0) break
       await page.click('button[aria-label="No"]') // all-no guarantees zero matches with POOL_SIZE_CAP=6
     }
   }
 
-  await expect(hostPage.locator('.fallback')).toBeVisible()
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible()
   await hostPage.reload()
-  await expect(hostPage.locator('.fallback')).toBeVisible() // recoverable from the joined snapshot, not just the one-shot event
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible() // recoverable from the joined snapshot, not just the one-shot event
   await browser.close()
 })
 ```
@@ -7767,13 +7811,13 @@ test('a participant disconnected through Start is excluded and their reconnect i
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
-  await guestPage.waitForSelector('text=Who\'s here')
+  await guestPage.waitForSelector('text=Admitted') // the lobby roster panel's heading
   const guestSessionToken = await guestPage.evaluate((code) => sessionStorage.getItem(`sessionToken:${code}`), roomCode)
 
   await guestContext.close() // simulates the guest going fully offline before Start
   await hostPage.waitForTimeout(3000) // exceed the heartbeat timeout so the server marks them disconnected
   await hostPage.click('text=Start')
-  await hostPage.waitForSelector('.swipe-card')
+  await hostPage.waitForSelector('[data-testid="swipe-card"]')
 
   const reconnectingPage = await (await browser.newContext()).newPage()
   await reconnectingPage.goto(`/room/${roomCode}`)
