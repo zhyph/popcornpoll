@@ -71,8 +71,9 @@ describe('startRoom', () => {
     const store = createRoomStore()
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
     const flaky = joinRoom(store, code, 'Flaky')
-    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    if (!host.ok || !other.ok || !flaky.ok) throw new Error('setup failed')
     store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
     seedPlexRows(10)
 

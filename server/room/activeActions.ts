@@ -64,14 +64,6 @@ export async function startRoom(
   if (!room) return err('room_not_found')
   if (room.status !== 'lobby') return err('already_started')
 
-  // Checked against the pre-exclusion total: this guards against starting an
-  // empty/solo room, not against every disconnected participant being culled
-  // below 2 — a room that had 2+ joiners may still start with 1 remaining
-  // after exclusion below.
-  if (room.participants.size < MIN_PARTICIPANTS_TO_START) {
-    return err('not_enough_participants')
-  }
-
   const excludedParticipantIds: string[] = []
   for (const participant of [...room.participants.values()]) {
     if (participant.connectionStatus === 'disconnected') {
@@ -80,6 +72,10 @@ export async function startRoom(
       room.participants.delete(participant.id)
       excludedParticipantIds.push(participant.id)
     }
+  }
+
+  if (room.participants.size < MIN_PARTICIPANTS_TO_START) {
+    return err('not_enough_participants')
   }
 
   // Synchronous status flip BEFORE the async pool build — closes the join
