@@ -3,6 +3,24 @@ import { findById } from '../db/movies'
 import { getPlexLink } from '../plex/link'
 import type { PlexClient } from '../plex/client'
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+function capStreamSize(stream: ReadableStream, maxBytes: number): ReadableStream {
+  let total = 0
+  return stream.pipeThrough(
+    new TransformStream({
+      transform(chunk: Uint8Array, controller) {
+        total += chunk.byteLength
+        if (total > maxBytes) {
+          controller.error(new Error('Image exceeds size cap'))
+          return
+        }
+        controller.enqueue(chunk)
+      },
+    }),
+  )
+}
+
 export function createImageProxyHandler(
   db: Database.Database,
   encryptionKey: string,
@@ -27,7 +45,7 @@ export function createImageProxyHandler(
       return new Response(null, { status: 502 })
     }
 
-    return new Response(thumb.body, {
+    return new Response(capStreamSize(thumb.body, MAX_IMAGE_BYTES), {
       status: 200,
       headers: {
         'Content-Type': thumb.contentType,

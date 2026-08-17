@@ -46,9 +46,8 @@ export function upsertPlexRow(
   row: Omit<MovieRow, 'id' | 'cachedAt' | 'lastSyncId'>,
 ): MovieRow {
   const now = new Date().toISOString()
-  const info = db
-    .prepare(
-      `INSERT INTO movies
+  db.prepare(
+    `INSERT INTO movies
        (plex_rating_key, tmdb_id, imdb_id, title, poster_path, poster_source,
         overview, year, genres, rating, vote_count, in_library, last_sync_id, last_used_at, cached_at)
      VALUES (@plexRatingKey, @tmdbId, @imdbId, @title, @posterPath, @posterSource,
@@ -64,28 +63,24 @@ export function upsertPlexRow(
        genres = excluded.genres,
        in_library = excluded.in_library,
        last_sync_id = excluded.last_sync_id`,
-    )
-    .run({
-      plexRatingKey: row.plexRatingKey,
-      tmdbId: row.tmdbId,
-      imdbId: row.imdbId,
-      title: row.title,
-      posterPath: row.posterPath,
-      posterSource: row.posterSource,
-      overview: row.overview,
-      year: row.year,
-      genres: JSON.stringify(row.genres),
-      rating: row.rating,
-      voteCount: row.voteCount,
-      inLibrary: row.inLibrary ? 1 : 0,
-      runId,
-      lastUsedAt: row.lastUsedAt,
-      cachedAt: now,
-    })
-  // SELECT by plex_rating_key would fail to find the row when it's NULL (SQL
-  // NULL never equals NULL) — SQLite's UPSERT still reports the correct rowid
-  // in both the insert and the ON CONFLICT DO UPDATE path, so use that instead.
-  const found = db.prepare('SELECT * FROM movies WHERE id = ?').get(info.lastInsertRowid)
+  ).run({
+    plexRatingKey: row.plexRatingKey,
+    tmdbId: row.tmdbId,
+    imdbId: row.imdbId,
+    title: row.title,
+    posterPath: row.posterPath,
+    posterSource: row.posterSource,
+    overview: row.overview,
+    year: row.year,
+    genres: JSON.stringify(row.genres),
+    rating: row.rating,
+    voteCount: row.voteCount,
+    inLibrary: row.inLibrary ? 1 : 0,
+    runId,
+    lastUsedAt: row.lastUsedAt,
+    cachedAt: now,
+  })
+  const found = db.prepare('SELECT * FROM movies WHERE plex_rating_key = ?').get(row.plexRatingKey)
   return rowFromDb(found as Record<string, unknown>)
 }
 

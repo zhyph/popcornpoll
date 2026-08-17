@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
-import { upsertPlexRow } from '../db/movies'
+import { upsertPlexRow, upsertTmdbOnlyRow } from '../db/movies'
 import { savePlexLink } from '../plex/link'
 import { createImageProxyHandler } from './imageProxy'
 import type Database from 'better-sqlite3'
@@ -41,8 +41,7 @@ describe('createImageProxyHandler', () => {
   })
 
   it('rejects a movieId whose poster_source is tmdb, not plex', async () => {
-    const row = upsertPlexRow(db, 1, {
-      plexRatingKey: null as unknown as string,
+    const row = upsertTmdbOnlyRow(db, {
       tmdbId: 1,
       imdbId: null,
       title: 'X',
@@ -53,7 +52,6 @@ describe('createImageProxyHandler', () => {
       genres: [],
       rating: null,
       voteCount: null,
-      inLibrary: false,
       lastUsedAt: null,
     })
     const plex: Partial<PlexClient> = { getThumb: vi.fn() }
