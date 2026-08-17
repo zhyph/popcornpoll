@@ -104,6 +104,14 @@ describe('handleMessage: start + room_started', () => {
     if (started?.type === 'room_started' && stateUpdate?.type === 'state_update') {
       expect(started.seq).toBe(stateUpdate.seq)
     }
+
+    const room = store.get(code)!
+    const hostId = state.participantId!
+    const otherId = Array.from(room.participants.keys()).find((id) => id !== hostId)!
+    const hostCard = result.toParticipant.find((t) => t.participantId === hostId)
+    const otherCard = result.toParticipant.find((t) => t.participantId === otherId)
+    expect(hostCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(hostId)!.pendingCardId }])
+    expect(otherCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(otherId)!.pendingCardId }])
   })
 
   it('a non-host start attempt returns not_host and does not change room status', async () => {

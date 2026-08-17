@@ -220,6 +220,10 @@ export async function handleMessage(
           { type: 'room_started', pool: room.pool, seq: update.seq },
           update,
         ],
+        toParticipant: Array.from(room.participants.values()).map((p) => ({
+          participantId: p.id,
+          messages: [{ type: 'next_card', movieId: p.pendingCardId }],
+        })),
       }
     }
 
