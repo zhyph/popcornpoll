@@ -1318,8 +1318,9 @@ git commit -m "feat: encrypted plex link storage"
     checkPin(pinId: number, clientIdentifier: string): Promise<{ authToken: string | null }>
     getResources(authToken: string): Promise<{ name: string; clientIdentifier: string; connections: { uri: string }[] }[]>
     getLibrarySections(serverUrl: string, authToken: string): Promise<{ id: string; title: string; type: string }[]>
-    getLibraryItems(serverUrl: string, authToken: string, sectionId: string): Promise<import('./guid').PlexGuidSource[] & { ratingKey: string; title: string; year: number; genres: string[] }[]>
-    getThumb(serverUrl: string, authToken: string, ratingKey: string): Promise<{ body: ReadableStream; contentType: string | null }>
+    interface PlexItem extends import('./guid').PlexGuidSource { ratingKey: string; title: string; year: number | null; genres: string[] }
+    getLibraryItems(serverUrl: string, authToken: string, sectionId: string): Promise<PlexItem[]>
+    getThumb(serverUrl: string, authToken: string, ratingKey: string): Promise<{ body: ReadableStream | null; contentType: string | null; status: number }>
   }
   function createPlexClient(clientIdentifier: string): PlexClient
   ```
