@@ -5571,7 +5571,7 @@ Expected: FAIL — `server/ws/server.ts` does not exist yet.
 
 ```ts
 // server/ws/server.ts
-import type { Server } from 'node:http'
+import type { IncomingMessage, Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
@@ -5597,6 +5597,24 @@ function send(ws: WebSocket, message: ServerMessage): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
 }
 
+// Resolves the real client IP for rate-limiting purposes, honoring
+// TRUSTED_PROXY_HOPS the same way the HTTP rate limiter does — an
+// untrusted client can set X-Forwarded-For to anything, so this header is
+// only consulted at all when the deployer has explicitly said how many
+// trusted proxy hops sit in front of this process.
+function getClientIp(req: IncomingMessage, trustedProxyHops: number): string {
+  if (trustedProxyHops > 0) {
+    const forwarded = req.headers['x-forwarded-for']
+    if (typeof forwarded === 'string') {
+      const ips = forwarded.split(',').map((ip) => ip.trim())
+      const index = ips.length - trustedProxyHops
+      const candidate = index >= 0 ? ips[index] : undefined
+      if (candidate) return candidate
+    }
+  }
+  return req.socket.remoteAddress ?? 'unknown'
+}
+
 export function attachWebSocketServer(
   httpServer: Server,
   store: RoomStore,
@@ -5606,7 +5624,18 @@ export function attachWebSocketServer(
 ): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
   const sockets = new Map<WebSocket, SocketMeta>()
-  const joinBucket = createTokenBucket(MAX_FAILED_JOINS, 0)
+  // Per-IP, refilling bucket gating new WS *connections* (~10/minute) — this
+  // is the "initial upgrade" half of Network Exposure's rate-limiting
+  // requirement. Repeated `join` *messages* on one already-open connection
+  // are guarded separately below, per-connection, via meta.failedJoins —
+  // a single global bucket for that (an earlier draft of this function used
+  // one keyed by `roomCode ?? 'unbound'`, which collapses to one shared
+  // bucket for every not-yet-joined connection on the whole server, with a
+  // refill rate of 0 — meaning the entire app stops accepting joins from
+  // anyone after the first 5 attempts, ever. That was a real bug, not a
+  // design choice; per-IP-at-upgrade plus per-connection-failed-joins is
+  // the actual fix.)
+  const upgradeBucket = createTokenBucket(10, 10 / 60)
 
   httpServer.on('upgrade', (req, socket, head) => {
     if (req.url !== '/ws') {
@@ -5614,6 +5643,11 @@ export function attachWebSocketServer(
       return
     }
     if (config.appOrigin && req.headers.origin !== config.appOrigin) {
+      socket.destroy()
+      return
+    }
+    const clientIp = getClientIp(req, config.trustedProxyHops)
+    if (!upgradeBucket.tryConsume(clientIp)) {
       socket.destroy()
       return
     }
@@ -5639,22 +5673,23 @@ export function attachWebSocketServer(
         return
       }
 
-      if (message.type === 'join') {
-        const clientKey = `${meta.state.roomCode ?? 'unbound'}:join`
-        if (!joinBucket.tryConsume(clientKey)) {
-          ws.close()
-          return
-        }
-      }
       if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
 
       const result = await handleMessage(store, db, tmdb, meta.state, message)
       meta.state = result.newState
+      for (const m of result.toSender) send(ws, m)
+
       if (message.type === 'join' && result.toSender.some((m) => m.type === 'error')) {
         meta.failedJoins++
+        if (meta.failedJoins >= MAX_FAILED_JOINS) {
+          // The response was already sent above; this closes the connection
+          // itself as the actual enforcement of "a connection sending failed
+          // joins past a small threshold is closed" — tracking failedJoins
+          // without ever acting on it would make this guard a no-op.
+          ws.close()
+          return
+        }
       }
-
-      for (const m of result.toSender) send(ws, m)
 
       if (result.toRoom.length > 0 && meta.state.roomCode) {
         const room = store.get(meta.state.roomCode)
