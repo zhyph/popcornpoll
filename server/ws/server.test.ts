@@ -9,7 +9,7 @@ import WebSocket from 'ws'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
 import { createRoomStore } from '../room/roomStore'
-import { attachWebSocketServer } from './server'
+import { attachWebSocketServer, MAX_FAILED_JOINS } from './server'
 import type { Server } from 'node:http'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
@@ -67,6 +67,22 @@ function nextMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   })
 }
 
+function connectExpectRejection(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://localhost:${port}/ws`)
+    const timer = setTimeout(() => reject(new Error('timed out waiting for rejection')), 2000)
+    ws.once('open', () => {
+      clearTimeout(timer)
+      ws.close()
+      reject(new Error('expected the upgrade to be rejected but it opened'))
+    })
+    ws.once('error', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
 describe('attachWebSocketServer', () => {
   it('a client can join a room and receives a joined message', async () => {
     const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
@@ -97,5 +113,25 @@ describe('attachWebSocketServer', () => {
     const room = store.get(code)!
     const participant = room.participants.get(joined.participantId as string)!
     expect(participant.connectionStatus).toBe('disconnected')
+  })
+
+  it('closes the connection after MAX_FAILED_JOINS consecutive failed joins', async () => {
+    const ws = await connect()
+    let lastMessage: Record<string, unknown> | undefined
+    for (let i = 0; i < MAX_FAILED_JOINS; i++) {
+      ws.send(JSON.stringify({ type: 'join', roomCode: 'NOPE99', displayName: 'Eve' }))
+      lastMessage = await nextMessage(ws)
+    }
+    expect(lastMessage?.type).toBe('error')
+    await new Promise<void>((resolve) => ws.once('close', () => resolve()))
+  })
+
+  it('rejects the WebSocket upgrade once the per-IP upgrade rate limit is exhausted', async () => {
+    const sockets: WebSocket[] = []
+    for (let i = 0; i < 10; i++) {
+      sockets.push(await connect())
+    }
+    await connectExpectRejection()
+    for (const s of sockets) s.close()
   })
 })

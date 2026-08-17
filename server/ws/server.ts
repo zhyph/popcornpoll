@@ -1,5 +1,5 @@
 // server/ws/server.ts
-import type { Server } from 'node:http'
+import type { IncomingMessage, Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
@@ -25,6 +25,19 @@ function send(ws: WebSocket, message: ServerMessage): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
 }
 
+function getClientIp(req: IncomingMessage, trustedProxyHops: number): string {
+  if (trustedProxyHops > 0) {
+    const forwarded = req.headers['x-forwarded-for']
+    if (typeof forwarded === 'string') {
+      const ips = forwarded.split(',').map((ip) => ip.trim())
+      const index = ips.length - trustedProxyHops
+      const candidate = index >= 0 ? ips[index] : undefined
+      if (candidate) return candidate
+    }
+  }
+  return req.socket.remoteAddress ?? 'unknown'
+}
+
 export function attachWebSocketServer(
   httpServer: Server,
   store: RoomStore,
@@ -34,7 +47,7 @@ export function attachWebSocketServer(
 ): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
   const sockets = new Map<WebSocket, SocketMeta>()
-  const joinBucket = createTokenBucket(MAX_FAILED_JOINS, 0)
+  const upgradeBucket = createTokenBucket(10, 10 / 60)
 
   httpServer.on('upgrade', (req, socket, head) => {
     if (req.url !== '/ws') {
@@ -42,6 +55,11 @@ export function attachWebSocketServer(
       return
     }
     if (config.appOrigin && req.headers.origin !== config.appOrigin) {
+      socket.destroy()
+      return
+    }
+    const clientIp = getClientIp(req, config.trustedProxyHops)
+    if (!upgradeBucket.tryConsume(clientIp)) {
       socket.destroy()
       return
     }
@@ -67,22 +85,19 @@ export function attachWebSocketServer(
         return
       }
 
-      if (message.type === 'join') {
-        const clientKey = `${meta.state.roomCode ?? 'unbound'}:join`
-        if (!joinBucket.tryConsume(clientKey)) {
-          ws.close()
-          return
-        }
-      }
       if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
 
       const result = await handleMessage(store, db, tmdb, meta.state, message)
       meta.state = result.newState
+      for (const m of result.toSender) send(ws, m)
+
       if (message.type === 'join' && result.toSender.some((m) => m.type === 'error')) {
         meta.failedJoins++
+        if (meta.failedJoins >= MAX_FAILED_JOINS) {
+          ws.close()
+          return
+        }
       }
-
-      for (const m of result.toSender) send(ws, m)
 
       if (result.toRoom.length > 0 && meta.state.roomCode) {
         const room = store.get(meta.state.roomCode)
