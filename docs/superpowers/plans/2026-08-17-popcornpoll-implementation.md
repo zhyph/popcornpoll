@@ -6421,7 +6421,11 @@ export function createApp(config: AppConfig) {
         res.writeHead(404).end()
         return
       }
-      res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()))
+      const headerObj: Record<string, string> = {}
+      webRes.headers.forEach((value, key) => {
+        headerObj[key] = value
+      })
+      res.writeHead(webRes.status, headerObj)
       res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
     })
   })
