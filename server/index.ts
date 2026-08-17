@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { loadConfig, type AppConfig } from './config'
 import { openDb } from './db'
 import { createPlexClient } from './plex/client'
+import { createFakePlexClient } from './plex/fakeClient'
 import { createTmdbClient } from './tmdb/client'
 import { createRoomStore } from './room/roomStore'
 import { sweepEvictions, sweepInactiveRooms } from './room/lifecycle'
@@ -13,15 +14,27 @@ import { createRoomsHandler } from './http/rooms'
 import { createSetupHandlers } from './http/setup'
 import { createImageProxyHandler } from './http/imageProxy'
 import { createHealthHandler } from './http/health'
-import { getPlexLink } from './plex/link'
+import { getPlexLink, savePlexLink } from './plex/link'
 
 const SWEEP_INTERVAL_MS = 60_000
 
 export function createApp(config: AppConfig) {
   const db = openDb(config.dataDir)
   const store = createRoomStore()
+  if (process.env.FAKE_EXTERNAL_APIS === 'true' && !getPlexLink(db, config.authEncryptionKey)) {
+    // e2e/dev fixture mode: seed a fake link so librarySync can run without a
+    // real OAuth flow — the fake client below ignores serverUrl/authToken.
+    savePlexLink(db, config.authEncryptionKey, {
+      clientIdentifier: 'fake-client',
+      serverUrl: 'http://fake-plex.local',
+      authToken: 'fake-token',
+      librarySectionIds: ['1'],
+      linkedAt: new Date().toISOString(),
+    })
+  }
   const clientIdentifier = getPlexLink(db, config.authEncryptionKey)?.clientIdentifier ?? 'popcornpoll-instance'
-  const plex = createPlexClient(clientIdentifier)
+  const plex =
+    process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakePlexClient() : createPlexClient(clientIdentifier)
   const tmdb = createTmdbClient(config.tmdbApiKey)
   const librarySync = createLibrarySync({ db, plex, tmdb, encryptionKey: config.authEncryptionKey })
   const enrichment = createEnrichmentWorker(db, tmdb)
@@ -51,7 +64,13 @@ export function createApp(config: AppConfig) {
         else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
         else if (url.pathname === '/api/setup/plex/resync') {
           webRes = await setupHandlers.resync(webReq)
-          if (webRes.status === 200) void librarySync.run()
+          if (webRes.status === 200) {
+            if (process.env.FAKE_EXTERNAL_APIS === 'true') {
+              await librarySync.run() // e2e fixture mode: block so the caller can create a room immediately after
+            } else {
+              void librarySync.run()
+            }
+          }
         } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
         else {
           res.writeHead(404).end()
