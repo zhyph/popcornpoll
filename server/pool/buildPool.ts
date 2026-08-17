@@ -1,0 +1,142 @@
+// server/pool/buildPool.ts
+import type Database from 'better-sqlite3'
+import { findByTmdbId, findEligiblePlexRows, mergeTmdbOnlyIntoPlexRow, stampLastUsed, upsertTmdbOnlyRow } from '../db/movies'
+import type { MovieRow } from '../db/movies'
+import { computeCAndM, reputationScore } from '../ranking/reputation'
+import { createRng, weightedSampleWithoutReplacement } from '../ranking/rng'
+import { TMDB_DISCOVER_PAGE_CAP, type TmdbClient } from '../tmdb/client'
+
+export const POOL_CAP = 100
+export const POOL_MIN_SIZE = 5
+const TMDB_SHARE = 0.7
+
+export interface PoolEntry {
+  movieId: number
+  title: string
+  posterPath: string | null
+  posterSource: 'plex' | 'tmdb'
+  overview: string | null
+  genres: string[]
+  year: number | null
+  inLibrary: boolean
+  rating: number | null
+  voteCount: number | null
+}
+
+export interface PoolFilters {
+  genre?: string
+  yearMin?: number
+  yearMax?: number
+  ratingMin?: number
+}
+
+export interface BuildPoolResult {
+  pool: PoolEntry[]
+  tooSmall: boolean
+}
+
+function toEntry(row: MovieRow): PoolEntry {
+  return {
+    movieId: row.id,
+    title: row.title,
+    posterPath: row.posterPath,
+    posterSource: row.posterSource,
+    overview: row.overview,
+    genres: row.genres,
+    year: row.year,
+    inLibrary: row.inLibrary,
+    rating: row.rating,
+    voteCount: row.voteCount,
+  }
+}
+
+async function resolveTmdbCandidatesIntoRows(
+  db: Database.Database,
+  tmdbResults: Awaited<ReturnType<TmdbClient['discoverMovies']>>,
+): Promise<MovieRow[]> {
+  const rows: MovieRow[] = []
+  for (const result of tmdbResults) {
+    const existing = findByTmdbId(db, result.tmdbId)
+    if (existing) {
+      rows.push(existing)
+      continue
+    }
+    const created = upsertTmdbOnlyRow(db, {
+      tmdbId: result.tmdbId,
+      imdbId: null,
+      title: result.title,
+      posterPath: result.posterPath,
+      posterSource: 'tmdb',
+      overview: result.overview,
+      year: result.year,
+      genres: [], // genre IDs are TMDB-numeric; name mapping happens client-side for filters, not stored here
+      rating: result.rating,
+      voteCount: result.voteCount,
+      lastUsedAt: null,
+    })
+    rows.push(created)
+  }
+  return rows
+}
+
+export async function buildPool(
+  db: Database.Database,
+  tmdb: TmdbClient,
+  candidateSource: 'plex' | 'plex+tmdb',
+  filters: PoolFilters,
+  rngSeed: number,
+): Promise<BuildPoolResult> {
+  const plexRows = findEligiblePlexRows(db, filters)
+
+  let tmdbRows: MovieRow[] = []
+  if (candidateSource === 'plex+tmdb') {
+    const discovered = await tmdb.discoverMovies(
+      { yearMin: filters.yearMin, yearMax: filters.yearMax, ratingMin: filters.ratingMin },
+      TMDB_DISCOVER_PAGE_CAP,
+    )
+    tmdbRows = await resolveTmdbCandidatesIntoRows(db, discovered)
+  }
+
+  // Merge: a row that started as TMDB-only but actually matches a Plex row
+  // (same tmdb_id, resolved after this pool's own upserts above) collapses.
+  const byMovieId = new Map<number, MovieRow>()
+  for (const row of plexRows) byMovieId.set(row.id, row)
+  for (const row of tmdbRows) {
+    const asPlexRow = plexRows.find((p) => p.tmdbId === row.tmdbId && row.tmdbId !== null)
+    if (asPlexRow && row.plexRatingKey === null) {
+      mergeTmdbOnlyIntoPlexRow(db, asPlexRow.id, row.id)
+      byMovieId.set(asPlexRow.id, asPlexRow)
+    } else {
+      byMovieId.set(row.id, row)
+    }
+  }
+
+  const eligible = [...byMovieId.values()]
+  const { c, m } = computeCAndM(eligible)
+  const rng = createRng(rngSeed)
+
+  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(POOL_CAP * (1 - TMDB_SHARE)) : POOL_CAP
+  let targetTmdbCount = candidateSource === 'plex+tmdb' ? POOL_CAP - targetPlexCount : 0
+
+  const plexEligible = eligible.filter((r) => r.plexRatingKey !== null)
+  const tmdbEligible = eligible.filter((r) => r.plexRatingKey === null)
+
+  // Shortfall backfill: whichever source has fewer eligible rows than its
+  // target share, the other source picks up the difference, up to the cap.
+  const plexShortfall = Math.max(0, targetPlexCount - plexEligible.length)
+  const tmdbShortfall = Math.max(0, targetTmdbCount - tmdbEligible.length)
+  targetPlexCount = Math.min(plexEligible.length, targetPlexCount + tmdbShortfall)
+  targetTmdbCount = Math.min(tmdbEligible.length, targetTmdbCount + plexShortfall)
+
+  const weight = (row: MovieRow) => reputationScore(row, c, m)
+  const pickedPlex = weightedSampleWithoutReplacement(plexEligible, weight, targetPlexCount, rng)
+  const pickedTmdb = weightedSampleWithoutReplacement(tmdbEligible, weight, targetTmdbCount, rng)
+
+  const finalRows = [...pickedPlex, ...pickedTmdb].slice(0, POOL_CAP)
+  stampLastUsed(db, finalRows.map((r) => r.id), new Date().toISOString())
+
+  return {
+    pool: finalRows.map(toEntry),
+    tooSmall: finalRows.length < POOL_MIN_SIZE,
+  }
+}
