@@ -89,7 +89,7 @@ optional even under the trusted-network assumption:
   independent of the HTTP rate limiter.
 - **Caps**: max concurrent rooms (e.g. 50, counting `ended` rooms until
   they're evicted — see Room eviction), max participants per room (e.g.
-  20), max deck size per room (see Deck construction).
+  20), max pool size per room (see Candidate pool & deck ordering).
 
 Room codes use a 2-word + 3-digit format (e.g. `BLUE-FOX-427`) from a
 100-word list, giving roughly 10^7 possible codes; combined with the rate
@@ -138,17 +138,27 @@ surfaces the same "Plex link expired — visit /setup to relink" state at
 room-creation time, reusing the persisted `client_identifier`.
 
 ### TMDB integration
-Optional, opt-in per session, filtered by genre/year/rating. Keyed by a
-single env-configured v3 API key (`TMDB_API_KEY`).
+`TMDB_API_KEY` (v3 key) is **required**, not optional — it's no longer
+just the opt-in discover-mode key, it's also what lets the library sync
+enrich Plex rows with the rating/vote_count data the reputation-weighting
+formula depends on (see Library metadata cache and Candidate pool & deck
+ordering). Per-session TMDB discover as a candidate source is still
+opt-in.
 
-- `/discover/movie` returns 20 results/page; building a deck issues
-  sequential (not concurrent) paginated requests up to the configured
-  cap.
+- `/discover/movie` is called with `sort_by=vote_average.desc` and
+  `vote_count.gte=<TMDB_MIN_VOTE_COUNT>` (a named constant, default 200)
+  in addition to the host's genre/year filters — this is what actually
+  keeps obscure titles out of the eligible set; reputation-weighted
+  sampling (below) then ranks *within* that already-reasonable set, it
+  doesn't try to filter obscurity out of the full catalog by weighting
+  alone. Returns 20 results/page; pool construction issues sequential
+  (not concurrent) paginated requests up to `TMDB_DISCOVER_PAGE_CAP`
+  (named constant, default 5 pages / 100 results).
 - Poster URLs: `https://image.tmdb.org/t/p/w342<poster_path>`.
-- A TMDB failure *before* deck construction completes degrades that
-  session to Plex-only, surfaced to the host as a non-blocking notice. A
-  failure *after* the deck is dealt has no effect — the deck's already
-  fixed.
+- A TMDB failure *before* pool construction completes degrades that
+  session to Plex-only, surfaced to the host via a `notice` message (see
+  WebSocket protocol). A failure *after* the pool is built has no effect
+  — it's already fixed.
 - The app displays TMDB attribution ("This product uses the TMDB API but
   is not endorsed or certified by TMDB") plus the TMDB logo, per TMDB's
   terms of use.
@@ -166,6 +176,15 @@ resolved `tmdb_id` permanently. This keeps the real-time cross-reference
 rule simple (one column, one equality check) while still resolving most
 legacy-agent library items over time.
 
+If the backfilled `tmdb_id` collides with an existing TMDB-only row (a
+prior TMDB-discover session already cached that film with
+`plex_rating_key IS NULL`), the two rows are merged: the Plex-backed row
+is kept (it has a `plex_rating_key`, the TMDB-only one doesn't), any
+still-missing fields are copied over from the TMDB-only row, and the
+TMDB-only row is deleted. Without this merge step the two rows coexist
+indefinitely and the dedup rule in Deck construction — which matches by
+`tmdb_id` — would find two rows for one film and have no defined winner.
+
 ### Library metadata cache
 SQLite `movies` table, keyed by an internal surrogate id (not `tmdb_id`,
 which many Plex items lack, and not usable as a single key across both
@@ -182,10 +201,14 @@ poster_source   TEXT             -- 'plex' | 'tmdb', selects which URL builder /
 overview        TEXT
 year            INTEGER
 genres          TEXT             -- JSON array
-rating          REAL             -- TMDB's 0-10 vote_average scale, always; Plex's own
-                                  -- rating fields are not stored, to keep filter/clamp logic single-scale
-vote_count      INTEGER          -- TMDB's vote_count; feeds the reputation-weighting formula
+rating          REAL             -- TMDB's 0-10 vote_average scale; NULL until enriched
+                                  -- (see enrichment below) or if no tmdb_id was ever resolved.
+                                  -- Plex's own rating fields are never stored, to keep
+                                  -- filter/clamp logic single-scale.
+vote_count      INTEGER          -- TMDB's vote_count; NULL under the same conditions as rating
 in_library      BOOLEAN
+last_sync_id    INTEGER          -- the sync run that last confirmed this row is in the Plex library
+last_used_at    DATETIME         -- updated whenever this row is dealt into a pool; backs TMDB-only pruning
 cached_at       DATETIME
 
 -- partial unique index: prevents duplicate TMDB-only rows (plex_rating_key
@@ -197,22 +220,44 @@ CREATE UNIQUE INDEX movies_tmdb_only_uq
 **Sync procedure** (triggered automatically if stale >6h at room
 creation, or manually via the admin-gated `/setup` resync action):
 single-flight guarded (a module-level in-progress promise; concurrent
-triggers await the same run rather than starting a second one), and
-batched — processed in chunks of ~200 items with a `setImmediate` yield
-between chunks so a large-library sync doesn't stall the Node event loop
-(and therefore every other room's WebSocket traffic) for its full
-duration. Within one transaction: upsert every item returned by the
-current Plex scan, keyed by `plex_rating_key`; afterward, any row with a
-non-null `plex_rating_key` not touched this run has `in_library` set to
-`0` (soft — the row and its cached metadata are kept, not deleted, since
-they're still useful for cross-reference display). TMDB-only rows
-(`plex_rating_key IS NULL`) are pruned separately by simple age (e.g.
-deleted if uncached-into-a-deck for 30 days).
+triggers await the same run rather than starting a second one). Each run
+gets a monotonically increasing `runId`. Rather than one giant
+transaction (which `better-sqlite3`'s synchronous transaction API can't
+hold open across an `await` yield anyway), the run is a sequence of small
+synchronous transactions — one per chunk of ~200 items, with a
+`setImmediate` yield between chunks so a large-library sync doesn't stall
+the Node event loop, and therefore every other room's WebSocket traffic,
+for its full duration. Each chunk's transaction upserts its items (keyed
+by `plex_rating_key`) and stamps `last_sync_id = runId`. After all chunks
+complete, one final statement sweeps deletions:
+`UPDATE movies SET in_library = 0 WHERE plex_rating_key IS NOT NULL AND
+last_sync_id != :runId` — catching anything removed from Plex since the
+last sync, soft (row and cached metadata kept, not deleted — still useful
+for cross-reference display). This is correct under the app's own
+single-process/single-writer constraint (see Architecture); it would not
+be safe with multiple writers.
 
-**Plex-only deck filtering**: genre/year/rating filters apply to
-Plex-only sessions too, not just TMDB-extended ones — they're plain
-`WHERE` clauses against columns already in this table, so there's no
-reason to withhold them from the primary candidate source.
+**Reputation-data enrichment** (part of the same sync run): for any row
+with a resolved `tmdb_id` but `rating`/`vote_count` still NULL —
+freshly-added Plex items, or ones just resolved by the imdb backfill —
+fetch `/movie/{tmdb_id}` and store `vote_average`/`vote_count`, capped at
+e.g. 100 new enrichments per run and continuing across subsequent syncs,
+same pattern as the imdb backfill. Rows that never resolve a `tmdb_id` at
+all (see Plex integration's guid-parsing cases) keep `rating`/`vote_count`
+NULL permanently — there's nothing to enrich.
+
+**TMDB-only row pruning**: `plex_rating_key IS NULL` rows are deleted if
+`last_used_at` is more than 30 days old (or was never set, for a row
+cached but never actually dealt into a pool).
+
+**Plex-only pool filtering**: genre/year filters apply to Plex-only
+sessions the same as TMDB-extended ones. The rating filter applies only
+to rows with a non-NULL `rating` — a row with no resolved TMDB data
+can't be evaluated against a threshold, so it's excluded from
+eligibility *only when a rating filter is actually set*; with no rating
+filter active, it remains eligible and falls through to the
+`reputationScore = C` default described in Candidate pool & deck
+ordering.
 
 **Schema migrations**: a `schema_version` table, with numbered migration
 scripts run on boot — required since this is a Docker image people will
@@ -226,16 +271,28 @@ The proxy is an **allowlist lookup, not a passthrough**: `GET
 table, rejects if not found or if `poster_source != 'plex'`, fetches the
 corresponding Plex thumb path server-side using the stored token, forces
 `Content-Type: image/*` on the response (rejecting anything else Plex
-might return), and caps response size (e.g. 5MB) and timeout. TMDB poster
-URLs are public and used directly by the client — no proxy involved.
+might return), caps response size (e.g. 5MB) and timeout, and sets
+`Cache-Control: public, max-age=86400, immutable` (a poster for a given
+`movieId` never changes, and without this every participant in a room
+re-fetches the same images through the server on every render). TMDB
+poster URLs are public and used directly by the client — no proxy
+involved.
 
 ### HTTP API surface
 - `POST /api/rooms` — create a room. Body: `{candidateSource,
-  matchThreshold, tmdbFilters?}`. No auth required (this mints the host's
-  identity). Returns `{roomCode}`; the `hostToken` and `participantId`
-  are minted on the subsequent WebSocket `join`, not here, so room
-  creation and joining always go through the same identity-issuing path.
-  Rate-limited per Network exposure.
+  matchThreshold, tmdbFilters?}`. No auth required. Returns `{roomCode,
+  hostClaimToken}` — `hostClaimToken` is single-use and short-lived
+  (60s), and exists specifically to answer "who becomes host": it's not
+  itself the host credential, it's presented once on the *first* `join`
+  for that room (see WebSocket protocol) to claim `hostToken`. A `join`
+  without it, or arriving after it's been consumed or expired, is a plain
+  participant — even if it's the very first `join` the server sees. This
+  removes the otherwise-unspecified "first join wins" race between the
+  room's actual creator and anyone else who happens to hit `/join/<code>`
+  first (a stale/reused code, a slow page load, etc). On failure (e.g.
+  Plex link expired), returns `{error: {code, message}}` using the same
+  `code` enumeration as the WebSocket `error` message. Rate-limited per
+  Network exposure.
 - `GET /api/setup/plex/pin`, `GET /api/setup/plex/callback`, `POST
   /api/setup/plex/resync` — `ADMIN_SETUP_TOKEN`-gated, see Network
   exposure.
@@ -250,14 +307,20 @@ URLs are public and used directly by the client — no proxy involved.
 `status`: `lobby -> starting -> active -> ended`.
 
 **Match threshold** is a tagged union, not a single implicit rule:
-`{kind: 'all'}` | `{kind: 'majority'}` | `{kind: 'atLeast', n}`. A title
-matches when the count of yes-votes among the frozen, non-kicked
-participant set satisfies the chosen rule: `all` requires yesCount ===
-frozenCount; `majority` requires yesCount > frozenCount / 2 (so 3 of 4,
-not 2 of 4); `atLeast` requires yesCount >= n. `n` is validated <=
-participant count at the `lobby -> starting` transition and is
-**re-validated after every kick** (see below) — this is the one setting
-whose validity depends on a count that can shrink after the room starts.
+`{kind: 'all'}` | `{kind: 'majority'}` | `{kind: 'atLeast', n}`, with `n
+>= 1`. A title matches when the count of yes-votes among the frozen,
+non-kicked participant set satisfies the chosen rule: `all` requires
+yesCount === frozenCount; `majority` requires yesCount > frozenCount / 2
+(so 3 of 4, not 2 of 4); `atLeast` requires yesCount >= n. `n` is
+validated `1 <= n <= participant count` both when `update_settings` sets
+it (against the current lobby roster) and again at the `lobby ->
+starting` transition, and is **re-validated (clamped) after every kick**
+(see below) — this is the one setting whose validity depends on a count
+that can shrink after the room starts. Once a title matches, that fact is
+permanent: `matches` is append-only, `matchedMovieIds` is the sole
+authority on what's matched, and nothing ever removes an entry from it —
+see the kick bullet below for why this matters specifically for
+`atLeast`.
 
 - **`lobby`**: anyone with the link/code can join. Host sets candidate
   source and match-threshold rule. Host may kick a participant at any
@@ -265,16 +328,27 @@ whose validity depends on a count that can shrink after the room starts.
   the room to remove).
 - **Host clicks Start**: the transition to `starting` happens
   **synchronously**, before any `await` — this closes a real race where a
-  `join` arriving during deck construction could land in the frozen set
+  `join` arriving during pool construction could land in the frozen set
   after the freeze was already decided (see Concurrency). `starting`
-  rejects joins exactly like `active` does; it exists so clients can show
-  a "building your deck" state during the (multi-second, TMDB-paginated)
-  fetch. On success, deck construction completes (see Deck construction)
-  and the room moves to `active`, with the participant set now
-  permanently frozen. On failure (Plex unreachable, TMDB fails and even
-  the Plex-only fallback deck comes up too small — see Deck construction's
-  minimum-size check), the room reverts to `lobby` with an error surfaced
-  to the host, who can retry Start.
+  rejects joins exactly like `active` does (`error {code:
+  'already_started'}`, which applies to any `join`, `start`, or
+  `update_settings` once status is no longer `lobby`); it exists so
+  clients can show a "building your pool" state during the
+  (multi-second, TMDB-paginated) fetch. Participants who are currently
+  `disconnected` at the instant of freeze are **excluded** from the
+  frozen set entirely — not just left out of the threshold, genuinely not
+  part of the room going forward, as if auto-kicked before it started
+  (there's nothing to discard, since a disconnected-in-lobby participant
+  has no swipes yet). The host-facing Start action shows a connection
+  summary first ("2 of 3 connected — Alice will not be included") so this
+  isn't a silent surprise. On success, pool construction completes (see
+  Candidate pool & deck ordering) and the room moves to `active`, with
+  the (now `disconnected`-filtered) participant set permanently frozen.
+  On failure (Plex unreachable, TMDB fails and even the Plex-only
+  fallback pool comes up too small — see the minimum-size check), the
+  room reverts to `lobby` with an error surfaced to the host (`error
+  {code: 'not_enough_participants' | 'pool_too_small' | 'plex_unavailable'
+  | 'tmdb_unavailable'}`), who can retry Start.
 - **Disconnects during `active`** do not remove a participant from the
   match-threshold denominator or discard their existing swipes. An "all
   yes" title they haven't yet swiped on can't match until they either
@@ -285,14 +359,23 @@ whose validity depends on a count that can shrink after the room starts.
   room's vote count.
 - **Kick** (host-only, `lobby` or `active`): permanently removes a
   participant. Their recorded swipes are **discarded from every title's
-  vote count** — kicking someone is a full retraction, not just a freeze.
-  The server then recomputes the match predicate for every `movieId` that
-  has at least one remaining recorded swipe, against the new, smaller
-  frozen set; this can produce one or more `match` events immediately, an
-  accepted consequence of an explicit host action. If the current
-  `atLeast` threshold now exceeds the new participant count, it's clamped
-  to the new count and a `settings_updated` change is included in the
-  next broadcast. The kicked participant's `sessionToken` is added to a
+  vote count** — kicking someone is a full retraction, not just a freeze
+  — and the room-wide genre-affinity tally and `totalVotes` count (see
+  Candidate pool & deck ordering) are **rebuilt from the surviving
+  participants' swipe maps** (cheap — an in-memory fold over at most 20
+  participants × 100 swipes), so a kicked participant stops influencing
+  everyone else's serving order immediately, not just the vote count.
+  `affinityWeight`'s ramp may consequently move backwards; that's
+  expected. The server then recomputes the match predicate for every
+  `movieId` that has at least one remaining recorded swipe, against the
+  new, smaller frozen set; this can produce one or more new `match`
+  events, an accepted consequence of an explicit host action — but never
+  a *retraction*: a title already in `matches` stays there even if a kick
+  drops its yes-count below the current threshold (this is reachable with
+  `atLeast`, not just a hypothetical — see the tagged-union note above).
+  If the current `atLeast` threshold now exceeds the new participant
+  count, it's clamped to the new count and reflected in the next
+  broadcast. The kicked participant's `sessionToken` is added to a
   per-room revocation set; any subsequent `reconnect` with that token is
   rejected with `error {code: 'kicked'}`, and their live connection (if
   any) receives a `kicked {reason}` message immediately before the server
@@ -313,7 +396,13 @@ whose validity depends on a count that can shrink after the room starts.
   "nothing more to see" state, rather than treating them as mutually
   exclusive. When exhausted with **no** matches, the ranked fallback
   (highest yes-vote-count titles in the pool; ties broken by reputation
-  score — see Candidate pool & deck ordering) is shown.
+  score — see Candidate pool & deck ordering) is shown. The `exhausted`
+  server→client *event* (as opposed to the `state_update.exhausted`
+  field, which is level-triggered and always current) fires only on the
+  false→true edge, so a flapping connection near the end of a session
+  doesn't repeatedly re-trigger the fallback UI; clients tear the
+  fallback UI down when `state_update.exhausted` reads `false` again,
+  not from a separate event.
 - **Room end**: host-only explicit action, or a 30-minute inactivity
   timeout (a `join`, `swipe`, or any host action resets the timer — this
   applies in `lobby` too, so a room that's still filling up doesn't time
@@ -326,9 +415,10 @@ whose validity depends on a count that can shrink after the room starts.
   10 minutes after entering `ended` (enough time for any last client to
   receive the terminal broadcast), and counts against the concurrent-room
   cap until then.
-- **Minimums**: Start is rejected (same error path as an invalid
-  threshold) if the participant count is below 2, or if pool construction
-  would produce fewer than 5 candidates.
+- **Minimums**: Start is rejected — `error {code:
+  'not_enough_participants'}` — if the (disconnected-filtered)
+  participant count is below 2, or `error {code: 'pool_too_small'}` if
+  pool construction would produce fewer than 5 candidates.
 
 ### Authorization model
 Identity is established **once per WebSocket connection**, not
@@ -343,14 +433,29 @@ body.
   render the roster. Not a credential.
 - `sessionToken` — private, cryptographically random (>=128 bits), issued
   to a participant on `join`, never echoed to other clients, held
-  client-side in memory/`sessionStorage`. Presented once, in the
-  `reconnect` message, to re-bind a new socket to an existing identity. A
-  `reconnect` with a `sessionToken` that already has a live connection
-  takes over — the old socket is closed server-side.
-- `hostToken` — private, cryptographically random, issued once to
-  whoever creates the room, held in the host's browser `localStorage`
-  (survives a tab refresh). Required to `reconnect` *as host* — a plain
-  `join` never grants host status.
+  client-side in memory/`sessionStorage`. Presented in the `reconnect`
+  message to re-bind a new socket to an existing identity — this is
+  idempotent, not a fresh credential grant, so re-sending it on every
+  reconnect/resync doesn't widen its exposure beyond the already-trusted
+  client holding it. A `reconnect` with a `sessionToken` that already has
+  a live connection takes over — the old socket is closed server-side.
+- `hostClaimToken` — private, single-use, 60s TTL, returned by `POST
+  /api/rooms` (see HTTP API surface) to whoever creates the room.
+  Presented on that creator's *first* `join` (`join {roomCode,
+  displayName, hostClaimToken}`) to claim host status and receive
+  `hostToken` in the `joined` response. Any `join` without a valid,
+  unconsumed `hostClaimToken` for that room — including a second attempt
+  after it's already been consumed — is a plain participant. This is what
+  actually decides "who's the host," since room creation (HTTP) and
+  becoming a room participant (WebSocket) are two separate steps that
+  would otherwise race.
+- `hostToken` — private, cryptographically random, held in the host's
+  browser `localStorage` (survives a tab refresh). Required to `reconnect
+  *as host*` — pass it as `reconnect {roomCode, sessionToken, hostToken}`;
+  a `reconnect` without it re-binds the participant identity but not host
+  privileges. A plain `join` never grants host status, `hostClaimToken`
+  or not — `hostClaimToken` only works on the very first `join` for a
+  room.
 - Room creation and joining need no token; `/setup` routes require
   `ADMIN_SETUP_TOKEN` (see Network exposure) — a distinct, instance-level
   credential, not part of this per-room model.
@@ -360,43 +465,85 @@ One connection per client, at `/ws`. Every broadcast that reflects a
 state change carries a monotonic per-room `seq`; a client that detects a
 gap sends `resync` rather than trusting a partial delta.
 
-**Client → server**: `join {roomCode, displayName}`, `reconnect
-{roomCode, sessionToken}`, `resync {}`, `swipe {movieId, vote}`, `start
-{}`, `end_room {}`, `update_settings {matchThreshold?, candidateSource?,
-tmdbFilters?}` (host-only, `lobby`-only), `kick {participantId}`
-(host-only), `heartbeat {}`.
+**Client → server**: `join {roomCode, displayName, hostClaimToken?}`,
+`reconnect {roomCode, sessionToken, hostToken?}`, `resync {}`, `swipe
+{movieId, vote}`, `start {}`, `end_room {}`, `update_settings
+{matchThreshold?, candidateSource?, tmdbFilters?}` (host-only,
+`lobby`-only), `kick {participantId}` (host-only), `heartbeat {}`.
 
 **Server → client**:
 - `joined {participantId, sessionToken, hostToken?, room}` — sent once,
   directly in response to `join`/`reconnect`/`resync`. `room` is the
-  **full** snapshot: status, pool (denormalized candidate entries — see
-  Candidate pool & deck ordering), this participant's own `mySwipes` map
-  (needed to restore UI position on reconnect), participants (with
+  **full** snapshot: status, this participant's own `mySwipes` map
+  (needed to restore progress on reconnect), participants (with
   `connectionStatus`/`finished`), matches, exhausted, matchThreshold,
-  candidateSource, `seq`.
-- `next_card {movieId}` — sent to a single participant (not broadcast),
-  telling their client which pool entry to show next. Sent right after
-  `joined` (their first card) and after each of their own `swipe`s (their
-  next card); computed live at send time from the reputation + affinity
-  scoring described in Candidate pool & deck ordering. Never sent
-  reactively due to another participant's activity — see that section for
-  why a displayed, unswiped card never changes out from under someone.
+  candidateSource, `seq` — and, **once the room has reached `active`**,
+  `pool` (denormalized candidate entries) and `pendingCardId` (this
+  participant's current, already-assigned, not-yet-swiped card — see
+  below). In `lobby`/`starting`, `pool`/`pendingCardId` are simply absent
+  — there's nothing to send yet.
+- `room_started {pool, seq}` — broadcast once to every connected client
+  exactly when `starting -> active` completes. This is the *only* other
+  place the pool is delivered — a client that was already connected
+  through the `lobby -> starting -> active` transition gets the pool
+  here, not through another `joined`; a client that reconnects afterward
+  gets it via `joined` as described above. (A design note for
+  implementers: it is a real, previously-missed defect for the pool to
+  be sent *only* in `joined` — every client present at Start would never
+  receive it otherwise, since `joined` only fires on join/reconnect/resync
+  and joins are rejected once the room leaves `lobby`.)
+- `next_card {movieId}` or `next_card {movieId: null}` (no cards left —
+  equivalent to this participant being `finished`) — sent to a single
+  participant, never broadcast. The server tracks one `pendingCardId` per
+  participant (the card it last sent them that they haven't yet swiped).
+  It is **(re)computed** — via the reputation + affinity scoring in
+  Candidate pool & deck ordering — only when there is no current pending
+  card to reuse: right after `room_started`/pool delivery (their first
+  card) and immediately after each of their own `swipe`s (which consumes
+  the current pending card and computes the next one). On `reconnect` or
+  `resync`, if a `pendingCardId` is already stored for them and it hasn't
+  since been swiped, the **same** id is resent, not recomputed — this is
+  what makes the "a displayed, unswiped card never changes out from under
+  someone" guarantee hold even though `resync` can be triggered by
+  unrelated network hiccups at any time, including mid-drag.
 - `state_update {participants, status, matches, exhausted,
   matchThreshold, candidateSource, seq}` — broadcast to every connected
   client on any state change (join/reconnect/disconnect/kick, status
-  transition, settings change). Deliberately omits the pool, since it's
-  immutable after `starting` and every client already has it from its own
-  `joined` payload.
-- `match {movieId, movie, seq}`, `exhausted {topCandidates, seq}` — sent
-  alongside a `state_update` with the same `seq`, as distinct events
-  specifically so clients can trigger their own one-shot UI (banner,
-  confetti) without diffing `state_update` for the change themselves.
+  transition, settings change). Deliberately omits the pool (see
+  `room_started` above) and `next_card` (participant-specific, sent
+  separately). Multiple messages describing the same state change (e.g. a
+  `match` alongside the `state_update` it caused) legitimately share one
+  `seq` — a client detects a *gap* in the sequence of `state_update`s
+  specifically, not a mismatch between message types.
+- `match {movieId, movie, seq}`, `exhausted {topCandidates: MovieCard[5]}`
+  (same denormalized shape as pool entries, top 5 by yes-vote count,
+  ties broken by reputation score; fires only on the false→true edge —
+  see the state machine's Exhaustion bullet) — sent alongside a
+  `state_update` with the same `seq`, as distinct events specifically so
+  clients can trigger their own one-shot UI (banner, confetti) without
+  diffing `state_update` for the change themselves.
+- `notice {level, code, message}` — a non-blocking, host-facing informational
+  event that doesn't change room state (currently: TMDB degrading a
+  session to Plex-only). Not part of `state_update` since it's a
+  point-in-time event, not a durable field.
 - `kicked {reason}` — sent only to the participant being kicked,
   immediately before the server closes that connection.
 - `room_ended {reason, seq}`, `error {code, message}` — `code` is one of
   `room_not_found | room_full | already_started | invalid_name |
-  not_host | kicked | invalid_threshold | rate_limited | bad_token`.
+  not_host | kicked | invalid_threshold | not_enough_participants |
+  pool_too_small | plex_unavailable | tmdb_unavailable | rate_limited |
+  bad_token`. `reconnect`/`join` against a room that exists in the `Map`
+  but has `status: 'ended'` (including during its 10-minute eviction
+  window) returns `error {code: 'room_not_found'}` — indistinguishable
+  from a room that's already been fully evicted, deliberately, since
+  there's nothing a client can usefully do differently between the two.
 - `heartbeat_ack {}`.
+
+For deterministic testing, the weighted-random selection inside
+`next_card`'s computation (see Candidate pool & deck ordering) is drawn
+from a per-room seeded PRNG; under `FAKE_EXTERNAL_APIS`, the seed is
+settable via a `ROOM_RNG_SEED` room-creation param so Vitest can assert
+exact serving order.
 
 **Heartbeat**: client pings every 15s; if the server sees none for 45s,
 `connectionStatus` flips to `disconnected` and the participant enters a
@@ -422,65 +569,97 @@ trigger to fetch more). A participant's **deck** is their personal,
 on-demand ordering through that pool — not a fixed array, computed live.
 
 **Pool construction**: capped at e.g. 100 candidates, denormalized
-(title, poster info, overview, in_library) so swiping never needs a
-mid-session re-fetch. `MovieId` throughout this spec is the internal
-`movies.id` surrogate key, **not** `tmdb_id` or `plex_rating_key`
-directly — every candidate, whether sourced from the Plex sample or a
-TMDB discover query, is resolved/upserted into the `movies` table
-(matching existing rows by `tmdb_id`/`plex_rating_key` per the
-guid/cross-reference rules) before being added to the pool, so the same
-film pulled from both sources collapses to one card, not two. For a
-TMDB-extended session, up to 70% of the cap is filled from the Plex
-sample and the remainder from TMDB discover results (after dedup against
-the Plex portion); a Plex-only session is 100% Plex. Both sources are
-filtered per the host's genre/year/rating settings, and — this is the
-part that keeps a huge TMDB catalog from surfacing obscure or poorly
-regarded titles — both are **sampled weighted by reputation score**,
-not uniformly at random.
+(title, poster info, overview, `in_library`) so swiping never needs a
+mid-session re-fetch. `in_library` on a pool entry is the *derived*
+cross-reference result computed at pool-construction time (per Cross-
+reference), not blindly copied off the `movies.in_library` column — the
+two agree for genuinely Plex-sourced rows, but a TMDB-sourced candidate
+whose `tmdb_id` matches a Plex row needs the match resolved (and, per the
+imdb-backfill merge rule under Cross-reference, the rows themselves
+merged) at this point, not left as two separate facts. `MovieId`
+throughout this spec is the internal `movies.id` surrogate key, **not**
+`tmdb_id` or `plex_rating_key` directly — every candidate, whether
+sourced from the Plex sample or a TMDB discover query, is
+resolved/upserted into the `movies` table before being added to the
+pool, so the same film pulled from both sources collapses to one card,
+not two.
+
+For a TMDB-extended session, up to 70% of the cap is targeted from the
+Plex sample and the remainder from TMDB discover results (after dedup
+against the Plex portion); if either source falls short of its target
+share (a small library, or a narrow TMDB filter), the other source backs
+it up to the overall cap rather than leaving the pool artificially small
+— the 5-candidate minimum still applies to the combined result. A
+Plex-only session is 100% Plex. Both sources are filtered per the host's
+genre/year/rating settings (TMDB's obscurity filtering happens at the
+query level — `vote_count.gte`/`sort_by`, see TMDB integration — not
+here), and both are **sampled weighted by reputation score**, not
+uniformly at random, so the pool skims the better-regarded slice of
+what's eligible.
 
 **Reputation score**: IMDB's weighted-rating formula, deliberately *not*
 TMDB's raw `popularity` field (which trends toward "recently searched,"
 not "well-regarded") and *not* raw `vote_average` alone (dominated by
-titles with a handful of 10/10 votes):
+titles with a handful of 10/10 votes). This formula's job is to *rank*
+the eligible set by how well-regarded a title is — keeping outright
+obscure titles out of the eligible set in the first place is the TMDB
+query filter's job (see TMDB integration), not this formula's:
 
 ```
 reputationScore = (v / (v + m)) * R + (m / (v + m)) * C
 ```
 
 `R` = the candidate's `rating` (TMDB vote_average), `v` = its
-`vote_count`, `C` = the mean `rating` across the eligible (post-filter,
-pre-sampling) candidate set, `m` = the 60th-percentile `vote_count`
-within that same set — this adapts "how many votes counts as credible"
-to the pool's own scale rather than a fixed constant that might not fit
-a small library. Candidates with no TMDB data (Plex items with no
-resolved `tmdb_id`) get `reputationScore = C`: treated as average,
-neither boosted nor excluded.
+`vote_count`. `C` and `m` are computed **once per pool build, over the
+union of both sources' eligible sets** (all eligible Plex rows with a
+non-NULL `rating`, plus all TMDB pages actually fetched up to
+`TMDB_DISCOVER_PAGE_CAP` — not the full, unknowable TMDB result count):
+`C` is the mean `rating` across that union, `m` is the 60th-percentile
+`vote_count` within it. If that union is empty (nothing has a non-NULL
+`rating` yet — e.g. a fresh install before the first enrichment sync has
+run), `C` defaults to 6.5 and `m` to 50, so the formula never evaluates
+against an empty set. Candidates with no TMDB data (`rating` NULL) get
+`reputationScore = C`: treated as average, neither boosted nor excluded.
 
 **Per-participant serving order**: each participant's next card is
 chosen from the pool minus what they've already swiped, scored as
 `score = reputationScore + affinityWeight * genreAffinity`.
-`genreAffinity` comes from a live, room-wide (not per-individual — there
-is no persisted per-person profile) tally of yes/no votes per genre so
-far in the room, normalized to roughly [-1, 1] with Laplace smoothing so
-a genre with one or two votes doesn't swing wildly. `affinityWeight`
-ramps from 0 up to a capped maximum as total votes cast in the room
-increase (e.g. `min(totalVotes / 20, 1) * maxWeight`) — early cards in a
-session are reputation-driven since there's no group signal yet, later
-cards increasingly reflect what this specific group is saying yes to.
-The next card is a weighted-random pick among the top-scoring remaining
-candidates, not a strict argmax, so the order has some variety rather
-than feeling mechanically deterministic.
+`genreAffinity` for a candidate is the **mean**, across its `genres`
+array, of each genre's live affinity — not the sum, which would
+systematically favor multi-genre films independent of taste. A single
+genre `g`'s affinity is `(yesCount(g) - noCount(g)) / (yesCount(g) +
+noCount(g) + 2*2)` (Laplace smoothing, α = 2, so one or two votes on a
+genre doesn't swing it to ±1), giving a value roughly in [-1, 1] tallied
+room-wide — not per-individual, there is no persisted per-person profile
+— from every participant's votes so far this room, and rebuilt from
+scratch on a kick (see the Kick bullet in Room/session engine).
+`affinityWeight = min(totalVotes / 20, 1) * 1.5` (`maxWeight = 1.5`,
+i.e. affinity can shift a candidate by at most ±1.5 points on the same
+0–10 scale `reputationScore` lives on) — early cards in a session are
+reputation-driven since there's no group signal yet, later cards
+increasingly reflect what this specific group is saying yes to.
+
+The next card is a **weighted-random pick among the top 10
+remaining-unswiped candidates by `score`** (ties broken by `movieId`
+ascending), not a strict argmax, so the order has some variety rather
+than feeling mechanically deterministic. Because `genreAffinity` can be
+negative and `affinityWeight * genreAffinity` can outweigh
+`reputationScore`, raw `score` can go negative — sampling weight is
+`max(score - minScoreInTopTen, ε)` (shifted so the lowest-scored of the
+ten is never fully excluded, `ε` a small positive constant), never the
+raw score directly. The random draw itself comes from a per-room seeded
+PRNG (see WebSocket protocol) so it's reproducible in tests.
 
 A participant's **currently-displayed, not-yet-swiped card never changes
-out from under them**: `next_card` (see WebSocket protocol) is computed
-and sent only at specific trigger points — their own `join`, their own
-`swipe`, their own `reconnect`/`resync` — never reactively because
-another participant's vote shifted the live affinity score in the
-background.
+out from under them** — see the `next_card`/`pendingCardId` mechanism in
+WebSocket protocol for exactly how that's enforced across reconnects and
+resyncs, not just normal play.
 
 The minimum pool size (5) and minimum participant count (2) from
 Room/session engine gate on the pool, not on any particular serving
-order, and are unaffected by this section.
+order, and are unaffected by this section. Whenever a pool entry is
+dealt as someone's `next_card`, its `movies.last_used_at` is stamped
+(supports the TMDB-only pruning rule in Library metadata cache).
 
 ### Room sharing
 Room creation generates the room code and canonical URL
@@ -525,7 +704,7 @@ but the claim of automated coverage for them would be false.
    built and the participant set frozen, then `active`.
 5. Swipes go over WebSocket; `match` broadcasts the instant a title
    crosses the threshold; the room keeps going until end/exhaustion.
-6. Host ends the session explicitly, the deck is exhausted, or the
+6. Host ends the session explicitly, the pool is exhausted, or the
    inactivity timeout fires; the room is evicted 10 minutes later.
 
 ## Input validation
@@ -542,14 +721,18 @@ but the claim of automated coverage for them would be false.
   are not deduped — each is a distinct `participantId`. A `reconnect`
   with a live `sessionToken` takes over that identity's existing
   connection rather than creating a new one.
+- There's no explicit "leave" — closing a tab just becomes a disconnect
+  under the heartbeat rules. This is intentional: only a host kick or the
+  inactivity timeout permanently removes someone, so the match-threshold
+  denominator can't be gamed by leaving and rejoining.
 
 ## Error handling
 
 - Plex unreachable/token invalid: blocks room creation at the host step,
   and blocks the `lobby -> starting` transition if it happens mid-sync;
   surfaced via the `error` code table above.
-- TMDB failure before deck construction completes: degrades to Plex-only,
-  non-blocking notice to host.
+- TMDB failure before pool construction completes: degrades to Plex-only,
+  surfaced via a `notice` message to the host (see WebSocket protocol).
 - WebSocket disconnects: see heartbeat/reconnect rules above.
 
 ## Concurrency
@@ -559,7 +742,7 @@ mutation happens in a single synchronous block**; any `await` (TMDB
 fetch, Plex fetch, SQLite sync) computes into a local variable first, and
 re-validates the room's current status/participant set before committing
 the result. The `lobby -> starting` transition is the concrete case this
-protects: it's set synchronously, before deck construction's first
+protects: it's set synchronously, before pool construction's first
 `await`, specifically so a `join` arriving during that fetch is rejected
 by the already-`starting` status rather than racing into the frozen set.
 The library sync's single-flight guard (Library metadata cache) exists
@@ -570,32 +753,44 @@ one room's state.
 
 - Vitest for pure logic: match-threshold evaluation (all three kinds)
   against the frozen denominator, kick-triggered re-evaluation and
-  threshold clamping, pool exhaustion with/without matches, swipe
+  threshold clamping (including the never-retract-a-match case under
+  `atLeast`), kick rebuilding the affinity tally, pool exhaustion
+  with/without matches (both edges of the false/true transition), swipe
   idempotency/replay, duplicate-name resolution, Plex guid parsing across
-  all five cases, the pool dedup rule, the reputation-score formula
-  (including the no-TMDB-data fallback), the affinity-weight ramp, and
-  that `next_card` is only ever recomputed at its three defined trigger
-  points (not reactively). Plex and TMDB clients are
-  behind an interface with a fake implementation (`FAKE_EXTERNAL_APIS`
-  env flag + a seeded fixture DB), used by both Vitest and Playwright so
-  neither needs live network access or a real Plex/TMDB account.
+  all five cases, the pool dedup rule (including the imdb-backfill merge
+  case), the reputation-score formula (including the empty-set and
+  no-TMDB-data fallbacks), the affinity-weight ramp and its
+  negative-score sampling shift, that `pendingCardId` is resent unchanged
+  on `reconnect`/`resync` and only recomputed on join/own-swipe, the
+  host-claim-token race (first valid claim wins, a second attempt or a
+  plain `join` doesn't), and disconnected-at-Start participants being
+  excluded from the frozen set. Plex and TMDB clients are behind an
+  interface with a fake implementation (`FAKE_EXTERNAL_APIS` env flag + a
+  seeded fixture DB, with `POOL_SIZE_CAP` and `ROOM_RNG_SEED` overrides
+  for reproducible, fast-to-run scenarios), used by both Vitest and
+  Playwright so neither needs live network access or a real Plex/TMDB
+  account.
 - Playwright: (a) two contexts joining a room and reaching a match; (b) a
   participant disconnecting mid-session and reconnecting, verifying
-  swipes and room state survive; (c) a session that exhausts with no
+  swipes, room state, and their current pending card all survive
+  unchanged; (c) a session (small `POOL_SIZE_CAP`) that exhausts with no
   match, verifying the fallback UI; (d) authorization enforcement — a
-  non-host `start`/`kick`/`update_settings` is rejected; (e) rate-limit
-  and cap behavior.
+  non-host `start`/`kick`/`update_settings` is rejected, and a
+  `reconnect` without `hostToken` doesn't regain host privileges; (e)
+  rate-limit and cap behavior.
 
 ## Deployment
 
 Multi-stage Dockerfile; runtime image runs the custom Node server as a
 non-root user; **single replica only** (see Architecture); one volume
 mount (e.g. `/data`) for the SQLite file. Env vars: `TMDB_API_KEY`
-(optional), `AUTH_ENCRYPTION_KEY` (required), `ADMIN_SETUP_TOKEN`
-(required), `APP_ORIGIN` (required), `TRUSTED_PROXY_HOPS` (optional,
-default 0). `/api/health` backs a Docker `HEALTHCHECK` (liveness only).
-Logs are structured (info/warn/error) and never include tokens;
-participant names are logged only at debug level if at all.
+(required — see TMDB integration for why), `AUTH_ENCRYPTION_KEY`
+(required), `ADMIN_SETUP_TOKEN` (required), `APP_ORIGIN` (required),
+`TRUSTED_PROXY_HOPS` (optional, default 0). `/api/health` backs a Docker
+`HEALTHCHECK` (liveness only — an existence/permission check on the
+SQLite file, not a write, so the probe itself can't contend with the
+sync's writes). Logs are structured (info/warn/error) and never include
+tokens; participant names are logged only at debug level if at all.
 
 If deployed behind a reverse proxy, it must pass through the WebSocket
 `Upgrade`/`Connection` headers and set `X-Forwarded-For` correctly for
