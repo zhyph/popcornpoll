@@ -17,6 +17,9 @@ export type ErrorCode =
   | 'excluded_at_start'
   | 'invalid_threshold'
   | 'bad_token'
+  | 'not_enough_participants'
+  | 'pool_too_small'
+  | 'not_your_card'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; code: ErrorCode }
 
