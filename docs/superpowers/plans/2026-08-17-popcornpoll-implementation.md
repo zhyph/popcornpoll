@@ -7493,7 +7493,8 @@ git commit -m "feat: WS client, room creation/join/lobby pages, swipe deck"
 - Create: `e2e/authorization.spec.ts`
 - Create: `e2e/exclusion.spec.ts`
 - Create: `server/plex/fakeClient.ts` (fake Plex client — the fixture-backed implementation the Global Constraints promised but no prior task built, Step 1)
-- Modify: `server/index.ts` (select the fake client under `FAKE_EXTERNAL_APIS`, auto-seed a fixture Plex link, await the resync sync synchronously in fake mode, Step 1)
+- Modify: `server/index.ts` (select the fake client under `FAKE_EXTERNAL_APIS`, auto-seed a fixture Plex link, await the resync sync synchronously in fake mode; wire Next.js's request handler into the custom server, since no task before this one ever served a page over HTTP, Step 1)
+- Modify: `server/index.test.ts` (opt its four `/api/*`-only tests out of frontend serving via `skipFrontend: true`, Step 1)
 - Modify: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`, `server/room/roomStore.ts` (test-only env overrides, Step 1)
 - Modify: `components/SwipeDeck.tsx`, `app/room/[code]/page.tsx` (add `data-testid` hooks — attribute-only, no behavior change, Step 1)
 
@@ -7612,6 +7613,111 @@ Run `npx vitest run` to confirm this didn't break any existing test (none of Tas
 git add server/plex/fakeClient.ts server/index.ts
 git commit -m "feat: fake Plex client + auto-seeded fixture link for FAKE_EXTERNAL_APIS mode"
 ```
+
+**A second, larger gap, also discovered by this task and also fixed here:** `server/index.ts`'s HTTP dispatch only ever handles `/api/*` paths and 404s everything else — no task from Task 1 through Task 22 ever wired Next.js's own request handler into the custom server, so `/`, `/join/[code]`, and `/room/[code]` (every actual page) have never been reachable over HTTP at all, in dev or production. This is a Task 1/21-era gap, not something introduced by Task 22 or this task; e2e is simply the first thing that ever made an HTTP request to a page path and noticed. Fix it here, since it blocks every e2e scenario and the running app itself.
+
+In `server/index.ts`, add the import and change `createApp`'s signature to accept an options object and become `async` (it needs to `await` Next's `prepare()` before the server can reliably serve pages):
+
+```ts
+// server/index.ts — add to the import block:
+import next from 'next'
+
+// server/index.ts — replace:
+//   export function createApp(config: AppConfig) {
+// with:
+export async function createApp(config: AppConfig, opts: { skipFrontend?: boolean } = {}) {
+```
+
+Inside `createApp`, after the existing `const healthHandler = createHealthHandler(config.dataDir)` line and before `const httpServer = createServer(...)`, add the Next.js app setup — but only when frontend serving isn't explicitly skipped (unit tests that only exercise `/api/*` behavior pass `skipFrontend: true` so they don't pay for a full Next dev-server boot on every test):
+
+```ts
+// server/index.ts — insert before `const httpServer = createServer(...)`:
+const nextApp = opts.skipFrontend ? null : next({ dev: process.env.NODE_ENV !== 'production' })
+const handleNextRequest = nextApp?.getRequestHandler()
+if (nextApp) await nextApp.prepare()
+```
+
+Change the request handler's dispatch to route non-`/api/*` paths to Next instead of 404ing. Replace:
+
+```ts
+// server/index.ts — replace the httpServer's callback body's opening:
+//   const httpServer = createServer((req, res) => {
+//     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
+//     const chunks: Buffer[] = []
+// with:
+const httpServer = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
+  if (!url.pathname.startsWith('/api/')) {
+    if (handleNextRequest) {
+      void handleNextRequest(req, res, url)
+    } else {
+      res.writeHead(404).end()
+    }
+    return
+  }
+  const chunks: Buffer[] = []
+```
+
+(The rest of the existing dispatch body — the `req.on('data', ...)`/`req.on('end', ...)` block, the `if (url.pathname === '/api/health') ...` chain, and its final `else { res.writeHead(404).end(); return }` for unmatched `/api/*` paths — is unchanged; it now only ever runs for `/api/*` requests, which is what it already assumed.)
+
+Update the process bootstrap at the bottom of the file to await the now-async `createApp`:
+
+```ts
+// server/index.ts — replace:
+//   if (process.argv[1] && process.argv[1].endsWith('index.ts')) {
+//     const config = loadConfig(process.env)
+//     const app = createApp(config)
+//     app.httpServer.listen(config.port, () => {
+//       console.log(`PopcornPoll listening on :${config.port}`)
+//     })
+//     process.on('SIGTERM', async () => {
+//       await app.shutdown()
+//       process.exit(0)
+//     })
+//   }
+// with:
+if (process.argv[1] && process.argv[1].endsWith('index.ts')) {
+  const config = loadConfig(process.env)
+  void (async () => {
+    const app = await createApp(config)
+    app.httpServer.listen(config.port, () => {
+      console.log(`PopcornPoll listening on :${config.port}`)
+    })
+    process.on('SIGTERM', async () => {
+      await app.shutdown()
+      process.exit(0)
+    })
+  })()
+}
+```
+
+In `server/index.test.ts` (Task 21's file — all four of its tests only exercise `/api/*` paths, so they opt out of frontend serving to stay fast and avoid booting a real Next dev server per test):
+
+```ts
+// server/index.test.ts — replace:
+//   let app: ReturnType<typeof createApp>
+// with:
+let app: Awaited<ReturnType<typeof createApp>>
+
+// server/index.test.ts — replace:
+//   beforeEach(() => {
+// with:
+beforeEach(async () => {
+
+// server/index.test.ts — replace:
+//   app = createApp(config)
+// with:
+app = await createApp(config, { skipFrontend: true })
+```
+
+Run `npx vitest run server/index.test.ts` to confirm those four tests still pass (should be unaffected — `skipFrontend: true` preserves the exact prior behavior for `/api/*` paths), then `npx vitest run` for the full suite, then `npx tsc --noEmit`, then commit:
+
+```bash
+git add server/index.ts server/index.test.ts
+git commit -m "fix: wire Next.js request handling into the custom server — no task ever served a single page over HTTP before this"
+```
+
+**Note for whoever builds Task 24 (deployment):** the production `start` script runs `node dist/server/index.js`, which now calls `next({ dev: false })` at startup — this requires the `.next` build output (from `next build`, already the first half of the `build` script) to be present alongside the compiled server code in the runtime image, not just the `dist/` output from `tsc -p tsconfig.server.json`. Make sure the Dockerfile's runtime stage copies `.next/`, `public/` (if any), `next.config.js`, and `package.json`/`node_modules` (Next needs its own runtime deps available), not only `dist/`.
 
 Now wire the two remaining test-only overrides (pool size, RNG seed) and the e2e `data-testid` hooks.
 
