@@ -227,7 +227,15 @@ hold open across an `await` yield anyway), the run is a sequence of small
 synchronous transactions — one per chunk of ~200 items, with a
 `setImmediate` yield between chunks so a large-library sync doesn't stall
 the Node event loop, and therefore every other room's WebSocket traffic,
-for its full duration. Each chunk's transaction upserts its items (keyed
+for its full duration. Room creation does **not** await a
+staleness-triggered sync — it's fire-and-forget, and the room is built
+against whatever's currently cached — except on a cold cache (no `movies`
+rows at all), where creation awaits the first sync and the client shows a
+first-run "indexing your library" state. Pool construction (at `lobby ->
+starting`), however, **does** await an in-flight sync if one is running,
+using the same promise handle the single-flight guard already holds —
+otherwise a pool could be built from a half-synced library, mixing
+already-removed and not-yet-added titles. Each chunk's transaction upserts its items (keyed
 by `plex_rating_key`) and stamps `last_sync_id = runId`. After all chunks
 complete, one final statement sweeps deletions:
 `UPDATE movies SET in_library = 0 WHERE plex_rating_key IS NOT NULL AND
@@ -237,18 +245,37 @@ for cross-reference display). This is correct under the app's own
 single-process/single-writer constraint (see Architecture); it would not
 be safe with multiple writers.
 
-**Reputation-data enrichment** (part of the same sync run): for any row
-with a resolved `tmdb_id` but `rating`/`vote_count` still NULL —
-freshly-added Plex items, or ones just resolved by the imdb backfill —
-fetch `/movie/{tmdb_id}` and store `vote_average`/`vote_count`, capped at
-e.g. 100 new enrichments per run and continuing across subsequent syncs,
-same pattern as the imdb backfill. Rows that never resolve a `tmdb_id` at
-all (see Plex integration's guid-parsing cases) keep `rating`/`vote_count`
-NULL permanently — there's nothing to enrich.
+**Reputation-data enrichment**: **not** tied to the room-creation sync
+trigger — bounding it to "up to 100 rows per sync run" would make it
+throughput-bound by how often someone creates a room, not by library
+size, and a real multi-thousand-title library would then take months to
+fully enrich, leaving the reputation-weighting feature effectively inert
+(nearly every candidate falling to the `reputationScore = C` fallback,
+tied, for most of that time). Instead, enrichment runs as an independent
+paced background worker (token-bucketed, e.g. 2 requests/second — well
+under TMDB's rate limit), started on boot and resumed after any restart,
+that continuously drains the backlog of rows with a resolved `tmdb_id`
+but NULL `rating`/`vote_count` (freshly-added Plex items, or ones just
+resolved by the imdb backfill) via `/movie/{tmdb_id}`, independent of
+whether any room is being created. At 2 req/s a 4,000-title library
+enriches in well under an hour, not months. Rows that never resolve a
+`tmdb_id` at all (see Plex integration's guid-parsing cases) keep
+`rating`/`vote_count` NULL permanently — there's nothing to enrich.
 
 **TMDB-only row pruning**: `plex_rating_key IS NULL` rows are deleted if
 `last_used_at` is more than 30 days old (or was never set, for a row
-cached but never actually dealt into a pool).
+cached but never actually dealt into a pool) — **except** any row whose
+`id` is referenced by a currently-live room's pool (cheap to check: a set
+union over the in-memory room `Map`'s pools). The same live-pool
+exclusion applies to the imdb-backfill merge-delete in Cross-reference.
+Without this, pruning or merging can delete a row mid-session — the pool
+still renders the denormalized card client-side, but any server-side
+re-read (a `match` broadcast, the image proxy) becomes a null lookup, and
+a later re-upsert of the same film gets a new `movies.id`, permanently
+splitting one film across two ids. All in-session movie data is served
+from the pool snapshot taken at construction time and never re-read from
+`movies` mid-session, which is what makes this exclusion sufficient
+rather than merely reducing the odds.
 
 **Plex-only pool filtering**: genre/year filters apply to Plex-only
 sessions the same as TMDB-extended ones. The rating filter applies only
@@ -257,7 +284,10 @@ can't be evaluated against a threshold, so it's excluded from
 eligibility *only when a rating filter is actually set*; with no rating
 filter active, it remains eligible and falls through to the
 `reputationScore = C` default described in Candidate pool & deck
-ordering.
+ordering. The Plex sample itself is drawn only from
+`plex_rating_key IS NOT NULL AND in_library = 1` — a row soft-deleted by
+the sync sweep (removed from Plex since the last scan) is kept for
+cross-reference purposes but never dealt as a Plex-sourced candidate.
 
 **Schema migrations**: a `schema_version` table, with numbered migration
 scripts run on boot — required since this is a Docker image people will
@@ -281,12 +311,23 @@ involved.
 ### HTTP API surface
 - `POST /api/rooms` — create a room. Body: `{candidateSource,
   matchThreshold, tmdbFilters?}`. No auth required. Returns `{roomCode,
-  hostClaimToken}` — `hostClaimToken` is single-use and short-lived
-  (60s), and exists specifically to answer "who becomes host": it's not
-  itself the host credential, it's presented once on the *first* `join`
-  for that room (see WebSocket protocol) to claim `hostToken`. A `join`
-  without it, or arriving after it's been consumed or expired, is a plain
-  participant — even if it's the very first `join` the server sees. This
+  hostClaimToken}` — `hostClaimToken` is single-use, valid **until
+  consumed or the room ends** (not a short fixed TTL: it's unguessable,
+  single-use, and per-room already, so a long lifetime adds essentially
+  no attack surface while avoiding stranding a room over an ordinary
+  delay between creation and joining), and exists specifically to answer
+  "who becomes host": it's not itself the host credential, it's presented
+  on the *first* `join` for that room (see WebSocket protocol) to claim
+  `hostToken`. It is consumed **only on a `join` that actually succeeds**
+  — a `join` that fails for any other reason (`invalid_name`,
+  `room_full`, `rate_limited`) leaves the claim available for the retry,
+  so a mistyped display name can't permanently orphan the room. A `join`
+  presenting no token, or an already-consumed one, is a plain
+  participant; the `joined` response additionally carries
+  `hostClaimResult: 'claimed' | 'expired' | 'already_consumed'` **only
+  when** a `hostClaimToken` was presented, so the creator's own client
+  can distinguish "you're the host" from "your claim failed" instead of
+  silently rendering participant-only chrome with no explanation. This
   removes the otherwise-unspecified "first join wins" race between the
   room's actual creator and anyone else who happens to hit `/join/<code>`
   first (a stale/reused code, a slow page load, etc). On failure (e.g.
@@ -337,18 +378,26 @@ see the kick bullet below for why this matters specifically for
   (multi-second, TMDB-paginated) fetch. Participants who are currently
   `disconnected` at the instant of freeze are **excluded** from the
   frozen set entirely — not just left out of the threshold, genuinely not
-  part of the room going forward, as if auto-kicked before it started
-  (there's nothing to discard, since a disconnected-in-lobby participant
-  has no swipes yet). The host-facing Start action shows a connection
-  summary first ("2 of 3 connected — Alice will not be included") so this
-  isn't a silent surprise. On success, pool construction completes (see
-  Candidate pool & deck ordering) and the room moves to `active`, with
-  the (now `disconnected`-filtered) participant set permanently frozen.
-  On failure (Plex unreachable, TMDB fails and even the Plex-only
-  fallback pool comes up too small — see the minimum-size check), the
-  room reverts to `lobby` with an error surfaced to the host (`error
+  part of the room going forward, and this uses the *same mechanism* as a
+  kick, not just the same description: their `sessionToken`s are added to
+  the per-room revocation set, so a later `reconnect` from that device
+  gets a defined response — `error {code: 'excluded_at_start'}` — rather
+  than an undefined one (there's nothing for them to have lost, since a
+  disconnected-in-lobby participant has no swipes yet, but the *response*
+  to their reconnect attempt still needs to be a real, defined thing).
+  The host-facing Start action shows a connection summary first ("2 of 3
+  connected — Alice will not be included") so this isn't a silent
+  surprise. On success, pool construction completes (see Candidate pool &
+  deck ordering) and the room moves to `active`, with the (now
+  `disconnected`-filtered) participant set permanently frozen. On failure
+  (Plex unreachable, TMDB fails and even the Plex-only fallback pool
+  comes up too small — see the minimum-size check), the room reverts to
+  `lobby`: every connected client receives a `state_update {status:
+  'lobby', ...}` (not just the host — everyone else was shown a "building
+  your pool" state driven by `status: 'starting'` and needs to be told it
+  ended), and the host additionally, point-to-point, receives `error
   {code: 'not_enough_participants' | 'pool_too_small' | 'plex_unavailable'
-  | 'tmdb_unavailable'}`), who can retry Start.
+  | 'tmdb_unavailable'}` so they know why and can retry Start.
 - **Disconnects during `active`** do not remove a participant from the
   match-threshold denominator or discard their existing swipes. An "all
   yes" title they haven't yet swiped on can't match until they either
@@ -404,9 +453,13 @@ see the kick bullet below for why this matters specifically for
   fallback UI down when `state_update.exhausted` reads `false` again,
   not from a separate event.
 - **Room end**: host-only explicit action, or a 30-minute inactivity
-  timeout (a `join`, `swipe`, or any host action resets the timer — this
-  applies in `lobby` too, so a room that's still filling up doesn't time
-  out on its own). On the app's own restart/redeploy, a `SIGTERM` handler
+  timeout. The timer resets on a `join`, `swipe`, any host action, or a
+  **heartbeat from any currently-connected participant** — that last one
+  matters specifically for `lobby`: a room that's filling up with no
+  *new* joins for 30 minutes (everyone invited is slow to arrive, but the
+  host's own tab has been open and heartbeating the whole time) must not
+  time out from under a host who never left. On the app's own
+  restart/redeploy, a `SIGTERM` handler
   broadcasts `room_ended {reason: 'server_restarting'}` to every
   connected client (waiting briefly for send buffers to drain, well
   within Docker's default 10s stop grace) before exit, and all in-memory
@@ -439,16 +492,17 @@ body.
   reconnect/resync doesn't widen its exposure beyond the already-trusted
   client holding it. A `reconnect` with a `sessionToken` that already has
   a live connection takes over — the old socket is closed server-side.
-- `hostClaimToken` — private, single-use, 60s TTL, returned by `POST
-  /api/rooms` (see HTTP API surface) to whoever creates the room.
-  Presented on that creator's *first* `join` (`join {roomCode,
-  displayName, hostClaimToken}`) to claim host status and receive
-  `hostToken` in the `joined` response. Any `join` without a valid,
-  unconsumed `hostClaimToken` for that room — including a second attempt
-  after it's already been consumed — is a plain participant. This is what
-  actually decides "who's the host," since room creation (HTTP) and
-  becoming a room participant (WebSocket) are two separate steps that
-  would otherwise race.
+- `hostClaimToken` — private, single-use, valid until consumed or the
+  room ends (see HTTP API surface for why not a short fixed TTL),
+  returned by `POST /api/rooms` to whoever creates the room. Presented on
+  that creator's *first successful* `join` (`join {roomCode, displayName,
+  hostClaimToken}`) to claim host status and receive `hostToken` in the
+  `joined` response — a failed `join` attempt does not consume it. Any
+  `join` without a valid, unconsumed `hostClaimToken` for that room —
+  including a second attempt after it's already been consumed — is a
+  plain participant. This is what actually decides "who's the host,"
+  since room creation (HTTP) and becoming a room participant (WebSocket)
+  are two separate steps that would otherwise race.
 - `hostToken` — private, cryptographically random, held in the host's
   browser `localStorage` (survives a tab refresh). Required to `reconnect
   *as host*` — pass it as `reconnect {roomCode, sessionToken, hostToken}`;
@@ -469,74 +523,122 @@ gap sends `resync` rather than trusting a partial delta.
 `reconnect {roomCode, sessionToken, hostToken?}`, `resync {}`, `swipe
 {movieId, vote}`, `start {}`, `end_room {}`, `update_settings
 {matchThreshold?, candidateSource?, tmdbFilters?}` (host-only,
-`lobby`-only), `kick {participantId}` (host-only), `heartbeat {}`.
+`lobby`-only), `kick {participantId}` (host-only), `heartbeat {}`. `join`
+messages are additionally rate-limited per connection (independent of the
+HTTP-level room-creation/join rate limit in Network exposure, which
+covers the `/api/rooms` path and the initial upgrade — not repeated `join`
+messages sent over an already-open socket, which a non-browser client on
+the trusted network could otherwise use to enumerate room codes at wire
+speed); a connection sending failed `join`s past a small threshold (e.g.
+5) is closed.
 
 **Server → client**:
-- `joined {participantId, sessionToken, hostToken?, room}` — sent once,
-  directly in response to `join`/`reconnect`/`resync`. `room` is the
-  **full** snapshot: status, this participant's own `mySwipes` map
-  (needed to restore progress on reconnect), participants (with
+- `joined {participantId, sessionToken, hostToken?, hostClaimResult?,
+  room}` — sent once, directly in response to `join`/`reconnect`/`resync`.
+  `hostClaimResult` is present only when the triggering `join` carried a
+  `hostClaimToken` (see HTTP API surface). `room` is the **full**
+  snapshot: status, this participant's own `mySwipes` map (needed to
+  restore progress on reconnect), participants (with
   `connectionStatus`/`finished`), matches, exhausted, matchThreshold,
   candidateSource, `seq` — and, **once the room has reached `active`**,
-  `pool` (denormalized candidate entries) and `pendingCardId` (this
-  participant's current, already-assigned, not-yet-swiped card — see
-  below). In `lobby`/`starting`, `pool`/`pendingCardId` are simply absent
-  — there's nothing to send yet.
+  `pool` (denormalized candidate entries), `pendingCardId` (this
+  participant's current, already-assigned, not-yet-swiped card — always
+  delivered via this snapshot on `reconnect`/`resync`; `next_card`, below,
+  is reserved for the incremental case so there's exactly one channel per
+  situation, not two racing ones), and — **only when `exhausted &&
+  matches.length === 0`** — `topCandidates`, for the same reason
+  `pendingCardId` needs to survive a reconnect: a client that refreshes
+  after a no-match ending must still be able to render the fallback
+  screen, not just a boolean with nothing to show for it. In
+  `lobby`/`starting`, `pool`/`pendingCardId`/`topCandidates` are simply
+  absent — there's nothing to send yet.
 - `room_started {pool, seq}` — broadcast once to every connected client
-  exactly when `starting -> active` completes. This is the *only* other
-  place the pool is delivered — a client that was already connected
-  through the `lobby -> starting -> active` transition gets the pool
-  here, not through another `joined`; a client that reconnects afterward
-  gets it via `joined` as described above. (A design note for
-  implementers: it is a real, previously-missed defect for the pool to
-  be sent *only* in `joined` — every client present at Start would never
-  receive it otherwise, since `joined` only fires on join/reconnect/resync
-  and joins are rejected once the room leaves `lobby`.)
+  exactly when `starting -> active` completes, accompanied by a
+  same-`seq` `state_update {status: 'active', ...}` (see the `seq`
+  invariant below — every message that changes room state has one, and
+  every state change also gets a `state_update`, so clients always learn
+  the status actually changed rather than just receiving the pool). This
+  is the *only* other place the pool is delivered — a client that was
+  already connected through the `lobby -> starting -> active` transition
+  gets the pool here, not through another `joined`; a client that
+  reconnects afterward gets it via `joined` as described above. (A design
+  note for implementers: it is a real, previously-missed defect for the
+  pool to be sent *only* in `joined` — every client present at Start
+  would never receive it otherwise, since `joined` only fires on
+  join/reconnect/resync and joins are rejected once the room leaves
+  `lobby`.)
 - `next_card {movieId}` or `next_card {movieId: null}` (no cards left —
   equivalent to this participant being `finished`) — sent to a single
-  participant, never broadcast. The server tracks one `pendingCardId` per
-  participant (the card it last sent them that they haven't yet swiped).
-  It is **(re)computed** — via the reputation + affinity scoring in
-  Candidate pool & deck ordering — only when there is no current pending
-  card to reuse: right after `room_started`/pool delivery (their first
-  card) and immediately after each of their own `swipe`s (which consumes
-  the current pending card and computes the next one). On `reconnect` or
-  `resync`, if a `pendingCardId` is already stored for them and it hasn't
-  since been swiped, the **same** id is resent, not recomputed — this is
-  what makes the "a displayed, unswiped card never changes out from under
-  someone" guarantee hold even though `resync` can be triggered by
-  unrelated network hiccups at any time, including mid-drag.
+  participant, never broadcast, and used **only** for the incremental
+  case: right after `room_started`/pool delivery (their first card) and
+  immediately after each of their own `swipe`s. It is never the channel
+  for reconnect/resync — `joined`'s `pendingCardId` field covers that (see
+  above), which is what keeps this to one delivery channel per situation.
+  Recomputation (via the reputation + affinity scoring in Candidate pool
+  & deck ordering) happens **only when a `swipe` actually consumes the
+  currently-pending card** — i.e. `swipe.movieId === pendingCardId` and it
+  was not already recorded for that participant. Any other `swipe` —
+  a replayed/duplicate one for an already-recorded `movieId` (Swipe
+  idempotency's redelivery-safety case, which is expected to happen
+  during resync) or one naming a `movieId` that isn't the participant's
+  actual `pendingCardId` (`error {code: 'not_your_card'}`, a malformed or
+  hostile client) — is a no-op with **no** `next_card` emission. Without
+  this exact condition, a redelivered swipe during resync would
+  recompute and resend a *different* card, reopening the same
+  card-swap-under-your-thumb problem the `pendingCardId` split was built
+  to close, just through the redelivery path instead of the resync path.
 - `state_update {participants, status, matches, exhausted,
   matchThreshold, candidateSource, seq}` — broadcast to every connected
   client on any state change (join/reconnect/disconnect/kick, status
   transition, settings change). Deliberately omits the pool (see
   `room_started` above) and `next_card` (participant-specific, sent
-  separately). Multiple messages describing the same state change (e.g. a
-  `match` alongside the `state_update` it caused) legitimately share one
-  `seq` — a client detects a *gap* in the sequence of `state_update`s
-  specifically, not a mismatch between message types.
-- `match {movieId, movie, seq}`, `exhausted {topCandidates: MovieCard[5]}`
-  (same denormalized shape as pool entries, top 5 by yes-vote count,
-  ties broken by reputation score; fires only on the false→true edge —
-  see the state machine's Exhaustion bullet) — sent alongside a
-  `state_update` with the same `seq`, as distinct events specifically so
-  clients can trigger their own one-shot UI (banner, confetti) without
-  diffing `state_update` for the change themselves.
-- `notice {level, code, message}` — a non-blocking, host-facing informational
-  event that doesn't change room state (currently: TMDB degrading a
-  session to Plex-only). Not part of `state_update` since it's a
-  point-in-time event, not a durable field.
-- `kicked {reason}` — sent only to the participant being kicked,
-  immediately before the server closes that connection.
+  separately). **`seq` invariant**: it increments exactly once per room
+  state change, and *every* state change emits a `state_update` carrying
+  that value — `room_started` and `room_ended` are no exception, each
+  always accompanied by one (`status: 'active'` / `'ended'`
+  respectively). Other messages describing the same change (`match`,
+  `exhausted`) legitimately share that same `seq` rather than minting
+  their own. A client detects a *gap* in the sequence of `state_update`s
+  specifically (including the ones riding along with `room_started`/
+  `room_ended`), not a mismatch between message types.
+- `match {movieId, movie, seq}`, `exhausted {topCandidates}` (up to 5
+  entries — the pool may hold fewer eligible titles at exhaustion time
+  than 5, though the 5-candidate minimum makes that rare — same
+  denormalized shape as pool entries, ranked by yes-vote count, ties
+  broken by reputation score; fires only on the false→true edge — see the
+  state machine's Exhaustion bullet) — sent alongside a `state_update`
+  with the same `seq`, as distinct events specifically so clients can
+  trigger their own one-shot UI (banner, confetti) without diffing
+  `state_update` for the change themselves. `topCandidates` is *also*
+  included in `joined` when applicable (see above) — the event is the
+  one-shot trigger, the snapshot is what makes the state recoverable
+  after a refresh.
+- `notice {level, code, message}` — a non-blocking, host-facing
+  informational event that doesn't change durable room state (currently:
+  `code: 'degraded_to_plex_only'` when TMDB fails before pool
+  construction completes). Not part of `state_update`, but the fact that
+  a session degraded *is* durable — `state_update.candidateSource`
+  reflects the fallback once it happens, so a host who reconnects after
+  the fact can still see the session is Plex-only even though the
+  one-time notice itself isn't resent.
+- `kicked {reason}` — sent to a kicked participant, or to one excluded at
+  Start (`reason: 'excluded_at_start'`), immediately before the server
+  closes that connection if one is live; for the excluded-at-Start case
+  there usually isn't one, since exclusion only applies to participants
+  who were already disconnected.
 - `room_ended {reason, seq}`, `error {code, message}` — `code` is one of
   `room_not_found | room_full | already_started | invalid_name |
-  not_host | kicked | invalid_threshold | not_enough_participants |
-  pool_too_small | plex_unavailable | tmdb_unavailable | rate_limited |
-  bad_token`. `reconnect`/`join` against a room that exists in the `Map`
-  but has `status: 'ended'` (including during its 10-minute eviction
-  window) returns `error {code: 'room_not_found'}` — indistinguishable
-  from a room that's already been fully evicted, deliberately, since
-  there's nothing a client can usefully do differently between the two.
+  not_host | kicked | excluded_at_start | not_your_card |
+  invalid_threshold | not_enough_participants | pool_too_small |
+  plex_unavailable | tmdb_unavailable | rate_limited | bad_token`.
+  `reconnect`/`join` against a room that exists in the `Map` but has
+  `status: 'ended'` (including during its 10-minute eviction window)
+  returns `error {code: 'room_not_found'}` — indistinguishable from a
+  room that's already been fully evicted, deliberately, since there's
+  nothing a client can usefully do differently between the two. A `swipe`
+  arriving while status is `lobby` or `starting` (no pool exists yet) is
+  likewise `error {code: 'not_your_card'}` — there's no legitimate way for
+  a client to have a `movieId` to swipe on before `pendingCardId` exists.
 - `heartbeat_ack {}`.
 
 For deterministic testing, the weighted-random selection inside
@@ -640,9 +742,14 @@ reputation-driven since there's no group signal yet, later cards
 increasingly reflect what this specific group is saying yes to.
 
 The next card is a **weighted-random pick among the top 10
-remaining-unswiped candidates by `score`** (ties broken by `movieId`
-ascending), not a strict argmax, so the order has some variety rather
-than feeling mechanically deterministic. Because `genreAffinity` can be
+remaining-unswiped candidates by `score`** (ties broken by the same
+seeded PRNG used for the weighted draw itself, not `movieId` ascending —
+this matters concretely early in a library's life, before the
+enrichment worker has caught up: most candidates share the exact
+fallback `reputationScore = C`, and breaking that tie by id would serve
+the library in near-insertion order instead of a randomized one), not a
+strict argmax, so the order has some variety rather than feeling
+mechanically deterministic. Because `genreAffinity` can be
 negative and `affinityWeight * genreAffinity` can outweigh
 `reputationScore`, raw `score` can go negative — sampling weight is
 `max(score - minScoreInTopTen, ε)` (shifted so the lowest-scored of the
@@ -657,9 +764,14 @@ resyncs, not just normal play.
 
 The minimum pool size (5) and minimum participant count (2) from
 Room/session engine gate on the pool, not on any particular serving
-order, and are unaffected by this section. Whenever a pool entry is
-dealt as someone's `next_card`, its `movies.last_used_at` is stamped
-(supports the TMDB-only pruning rule in Library metadata cache).
+order, and are unaffected by this section. Every entry added to the pool
+gets `movies.last_used_at` stamped **at pool-construction time**, not
+when it's eventually dealt as someone's `next_card` — stamping on deal
+would leave most of a large pool eligible for the TMDB-only pruning
+sweep for the entire session (only the cards actually reached get
+stamped), and would mean a synchronous SQLite write on every single
+swipe across every participant, on the same event loop as WebSocket
+traffic. Stamping the whole pool once, at construction, avoids both.
 
 ### Room sharing
 Room creation generates the room code and canonical URL
@@ -762,9 +874,18 @@ one room's state.
   no-TMDB-data fallbacks), the affinity-weight ramp and its
   negative-score sampling shift, that `pendingCardId` is resent unchanged
   on `reconnect`/`resync` and only recomputed on join/own-swipe, the
-  host-claim-token race (first valid claim wins, a second attempt or a
-  plain `join` doesn't), and disconnected-at-Start participants being
-  excluded from the frozen set. Plex and TMDB clients are behind an
+  host-claim-token race (first *successful* claim wins; a failed first
+  `join` — bad name, full room — does not consume the token, and a
+  retry with the same token still succeeds), disconnected-at-Start
+  participants being excluded from the frozen set *and* their
+  `sessionToken` landing in the revocation set so a later `reconnect`
+  gets `excluded_at_start` rather than an undefined outcome, `next_card`
+  emitting **only** when a swipe consumes the actual `pendingCardId`
+  (a replayed swipe or one naming a different `movieId` is a no-op with
+  no re-emission), `topCandidates` being present in the `joined` snapshot
+  whenever `exhausted && matches.length === 0`, and the reputation-score
+  tie-break using the seeded PRNG rather than `movieId` ordering. Plex
+  and TMDB clients are behind an
   interface with a fake implementation (`FAKE_EXTERNAL_APIS` env flag + a
   seeded fixture DB, with `POOL_SIZE_CAP` and `ROOM_RNG_SEED` overrides
   for reproducible, fast-to-run scenarios), used by both Vitest and
@@ -774,10 +895,14 @@ one room's state.
   participant disconnecting mid-session and reconnecting, verifying
   swipes, room state, and their current pending card all survive
   unchanged; (c) a session (small `POOL_SIZE_CAP`) that exhausts with no
-  match, verifying the fallback UI; (d) authorization enforcement — a
-  non-host `start`/`kick`/`update_settings` is rejected, and a
-  `reconnect` without `hostToken` doesn't regain host privileges; (e)
-  rate-limit and cap behavior.
+  match, verifying the fallback UI, then refreshing the tab and verifying
+  it's still renderable from the `joined` snapshot; (d) authorization
+  enforcement — a non-host `start`/`kick`/`update_settings` is rejected,
+  and a `reconnect` without `hostToken` doesn't regain host privileges;
+  (e) rate-limit and cap behavior; (f) a participant who disconnects
+  during `lobby` and stays disconnected through Start, verifying the
+  host's confirmation prompt and that their later `reconnect` attempt
+  gets `excluded_at_start`.
 
 ## Deployment
 
