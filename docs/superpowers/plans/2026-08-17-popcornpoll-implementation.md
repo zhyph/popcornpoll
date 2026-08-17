@@ -2535,13 +2535,17 @@ describe('recordVote + genreAffinity', () => {
   it('genreAffinity for a multi-genre candidate is the mean across its genres, not the sum', () => {
     let tally = emptyTally()
     for (let i = 0; i < 10; i++) tally = recordVote(tally, ['Comedy'], 'yes')
-    for (let i = 0; i < 10; i++) tally = recordVote(tally, ['Horror'], 'no')
-    const comedyOnly = genreAffinity(['Comedy'], tally)
-    const both = genreAffinity(['Comedy', 'Horror'], tally)
-    // averaging a strong positive with a strong negative pulls it toward 0,
-    // and specifically must not just be comedyOnly (which sum would produce
-    // for a positive-only case, but is a clean way to assert mean-not-sum here)
-    expect(both).toBeCloseTo((comedyOnly + genreAffinity(['Horror'], tally)) / 2, 5)
+    for (let i = 0; i < 2; i++) tally = recordVote(tally, ['Drama'], 'yes')
+    // Asymmetric magnitudes deliberately: Comedy = 10/(10+0+4) = 5/7 ≈ 0.7143,
+    // Drama = 2/(2+0+4) = 1/3 ≈ 0.3333. A correct mean gives ≈0.5238; a buggy
+    // sum would give ≈1.0476 — the two are far enough apart that this test
+    // actually distinguishes them, unlike a symmetric +/- pair (whose mean
+    // and sum-of-symmetric-opposites both collapse to 0 and prove nothing).
+    // The expected value is a hardcoded literal, not re-derived by calling
+    // genreAffinity again, so this doesn't tautologically pass regardless of
+    // which implementation is under test.
+    const both = genreAffinity(['Comedy', 'Drama'], tally)
+    expect(both).toBeCloseTo(0.52381, 4)
   })
 
   it('rebuilding a tally from scratch (kick) produces the same result as never having those votes', () => {
