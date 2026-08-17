@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPlexClient } from './client'
 
 const originalFetch = globalThis.fetch
@@ -46,6 +46,18 @@ describe('createPlexClient', () => {
         clientIdentifier: 'server-1',
         provides: 'server',
         connections: [{ uri: 'http://192.168.1.10:32400' }],
+      },
+      {
+        name: 'Remote Player',
+        clientIdentifier: 'player-1',
+        provides: 'player',
+        connections: [{ uri: 'http://192.168.1.5:3000' }],
+      },
+      {
+        name: 'Orphaned Server',
+        clientIdentifier: 'server-2',
+        provides: 'server',
+        connections: [],
       },
     ])
     const client = createPlexClient('client-id')
