@@ -54,4 +54,19 @@ describe('createApp', () => {
     const res = await fetch(`http://localhost:${port}/api/setup/plex/pin`)
     expect(res.status).toBe(401)
   })
+
+  it('survives a malformed-JSON POST to /api/setup/plex/callback without crashing', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    const res = await fetch(`http://localhost:${port}/api/setup/plex/callback`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin' },
+      body: '{not valid json',
+    })
+    expect(res.status).toBe(500)
+
+    // The server process must still be alive and serving other requests.
+    const healthRes = await fetch(`http://localhost:${port}/api/health`)
+    expect(healthRes.status).toBe(200)
+  })
 })

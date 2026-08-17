@@ -35,32 +35,38 @@ export function createApp(config: AppConfig) {
   const httpServer = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
     const chunks: Buffer[] = []
+    req.on('error', () => res.destroy())
     req.on('data', (c) => chunks.push(c))
     req.on('end', async () => {
-      const webReq = new Request(url, {
-        method: req.method,
-        headers: req.headers as Record<string, string>,
-        body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
-      })
-      let webRes: Response
-      if (url.pathname === '/api/health') webRes = await healthHandler(webReq)
-      else if (url.pathname === '/api/rooms' && req.method === 'POST') webRes = await roomsHandler(webReq)
-      else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
-      else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
-      else if (url.pathname === '/api/setup/plex/resync') {
-        webRes = await setupHandlers.resync(webReq)
-        if (webRes.status === 200) void librarySync.run()
-      } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
-      else {
-        res.writeHead(404).end()
-        return
+      try {
+        const webReq = new Request(url, {
+          method: req.method,
+          headers: req.headers as Record<string, string>,
+          body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+        })
+        let webRes: Response
+        if (url.pathname === '/api/health') webRes = await healthHandler(webReq)
+        else if (url.pathname === '/api/rooms' && req.method === 'POST') webRes = await roomsHandler(webReq)
+        else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
+        else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
+        else if (url.pathname === '/api/setup/plex/resync') {
+          webRes = await setupHandlers.resync(webReq)
+          if (webRes.status === 200) void librarySync.run()
+        } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
+        else {
+          res.writeHead(404).end()
+          return
+        }
+        const responseHeaders: Record<string, string> = {}
+        webRes.headers.forEach((value, key) => {
+          responseHeaders[key] = value
+        })
+        res.writeHead(webRes.status, responseHeaders)
+        res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
+      } catch {
+        if (!res.headersSent) res.writeHead(500)
+        res.end()
       }
-      const responseHeaders: Record<string, string> = {}
-      webRes.headers.forEach((value, key) => {
-        responseHeaders[key] = value
-      })
-      res.writeHead(webRes.status, responseHeaders)
-      res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
     })
   })
 
