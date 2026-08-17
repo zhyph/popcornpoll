@@ -2091,10 +2091,9 @@ export function createLibrarySync(deps: SyncDeps) {
           // enclosing function on its first iteration, silently dropping
           // every other item in the chunk from ever being upserted. This
           // was a real bug in an earlier draft of this code, caught by
-          // task review, not by the test suite below (which only ever
-          // exercises single-item chunks) — a concrete reminder that a
-          // multi-item-chunk test is worth having, not just single-item
-          // coverage.
+          // task review — the multi-item-chunk test below (added
+          // specifically because the original suite only ever exercised
+          // single-item chunks) is what would catch a regression here.
           upsertPlexRow(deps.db, runId, {
             plexRatingKey: item.ratingKey,
             tmdbId,
