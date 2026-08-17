@@ -7492,13 +7492,128 @@ git commit -m "feat: WS client, room creation/join/lobby pages, swipe deck"
 - Create: `e2e/exhaustion.spec.ts`
 - Create: `e2e/authorization.spec.ts`
 - Create: `e2e/exclusion.spec.ts`
+- Create: `server/plex/fakeClient.ts` (fake Plex client — the fixture-backed implementation the Global Constraints promised but no prior task built, Step 1)
+- Modify: `server/index.ts` (select the fake client under `FAKE_EXTERNAL_APIS`, auto-seed a fixture Plex link, await the resync sync synchronously in fake mode, Step 1)
 - Modify: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`, `server/room/roomStore.ts` (test-only env overrides, Step 1)
 - Modify: `components/SwipeDeck.tsx`, `app/room/[code]/page.tsx` (add `data-testid` hooks — attribute-only, no behavior change, Step 1)
 
 **Interfaces:**
 - Consumes: `createApp` (Task 21), running against `FAKE_EXTERNAL_APIS=true` with `POOL_SIZE_CAP` and `ROOM_RNG_SEED` overrides threaded through `buildPool`'s cap constant and `startRoom`'s rng seeding respectively (extend `buildPool`'s exported `POOL_CAP` to instead read `Number(process.env.POOL_SIZE_CAP) || 100` when `FAKE_EXTERNAL_APIS` is set, and `roomStore.create` to accept an optional seed override from `process.env.ROOM_RNG_SEED` under the same flag — small additions to Tasks 12 and 15's files, made as part of this task's Step 1). Also consumes `data-testid="swipe-card"` (Task 22's `SwipeDeck.tsx`) and `data-testid="match-banner"`/`data-testid="fallback"` (Task 22's `app/room/[code]/page.tsx`) as e2e test hooks — none of these existed before this task; the e2e specs are their only consumer.
 
-- [ ] **Step 1: Wire the two test-only overrides**
+- [ ] **Step 1: Build the fake Plex client, auto-seed a fixture link, and wire the two test-only overrides**
+
+The Global Constraints promise "Plex/TMDB clients are always called through an interface with a fake implementation, selected via `FAKE_EXTERNAL_APIS=true`" — but no task through Task 22 actually built that fake implementation; `createPlexClient` (Task 6) has no fake branch, and `server/index.ts` (Task 21) always constructs the real one. Without it, `librarySync.doRun()` returns `{ runId: -1, itemCount: 0 }` immediately (no Plex link saved), so no e2e scenario below could ever see a swipeable card. This step builds the missing piece — it's this task's job to close the gap, since e2e is the first consumer that actually needs it exercised end-to-end.
+
+Create `server/plex/fakeClient.ts`:
+
+```ts
+// server/plex/fakeClient.ts
+import type { PlexClient, PlexItem } from './client'
+
+// A fixed 10-title fixture set. Every guid is opaque (matches neither the
+// tmdb:// nor imdb:// prefix `parseGuid` looks for), so synced rows land
+// with tmdbId/imdbId both null — enrichment's `row.tmdbId === null` guard
+// and the imdb-backfill query's `imdb_id IS NOT NULL` filter both skip
+// these rows naturally, so no TMDB fixture is needed to keep this
+// FAKE_EXTERNAL_APIS path fully network-free.
+const FAKE_LIBRARY: PlexItem[] = [
+  { ratingKey: '1', title: 'The Velvet Reel', year: 2011, genres: ['Comedy', 'Drama'], guid: 'plex://movie/fake-1' },
+  { ratingKey: '2', title: 'Marquee Nights', year: 2015, genres: ['Romance', 'Comedy'], guid: 'plex://movie/fake-2' },
+  { ratingKey: '3', title: 'Brass and Bone', year: 2008, genres: ['Action', 'Thriller'], guid: 'plex://movie/fake-3' },
+  { ratingKey: '4', title: 'Ticket to Nowhere', year: 2019, genres: ['Drama'], guid: 'plex://movie/fake-4' },
+  { ratingKey: '5', title: 'The Last Matinee', year: 2003, genres: ['Horror', 'Comedy'], guid: 'plex://movie/fake-5' },
+  { ratingKey: '6', title: 'Popcorn Symphony', year: 2021, genres: ['Animation', 'Family'], guid: 'plex://movie/fake-6' },
+  { ratingKey: '7', title: 'Curtain Call', year: 1997, genres: ['Drama', 'Mystery'], guid: 'plex://movie/fake-7' },
+  { ratingKey: '8', title: 'Exit Row Seven', year: 2013, genres: ['Thriller'], guid: 'plex://movie/fake-8' },
+  { ratingKey: '9', title: 'Neon Marquee', year: 2018, genres: ['Sci-Fi', 'Action'], guid: 'plex://movie/fake-9' },
+  { ratingKey: '10', title: 'Reel to Reel', year: 2006, genres: ['Documentary'], guid: 'plex://movie/fake-10' },
+]
+
+export function createFakePlexClient(): PlexClient {
+  return {
+    async createPin() {
+      return { id: 1, code: 'FAKE' }
+    },
+    async checkPin() {
+      return { authToken: 'fake-token' }
+    },
+    async getResources() {
+      return [
+        { name: 'Fake Server', clientIdentifier: 'fake-client', connections: [{ uri: 'http://fake-plex.local' }] },
+      ]
+    },
+    async getLibrarySections() {
+      return [{ id: '1', title: 'Movies', type: 'movie' }]
+    },
+    async getLibraryItems() {
+      return FAKE_LIBRARY
+    },
+    async getThumb() {
+      return { body: null, contentType: null, status: 404 }
+    },
+  }
+}
+```
+
+In `server/index.ts`, add the imports and select the fake client, auto-seeding a fixture link so `librarySync` has something to sync against without a real OAuth flow:
+
+```ts
+// server/index.ts — add to the import block:
+import { createFakePlexClient } from './plex/fakeClient'
+import { getPlexLink, savePlexLink } from './plex/link'
+
+// server/index.ts — inside createApp(), before the existing
+// `const clientIdentifier = ...` line, insert:
+if (process.env.FAKE_EXTERNAL_APIS === 'true' && !getPlexLink(db, config.authEncryptionKey)) {
+  // e2e/dev fixture mode: seed a fake link so librarySync can run without a
+  // real OAuth flow — the fake client below ignores serverUrl/authToken.
+  savePlexLink(db, config.authEncryptionKey, {
+    clientIdentifier: 'fake-client',
+    serverUrl: 'http://fake-plex.local',
+    authToken: 'fake-token',
+    librarySectionIds: ['1'],
+    linkedAt: new Date().toISOString(),
+  })
+}
+
+// server/index.ts — replace:
+//   const plex = createPlexClient(clientIdentifier)
+// with:
+const plex =
+  process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakePlexClient() : createPlexClient(clientIdentifier)
+```
+
+`getPlexLink` is already imported in `server/index.ts` (Task 21) — add `savePlexLink` alongside it on the same import line rather than duplicating the import.
+
+Finally, in `server/index.ts`'s request-dispatch block, make the e2e resync path deterministic. The existing `/api/setup/plex/resync` branch fires `librarySync.run()` without awaiting it (correct for production — a real library sync shouldn't block the HTTP response) — but `e2e/fixtures.ts` (Step 3, below) needs the tiny 10-item fake sync to actually finish before it returns, or every spec races an empty pool. Await only in fake mode:
+
+```ts
+// server/index.ts — replace:
+//   else if (url.pathname === '/api/setup/plex/resync') {
+//     webRes = await setupHandlers.resync(webReq)
+//     if (webRes.status === 200) void librarySync.run()
+//   }
+// with:
+else if (url.pathname === '/api/setup/plex/resync') {
+  webRes = await setupHandlers.resync(webReq)
+  if (webRes.status === 200) {
+    if (process.env.FAKE_EXTERNAL_APIS === 'true') {
+      await librarySync.run() // e2e fixture mode: block so the caller can create a room immediately after
+    } else {
+      void librarySync.run()
+    }
+  }
+}
+```
+
+Run `npx vitest run` to confirm this didn't break any existing test (none of Tasks 1-21's tests set `FAKE_EXTERNAL_APIS=true`, so the new branches are inert for them), then commit this piece on its own:
+
+```bash
+git add server/plex/fakeClient.ts server/index.ts
+git commit -m "feat: fake Plex client + auto-seeded fixture link for FAKE_EXTERNAL_APIS mode"
+```
+
+Now wire the two remaining test-only overrides (pool size, RNG seed) and the e2e `data-testid` hooks.
 
 In `server/pool/buildPool.ts`, change the `POOL_CAP` constant to a function so tests can shrink it:
 
@@ -7611,11 +7726,12 @@ import { request } from '@playwright/test'
 
 export async function seedFakeLibrary(baseURL: string): Promise<void> {
   const ctx = await request.newContext({ baseURL })
-  // In FAKE_EXTERNAL_APIS mode, server/plex/client.ts's factory (extended in
-  // this task) returns a fixture-backed client whose getLibraryItems() yields
-  // a fixed 10-title fixture set — /api/setup/plex/resync (admin-token-gated)
-  // triggers a sync against it without needing a real Plex server reachable
-  // from the test runner.
+  // In FAKE_EXTERNAL_APIS mode (Step 1), server/index.ts selects
+  // createFakePlexClient() and auto-seeds a fixture Plex link, so
+  // /api/setup/plex/resync (admin-token-gated) syncs the 10-title fixture
+  // set with no real Plex server reachable from the test runner — and,
+  // in this mode only, the server awaits the sync before responding, so
+  // by the time this call resolves the library is already in the DB.
   await ctx.post('/api/setup/plex/resync', { headers: { Authorization: 'Bearer admin' } })
   await ctx.dispose()
 }
