@@ -569,6 +569,7 @@ describe('upsertTmdbOnlyRow + mergeTmdbOnlyIntoPlexRow', () => {
       genres: ['Sci-Fi'],
       rating: 8.1,
       voteCount: 12000,
+      lastUsedAt: null,
     })
     const plexRow = upsertPlexRow(db, 1, {
       plexRatingKey: 'pk-3',
@@ -637,6 +638,7 @@ describe('pruneStaleTmdbOnlyRows', () => {
       genres: [],
       rating: null,
       voteCount: null,
+      lastUsedAt: null,
     })
     db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(old.id)
 
@@ -651,6 +653,7 @@ describe('pruneStaleTmdbOnlyRows', () => {
       genres: [],
       rating: null,
       voteCount: null,
+      lastUsedAt: null,
     })
     db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(keep.id)
 
@@ -1050,7 +1053,10 @@ export interface PlexGuidSource {
 function extractId(guid: string, prefix: string): string | null {
   if (!guid.startsWith(prefix)) return null
   const withoutPrefix = guid.slice(prefix.length)
-  const withoutQuery = withoutPrefix.split('?')[0]
+  // String.split always returns at least one element, so this index is safe
+  // at runtime; the `?? ''` fallback exists only to satisfy
+  // noUncheckedIndexedAccess, not because the value can actually be missing.
+  const withoutQuery = withoutPrefix.split('?')[0] ?? ''
   return withoutQuery.length > 0 ? withoutQuery : null
 }
 
@@ -1383,7 +1389,10 @@ describe('createPlexClient', () => {
     const client = createPlexClient('client-id')
     const resources = await client.getResources('token')
     expect(resources).toHaveLength(1)
-    expect(resources[0].connections[0].uri).toBe('http://192.168.1.10:32400')
+    // Non-null assertions: this test's own mock guarantees a single resource
+    // with a single connection, so these are always defined at runtime —
+    // noUncheckedIndexedAccess just can't prove that from the array type.
+    expect(resources[0]!.connections[0]!.uri).toBe('http://192.168.1.10:32400')
   })
 
   it('getLibraryItems requests with includeGuids=1 and maps fields', async () => {
@@ -1404,8 +1413,8 @@ describe('createPlexClient', () => {
     const client = createPlexClient('client-id')
     const items = await client.getLibraryItems('http://192.168.1.10:32400', 'token', '1')
     expect(items).toHaveLength(1)
-    expect(items[0].ratingKey).toBe('100')
-    expect(items[0].genres).toEqual(['Sci-Fi'])
+    expect(items[0]!.ratingKey).toBe('100')
+    expect(items[0]!.genres).toEqual(['Sci-Fi'])
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('includeGuids=1'),
       expect.anything(),
@@ -1643,7 +1652,7 @@ describe('createTmdbClient', () => {
         voteCount: 12000,
       },
     ])
-    const calledUrl = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    const calledUrl = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string
     expect(calledUrl).toContain(`vote_count.gte=${TMDB_MIN_VOTE_COUNT}`)
     expect(calledUrl).toContain('sort_by=vote_average.desc')
   })
