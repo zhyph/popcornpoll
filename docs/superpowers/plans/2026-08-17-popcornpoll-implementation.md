@@ -5343,7 +5343,7 @@ export async function handleMessage(
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run server/ws/router.test.ts`
-Expected: PASS (7 tests)
+Expected: PASS (6 tests)
 
 - [ ] **Step 6: Commit**
 
