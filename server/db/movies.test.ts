@@ -89,6 +89,7 @@ describe('upsertTmdbOnlyRow + mergeTmdbOnlyIntoPlexRow', () => {
       genres: ['Sci-Fi'],
       rating: 8.1,
       voteCount: 12000,
+      lastUsedAt: null,
     })
     const plexRow = upsertPlexRow(db, 1, {
       plexRatingKey: 'pk-3',
@@ -157,6 +158,7 @@ describe('pruneStaleTmdbOnlyRows', () => {
       genres: [],
       rating: null,
       voteCount: null,
+      lastUsedAt: null,
     })
     db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(old.id)
 
@@ -171,6 +173,7 @@ describe('pruneStaleTmdbOnlyRows', () => {
       genres: [],
       rating: null,
       voteCount: null,
+      lastUsedAt: null,
     })
     db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(keep.id)
 

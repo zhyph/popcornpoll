@@ -6,7 +6,10 @@ export interface PlexGuidSource {
 function extractId(guid: string, prefix: string): string | null {
   if (!guid.startsWith(prefix)) return null
   const withoutPrefix = guid.slice(prefix.length)
-  const withoutQuery = withoutPrefix.split('?')[0]
+  // String.split always returns at least one element, so this index is safe
+  // at runtime; the `?? ''` fallback exists only to satisfy
+  // noUncheckedIndexedAccess, not because the value can actually be missing.
+  const withoutQuery = withoutPrefix.split('?')[0] ?? ''
   return withoutQuery.length > 0 ? withoutQuery : null
 }
 

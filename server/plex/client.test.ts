@@ -63,7 +63,7 @@ describe('createPlexClient', () => {
     const client = createPlexClient('client-id')
     const resources = await client.getResources('token')
     expect(resources).toHaveLength(1)
-    expect(resources[0].connections[0].uri).toBe('http://192.168.1.10:32400')
+    expect(resources[0]!.connections[0]!.uri).toBe('http://192.168.1.10:32400')
   })
 
   it('getLibraryItems requests with includeGuids=1 and maps fields', async () => {
@@ -84,8 +84,8 @@ describe('createPlexClient', () => {
     const client = createPlexClient('client-id')
     const items = await client.getLibraryItems('http://192.168.1.10:32400', 'token', '1')
     expect(items).toHaveLength(1)
-    expect(items[0].ratingKey).toBe('100')
-    expect(items[0].genres).toEqual(['Sci-Fi'])
+    expect(items[0]!.ratingKey).toBe('100')
+    expect(items[0]!.genres).toEqual(['Sci-Fi'])
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('includeGuids=1'),
       expect.anything(),

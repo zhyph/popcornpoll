@@ -50,7 +50,7 @@ describe('createTmdbClient', () => {
         voteCount: 12000,
       },
     ])
-    const calledUrl = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    const calledUrl = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string
     expect(calledUrl).toContain(`vote_count.gte=${TMDB_MIN_VOTE_COUNT}`)
     expect(calledUrl).toContain('sort_by=vote_average.desc')
   })
