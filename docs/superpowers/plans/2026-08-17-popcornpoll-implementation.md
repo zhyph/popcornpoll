@@ -1203,7 +1203,7 @@ Expected: FAIL — `server/plex/link.ts` does not exist yet.
 
 ```ts
 // server/plex/link.ts
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
 import type Database from 'better-sqlite3'
 
 export class DecryptionError extends Error {}
@@ -1217,9 +1217,15 @@ export interface PlexLink {
 }
 
 function deriveKey(key: string): Buffer {
-  // HKDF-style derivation: a single SHA-256 over the provided secret yields a
-  // fixed 32-byte AES-256 key regardless of the input string's own length.
-  return createHash('sha256').update(key).digest()
+  // Real HKDF (RFC 5869) via Node's built-in hkdfSync, per the spec's binding
+  // "key derived via HKDF" requirement — not a plain hash. Empty salt is
+  // standard practice when the input key material (AUTH_ENCRYPTION_KEY) is
+  // already expected to be high-entropy; `info` provides domain separation
+  // so this derivation can never collide with a key derived for another
+  // purpose from the same secret.
+  return Buffer.from(
+    hkdfSync('sha256', Buffer.from(key), Buffer.alloc(0), 'popcornpoll-plex-auth-token', 32),
+  )
 }
 
 function encrypt(plaintext: string, key: string): string {
@@ -1239,8 +1245,10 @@ function decrypt(encoded: string, key: string): string {
     const decipher = createDecipheriv('aes-256-gcm', deriveKey(key), iv)
     decipher.setAuthTag(authTag)
     return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf-8')
-  } catch {
-    throw new DecryptionError('Failed to decrypt stored Plex token — AUTH_ENCRYPTION_KEY may have changed')
+  } catch (err) {
+    throw new DecryptionError('Failed to decrypt stored Plex token — AUTH_ENCRYPTION_KEY may have changed', {
+      cause: err,
+    })
   }
 }
 
