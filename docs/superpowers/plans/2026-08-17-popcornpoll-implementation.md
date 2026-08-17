@@ -1899,6 +1899,31 @@ describe('createLibrarySync', () => {
     expect(row).toBeDefined()
   })
 
+  it('upserts every item in a chunk, not just the first — regression test for a real dropped-items bug', async () => {
+    const plex: Partial<PlexClient> = {
+      getLibraryItems: vi.fn().mockResolvedValue([
+        fakePlexItem({ ratingKey: 'multi-1' }),
+        fakePlexItem({ ratingKey: 'multi-2' }),
+        fakePlexItem({ ratingKey: 'multi-3' }),
+      ]),
+      getLibrarySections: vi.fn().mockResolvedValue([{ id: '1', title: 'Movies', type: 'movie' }]),
+    }
+    const tmdb: Partial<TmdbClient> = { findByImdbId: vi.fn(), getMovieDetails: vi.fn() }
+    const sync = createLibrarySync({
+      db,
+      plex: plex as PlexClient,
+      tmdb: tmdb as TmdbClient,
+      encryptionKey: KEY,
+      chunkSize: 2, // forces a chunk boundary mid-batch (2 items, then 1)
+    })
+    const result = await sync.run()
+    expect(result.itemCount).toBe(3)
+    for (const key of ['multi-1', 'multi-2', 'multi-3']) {
+      const row = db.prepare('SELECT * FROM movies WHERE plex_rating_key = ?').get(key)
+      expect(row).toBeDefined()
+    }
+  })
+
   it('sweeps items missing from the current scan to in_library=0', async () => {
     upsertPlexRow(db, 0, {
       plexRatingKey: 'gone',
@@ -2061,7 +2086,16 @@ export function createLibrarySync(deps: SyncDeps) {
       const upsertBatch = deps.db.transaction(() => {
         for (const item of batch) {
           const { tmdbId, imdbId } = parseGuid(item)
-          const row = upsertPlexRow(deps.db, runId, {
+          // No `return` here — this loop must run to completion for every
+          // item in the chunk. A `return` inside a `for` exits the whole
+          // enclosing function on its first iteration, silently dropping
+          // every other item in the chunk from ever being upserted. This
+          // was a real bug in an earlier draft of this code, caught by
+          // task review, not by the test suite below (which only ever
+          // exercises single-item chunks) — a concrete reminder that a
+          // multi-item-chunk test is worth having, not just single-item
+          // coverage.
+          upsertPlexRow(deps.db, runId, {
             plexRatingKey: item.ratingKey,
             tmdbId,
             imdbId,
@@ -2076,7 +2110,6 @@ export function createLibrarySync(deps: SyncDeps) {
             inLibrary: true,
             lastUsedAt: null,
           })
-          return row
         }
       })
       upsertBatch()
