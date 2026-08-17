@@ -22,6 +22,7 @@
 - TypeScript strict mode throughout. Vitest for unit tests, Playwright for end-to-end.
 - All UI work goes through the frontend-design skill's process, not default component styling — shadcn/ui (Radix-based) for structural components, react-bits (via the shadcn CLI's `@react-bits` registry) for ambient motion, hand-authored components for the bespoke signature element. Design tokens (palette, type, structural devices) are fixed in Task 22 — later UI work extends that system rather than introducing a new one.
 - Plex/TMDB clients are always called through an interface with a fake implementation, selected via `FAKE_EXTERNAL_APIS=true`, so no task's tests require network access or real credentials.
+- UI chrome is internationalized (Task 25): pt-BR is the default locale, en-US is available via a cookie-persisted switcher, no URL locale prefix — room links stay `/room/CODE`. Movie content (Plex/TMDB titles/overviews/genres) and room codes are not translated.
 
 ---
 
@@ -8339,3 +8340,458 @@ git add Dockerfile .dockerignore tsconfig.server.json README.md
 git commit -m "docs+chore: Dockerfile, healthcheck, and README"
 ```
 
+
+---
+
+## Task 25: Internationalization (next-intl, pt-BR default / en-US)
+
+**Goal:** every piece of UI chrome (button labels, headings, placeholders, toasts) and every WS-level user-facing error renders in the visitor's chosen language. Portuguese (Brazil) is the default for a first-time visitor; English (US) is available via a switcher, persisted per-browser (no URL-based locale routing — room links stay exactly `/room/CODE`, unchanged, so a host and guest can each view the same room in their own language).
+
+**Explicitly out of scope, and why:**
+- **Movie content** (title/overview/genres from Plex or TMDB) stays exactly as the source returns it. It's shared per-room state, not per-viewer UI chrome — translating it would mean re-fetching TMDB per participant's locale for content everyone in the room needs to see identically, a materially different and much larger feature than "localize the app's own copy."
+- **Room codes** (the 100-word list, e.g. `BLUE-FOX-427`) stay untranslated — they're opaque identifiers, not content a visitor reads for meaning.
+- **The `kicked`/room-eviction UX** (currently: the app has no `ws.on('kicked', ...)` handler at all — a kicked participant's socket is simply closed server-side with no client-side redirect or explanation screen) is a real, separate gap this task noticed but does not fix — it needs its own UX design, not a bolt-on translated toast. Flagged for a future task.
+
+**Files:**
+- Create: `i18n/request.ts`, `messages/pt-br.json`, `messages/en-us.json`, `messages/messages.test.ts`
+- Create: `components/LocaleSwitcher.tsx`
+- Modify: `next.config.js` (wrap with the next-intl plugin)
+- Modify: `app/layout.tsx` (wrap children in `NextIntlClientProvider`, render `LocaleSwitcher`)
+- Modify: `app/page.tsx`, `app/join/[code]/page.tsx`, `app/room/[code]/page.tsx`, `components/SwipeDeck.tsx`, `components/MarqueeReveal.tsx`, `components/RoomShare.tsx`, `components/TicketAvatar.tsx` (replace hardcoded copy with `useTranslations()`)
+- Modify: `e2e/fixtures.ts` (pin `locale=en-us` via a cookie for every e2e context, since Task 23's specs assert English copy and the app now defaults to pt-BR)
+- Modify: `package.json` (add `next-intl` dependency)
+
+**Interfaces:**
+- Consumes: `ParticipantView`, `ServerMessage` (Task 18's `server/ws/protocol.ts`) for the WS `error.code`/`kicked.reason`/`room_ended.reason` values this task adds translated copy for.
+- Produces: `useTranslations(namespace)` usage across every component listed above — a namespace per component/page (`createRoom`, `joinRoom`, `room`, `swipeDeck`, `marqueeReveal`, `roomShare`, `ticketAvatar`, `errors`, `kicked`, `common`), matching `messages/*.json`'s top-level keys exactly.
+
+- [ ] **Step 1: Install next-intl**
+
+```bash
+npm install next-intl
+```
+
+- [ ] **Step 2: Write the message dictionaries**
+
+Create `messages/pt-br.json`:
+
+```json
+{
+  "common": {
+    "appName": "PopcornPoll"
+  },
+  "createRoom": {
+    "title": "Sessão de hoje",
+    "candidateSourceLabel": "Fonte dos candidatos",
+    "candidateSourcePlex": "Somente biblioteca do Plex",
+    "candidateSourcePlexTmdb": "Plex + descoberta TMDB",
+    "matchRuleLabel": "Regra de match",
+    "matchRuleAll": "Todos precisam dizer sim",
+    "matchRuleMajority": "Maioria",
+    "matchRuleAtLeast": "Pelo menos N",
+    "atLeastNLabel": "N",
+    "filtersLabel": "Filtros",
+    "genreLabel": "Gênero",
+    "genrePlaceholder": "ex. Comédia",
+    "yearFromLabel": "Ano, a partir de",
+    "yearToLabel": "Ano, até",
+    "minRatingLabel": "Nota mínima",
+    "createButton": "Criar sala",
+    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB."
+  },
+  "joinRoom": {
+    "invitedTo": "Você foi convidado para",
+    "nameCardTitle": "Seu nome no ingresso",
+    "nameLabel": "Nome",
+    "namePlaceholder": "Seu nome",
+    "joinButton": "Entrar"
+  },
+  "room": {
+    "connecting": "Conectando…",
+    "admitted": "Admitidos",
+    "removeButton": "Remover",
+    "startButton": "Iniciar",
+    "buildingPool": "Montando seu catálogo…",
+    "noUnanimousPick": "Sem escolha unânime — mais próximas",
+    "endSession": "Encerrar sessão"
+  },
+  "swipeDeck": {
+    "inLibrary": "Na sua biblioteca",
+    "noMoreCards": "Não há mais filmes",
+    "yesAriaLabel": "Sim",
+    "noAriaLabel": "Não"
+  },
+  "marqueeReveal": {
+    "matchLabel": "Deu match",
+    "readyInLibrary": "Pronto para assistir na sua biblioteca"
+  },
+  "roomShare": {
+    "copyLink": "Copiar link",
+    "copied": "Copiado!",
+    "share": "Compartilhar",
+    "linkCopiedToast": "Link copiado",
+    "shareTitle": "Venha para minha sessão de cinema"
+  },
+  "ticketAvatar": {
+    "away": "ausente",
+    "done": "pronto"
+  },
+  "errors": {
+    "room_not_found": "Sala não encontrada.",
+    "already_started": "Esta sala já começou.",
+    "room_full": "Esta sala está cheia.",
+    "bad_token": "Sua sessão expirou. Atualize a página.",
+    "kicked": "Você foi removido desta sala.",
+    "not_host": "Somente o anfitrião pode fazer isso.",
+    "invalid_threshold": "Regra de match inválida.",
+    "not_enough_participants": "É preciso pelo menos 2 pessoas conectadas para começar.",
+    "pool_too_small": "Não há filmes suficientes para começar. Ajuste os filtros.",
+    "not_your_card": "Esse filme não é mais o seu card atual.",
+    "generic": "Algo deu errado."
+  },
+  "kicked": {
+    "kicked": "O anfitrião te removeu da sala.",
+    "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou."
+  },
+  "localeSwitcher": {
+    "english": "English",
+    "portuguese": "Português"
+  }
+}
+```
+
+Create `messages/en-us.json` — same keys, English values:
+
+```json
+{
+  "common": {
+    "appName": "PopcornPoll"
+  },
+  "createRoom": {
+    "title": "Tonight's showing",
+    "candidateSourceLabel": "Candidate source",
+    "candidateSourcePlex": "Plex library only",
+    "candidateSourcePlexTmdb": "Plex + TMDB discover",
+    "matchRuleLabel": "Match rule",
+    "matchRuleAll": "Everyone must say yes",
+    "matchRuleMajority": "Majority",
+    "matchRuleAtLeast": "At least N",
+    "atLeastNLabel": "N",
+    "filtersLabel": "Filters",
+    "genreLabel": "Genre",
+    "genrePlaceholder": "e.g. Comedy",
+    "yearFromLabel": "Year, from",
+    "yearToLabel": "Year, to",
+    "minRatingLabel": "Minimum rating",
+    "createButton": "Create room",
+    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."
+  },
+  "joinRoom": {
+    "invitedTo": "You're invited to",
+    "nameCardTitle": "Your name on the ticket",
+    "nameLabel": "Name",
+    "namePlaceholder": "Your name",
+    "joinButton": "Join"
+  },
+  "room": {
+    "connecting": "Connecting…",
+    "admitted": "Admitted",
+    "removeButton": "Remove",
+    "startButton": "Start",
+    "buildingPool": "Building your pool…",
+    "noUnanimousPick": "No unanimous pick — closest picks",
+    "endSession": "End session"
+  },
+  "swipeDeck": {
+    "inLibrary": "In your library",
+    "noMoreCards": "No more cards",
+    "yesAriaLabel": "Yes",
+    "noAriaLabel": "No"
+  },
+  "marqueeReveal": {
+    "matchLabel": "It's a match",
+    "readyInLibrary": "Ready to watch in your library"
+  },
+  "roomShare": {
+    "copyLink": "Copy link",
+    "copied": "Copied!",
+    "share": "Share",
+    "linkCopiedToast": "Link copied",
+    "shareTitle": "Join my movie night"
+  },
+  "ticketAvatar": {
+    "away": "away",
+    "done": "done"
+  },
+  "errors": {
+    "room_not_found": "Room not found.",
+    "already_started": "This room has already started.",
+    "room_full": "This room is full.",
+    "bad_token": "Your session expired. Refresh the page.",
+    "kicked": "You were removed from this room.",
+    "not_host": "Only the host can do that.",
+    "invalid_threshold": "Invalid match rule.",
+    "not_enough_participants": "At least 2 connected participants are needed to start.",
+    "pool_too_small": "Not enough movies to start. Try adjusting your filters.",
+    "not_your_card": "That movie is no longer your current card.",
+    "generic": "Something went wrong."
+  },
+  "kicked": {
+    "kicked": "The host removed you from the room.",
+    "excluded_at_start": "You were excluded because you were disconnected when the session started."
+  },
+  "localeSwitcher": {
+    "english": "English",
+    "portuguese": "Português"
+  }
+}
+```
+
+- [ ] **Step 3: Write the failing dictionary-parity test**
+
+The most common real-world i18n bug is a key added to one locale file and forgotten in the other — this test catches that mechanically, once, instead of relying on every future edit remembering to touch both files.
+
+```ts
+// messages/messages.test.ts
+import { describe, expect, it } from 'vitest'
+import ptBr from './pt-br.json'
+import enUs from './en-us.json'
+
+function keyPaths(obj: Record<string, unknown>, prefix = ''): string[] {
+  return Object.entries(obj).flatMap(([key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key
+    return typeof value === 'object' && value !== null ? keyPaths(value as Record<string, unknown>, path) : [path]
+  })
+}
+
+describe('message dictionaries', () => {
+  it('pt-br.json and en-us.json declare exactly the same keys', () => {
+    expect(keyPaths(ptBr).sort()).toEqual(keyPaths(enUs).sort())
+  })
+})
+```
+
+Run: `npx vitest run messages/messages.test.ts`
+Expected: PASS immediately, since both files above were written with identical key sets — this test's value is catching *future* drift, not proving today's files. Confirm it fails if you temporarily delete one key from either file, then restore it.
+
+- [ ] **Step 4: Write `i18n/request.ts`**
+
+```ts
+// i18n/request.ts
+import { cookies } from 'next/headers'
+import { getRequestConfig } from 'next-intl/server'
+
+export const SUPPORTED_LOCALES = ['pt-br', 'en-us'] as const
+export type Locale = (typeof SUPPORTED_LOCALES)[number]
+export const DEFAULT_LOCALE: Locale = 'pt-br'
+
+export function isSupportedLocale(value: string | undefined): value is Locale {
+  return SUPPORTED_LOCALES.includes(value as Locale)
+}
+
+export default getRequestConfig(async () => {
+  const store = await cookies()
+  const cookieLocale = store.get('locale')?.value
+  const locale: Locale = isSupportedLocale(cookieLocale) ? cookieLocale : DEFAULT_LOCALE
+  const messages = (await import(`../messages/${locale}.json`)).default
+  return { locale, messages }
+})
+```
+
+- [ ] **Step 5: Wire the plugin into `next.config.js`**
+
+```js
+// next.config.js
+import createNextIntlPlugin from 'next-intl/plugin'
+
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  images: {
+    remotePatterns: [{ protocol: 'https', hostname: 'image.tmdb.org' }],
+  },
+}
+
+export default withNextIntl(nextConfig)
+```
+
+- [ ] **Step 6: Write `components/LocaleSwitcher.tsx`**
+
+```tsx
+// components/LocaleSwitcher.tsx
+'use client'
+
+import { useTranslations, useLocale } from 'next-intl'
+import { useTransition } from 'react'
+import { Button } from './ui/button'
+import { setLocaleAction } from '../app/localeAction'
+import type { Locale } from '../i18n/request'
+
+export function LocaleSwitcher() {
+  const t = useTranslations('localeSwitcher')
+  const locale = useLocale()
+  const [isPending, startTransition] = useTransition()
+
+  function switchTo(next: Locale) {
+    if (next === locale) return
+    startTransition(() => {
+      void setLocaleAction(next)
+    })
+  }
+
+  return (
+    <div className="flex gap-1 font-mono text-xs uppercase tracking-widest text-brass">
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={isPending}
+        className={locale === 'pt-br' ? 'text-marquee' : 'text-brass'}
+        onClick={() => switchTo('pt-br')}
+      >
+        {t('portuguese')}
+      </Button>
+      <span>/</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={isPending}
+        className={locale === 'en-us' ? 'text-marquee' : 'text-brass'}
+        onClick={() => switchTo('en-us')}
+      >
+        {t('english')}
+      </Button>
+    </div>
+  )
+}
+```
+
+- [ ] **Step 7: Write the server action that persists the chosen locale**
+
+```ts
+// app/localeAction.ts
+'use server'
+
+import { cookies } from 'next/headers'
+import type { Locale } from '../i18n/request'
+
+export async function setLocaleAction(locale: Locale): Promise<void> {
+  const store = await cookies()
+  store.set('locale', locale, { maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' })
+}
+```
+
+- [ ] **Step 8: Wire `NextIntlClientProvider` and the switcher into `app/layout.tsx`**
+
+Read the current `app/layout.tsx` (Task 22, unchanged since) before editing — wrap its existing `children` in `NextIntlClientProvider` (no props needed; it inherits locale/messages from `i18n/request.ts` automatically) and render `<LocaleSwitcher />` once, in a fixed corner so it's reachable from every screen:
+
+```tsx
+// app/layout.tsx — wrap the existing <body> contents:
+import { NextIntlClientProvider } from 'next-intl'
+import { LocaleSwitcher } from '../components/LocaleSwitcher'
+// ...(keep every existing import from Task 22's layout.tsx)
+
+// inside the returned JSX, replace `<body ...>{children}</body>` with:
+<body className={/* keep Task 22's existing className exactly as-is */}>
+  <NextIntlClientProvider>
+    <div className="fixed right-4 top-4 z-50">
+      <LocaleSwitcher />
+    </div>
+    {children}
+  </NextIntlClientProvider>
+</body>
+```
+
+- [ ] **Step 9: Translate `app/page.tsx` (CreateRoomPage)**
+
+Add `import { useTranslations } from 'next-intl'` and `const t = useTranslations('createRoom')` at the top of the component. Replace every hardcoded string with its dictionary key, keeping every prop, className, and event handler exactly as Task 22 built them:
+
+| Was | Becomes |
+|---|---|
+| `Tonight's showing` | `{t('title')}` |
+| `Candidate source` | `{t('candidateSourceLabel')}` |
+| `Plex library only` | `{t('candidateSourcePlex')}` |
+| `Plex + TMDB discover` | `{t('candidateSourcePlexTmdb')}` |
+| `Match rule` | `{t('matchRuleLabel')}` |
+| `Everyone must say yes` | `{t('matchRuleAll')}` |
+| `Majority` | `{t('matchRuleMajority')}` |
+| `At least N` | `{t('matchRuleAtLeast')}` |
+| `<Label htmlFor="atLeastN">N</Label>` | `<Label htmlFor="atLeastN">{t('atLeastNLabel')}</Label>` |
+| `Filters` | `{t('filtersLabel')}` |
+| `<Label htmlFor="genre">Genre</Label>` | `<Label htmlFor="genre">{t('genreLabel')}</Label>` |
+| `placeholder="e.g. Comedy"` | `placeholder={t('genrePlaceholder')}` |
+| `Year, from` | `{t('yearFromLabel')}` |
+| `Year, to` | `{t('yearToLabel')}` |
+| `Minimum rating` | `{t('minRatingLabel')}` |
+| `Create room` | `{t('createButton')}` |
+| `This product uses the TMDB API...` | `{t('tmdbAttribution')}` |
+
+`POPCORNPOLL` (the `<h1>`) stays as a literal string — it's the brand name, not translatable content.
+
+- [ ] **Step 10: Translate `app/join/[code]/page.tsx` (JoinRoomPage)**
+
+Add `useTranslations('joinRoom')`. Replace: `You're invited to` → `{t('invitedTo')}`; `Your name on the ticket` → `{t('nameCardTitle')}`; `<Label htmlFor="displayName">Name</Label>` → `<Label htmlFor="displayName">{t('nameLabel')}</Label>`; `placeholder="Your name"` → `placeholder={t('namePlaceholder')}`; `Join` → `{t('joinButton')}`.
+
+- [ ] **Step 11: Translate `app/room/[code]/page.tsx` (RoomPage)**
+
+Add `useTranslations('room')` and `useTranslations('errors')`. Replace: `Connecting…` → `{t('connecting')}`; `Admitted` → `{t('admitted')}`; `Remove` → `{t('removeButton')}`; `Start` → `{t('startButton')}`; `Building your pool…` → `{t('buildingPool')}`; `No unanimous pick — closest picks` → `{t('noUnanimousPick')}`; `End session` → `{t('endSession')}`.
+
+Also add error surfacing — there is currently no `ws.on('error', ...)` handler anywhere in this file, so no WS-level error, translated or not, ever reaches a participant. Add one, using the same `sonner` `toast()` pattern `RoomShare.tsx` already established in Task 22:
+
+```tsx
+// app/room/[code]/page.tsx — add this import:
+import { toast } from 'sonner'
+
+// app/room/[code]/page.tsx — add alongside the other ws.on(...) subscriptions in the effect:
+const unsubError = ws.on('error', (msg) => {
+  toast(tErrors.has(msg.code) ? tErrors(msg.code) : tErrors('generic'))
+})
+
+// add unsubError() to the effect's cleanup return, alongside the other unsub calls
+```
+
+(`tErrors.has(...)` — `next-intl`'s translation function exposes a `.has(key)` check for exactly this "look up a dynamic, server-supplied key with a safe fallback" case; use it rather than a try/catch.)
+
+- [ ] **Step 12: Translate `components/SwipeDeck.tsx`, `components/MarqueeReveal.tsx`, `components/RoomShare.tsx`, `components/TicketAvatar.tsx`**
+
+`SwipeDeck.tsx` — add `useTranslations('swipeDeck')`. Replace: `In your library` → `{t('inLibrary')}`; `No more cards` → `{t('noMoreCards')}`; `aria-label="No"` → `aria-label={t('noAriaLabel')}`; `aria-label="Yes"` → `aria-label={t('yesAriaLabel')}`.
+
+`MarqueeReveal.tsx` — add `useTranslations('marqueeReveal')`. Replace: `It's a match` → `{t('matchLabel')}`; `Ready to watch in your library` → `{t('readyInLibrary')}`.
+
+`RoomShare.tsx` — add `useTranslations('roomShare')`. Replace: `Copied!` / `Copy link` → `{copied ? t('copied') : t('copyLink')}`; `Share` → `{t('share')}`; `toast('Link copied')` → `toast(t('linkCopiedToast'))`; `navigator.share({ title: 'Join my movie night', url: joinUrl })` → `navigator.share({ title: t('shareTitle'), url: joinUrl })`.
+
+`TicketAvatar.tsx` — add `useTranslations('ticketAvatar')`. Replace: `away` → `{t('away')}`; `done` → `{t('done')}`.
+
+- [ ] **Step 13: Pin the e2e suite to English so Task 23's existing assertions keep passing**
+
+Task 23's specs assert English copy (`text=Create room`, `text=Join`, `text=Start`, `text=Admitted`, `input[placeholder="Your name"]`, `button[aria-label="Yes"/"No"]`, `text=Connecting`). The app now defaults to pt-BR, which would break every one of them — not because they're wrong, but because they never pinned a locale in the first place, which was already a latent gap this task's own default-locale change exposes.
+
+```ts
+// e2e/fixtures.ts — add this export alongside seedFakeLibrary:
+import type { BrowserContext } from '@playwright/test'
+
+export async function pinEnglishLocale(context: BrowserContext, baseURL: string): Promise<void> {
+  const url = new URL(baseURL)
+  await context.addCookies([{ name: 'locale', value: 'en-us', domain: url.hostname, path: '/' }])
+}
+```
+
+In each of `e2e/match.spec.ts`, `e2e/reconnect.spec.ts`, `e2e/exhaustion.spec.ts`, `e2e/authorization.spec.ts`, `e2e/exclusion.spec.ts`, import `pinEnglishLocale` alongside the existing `seedFakeLibrary` import, and call `await pinEnglishLocale(context, baseURL!)` on every `browser.newContext()` result immediately after creating it and before the first `.newPage()`/`.goto()` call on that context (there are 2-3 contexts per spec — every one needs the cookie, since each is an independent browser profile).
+
+- [ ] **Step 14: Run the full suite**
+
+Run: `npx vitest run`
+Expected: PASS — all tests from Tasks 1-24 plus this task's new `messages/messages.test.ts`.
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+Run: `npm run test:e2e`
+Expected: PASS — same specs as Task 23, now passing against an app whose default locale is pt-BR because every spec pins `en-us` explicitly.
+
+- [ ] **Step 15: Commit**
+
+```bash
+git add package.json package-lock.json next.config.js i18n messages components/LocaleSwitcher.tsx app/localeAction.ts app/layout.tsx app/page.tsx "app/join/[code]/page.tsx" "app/room/[code]/page.tsx" components/SwipeDeck.tsx components/MarqueeReveal.tsx components/RoomShare.tsx components/TicketAvatar.tsx e2e
+git commit -m "feat: internationalization via next-intl — pt-BR default, en-US option, cookie-based (no URL locale prefix)"
+```
