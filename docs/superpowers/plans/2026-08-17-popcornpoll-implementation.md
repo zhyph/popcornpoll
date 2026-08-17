@@ -4095,7 +4095,7 @@ export function updateSettings(
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run server/room/actions.test.ts`
-Expected: PASS (19 tests)
+Expected: PASS (20 tests)
 
 - [ ] **Step 6: Commit**
 
