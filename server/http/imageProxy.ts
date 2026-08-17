@@ -5,7 +5,7 @@ import type { PlexClient } from '../plex/client'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
-function capStreamSize(stream: ReadableStream, maxBytes: number): ReadableStream {
+function capStreamSize(stream: ReadableStream<Uint8Array>, maxBytes: number): ReadableStream<Uint8Array> {
   let total = 0
   return stream.pipeThrough(
     new TransformStream({
