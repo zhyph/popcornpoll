@@ -49,7 +49,7 @@ export function createLibrarySync(deps: SyncDeps) {
       const upsertBatch = deps.db.transaction(() => {
         for (const item of batch) {
           const { tmdbId, imdbId } = parseGuid(item)
-          const row = upsertPlexRow(deps.db, runId, {
+          upsertPlexRow(deps.db, runId, {
             plexRatingKey: item.ratingKey,
             tmdbId,
             imdbId,
@@ -64,7 +64,6 @@ export function createLibrarySync(deps: SyncDeps) {
             inLibrary: true,
             lastUsedAt: null,
           })
-          return row
         }
       })
       upsertBatch()
