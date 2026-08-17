@@ -3491,7 +3491,7 @@ export function clampThreshold(threshold: MatchThreshold, participantCount: numb
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `npx vitest run server/room/matchThreshold.test.ts`
-Expected: PASS (7 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 6: Write the failing tokens test**
 
