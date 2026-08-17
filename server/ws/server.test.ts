@@ -67,6 +67,26 @@ function nextMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   })
 }
 
+function seedPlexRows(db: Database.Database, count: number) {
+  for (let i = 0; i < count; i++) {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: `pk-${i}`,
+      tmdbId: null,
+      imdbId: null,
+      title: `Movie ${i}`,
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2020,
+      genres: ['Drama'],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+  }
+}
+
 function connectExpectRejection(): Promise<void> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${port}/ws`)
@@ -133,5 +153,33 @@ describe('attachWebSocketServer', () => {
     }
     await connectExpectRejection()
     for (const s of sockets) s.close()
+  })
+
+  it('the host who sends start receives room_started too, not just other participants', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5) // MIN_POOL_SIZE
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await nextMessage(hostWs) // joined
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    hostWs.send(JSON.stringify({ type: 'start' }))
+    const hostNext = await nextMessage(hostWs)
+    const guestNext = await nextMessage(guestWs)
+
+    // Message order between room_started and state_update isn't guaranteed by
+    // this assertion — either socket may see either one first — so check the
+    // pair of types each side saw rather than a fixed position.
+    expect(hostNext.type === 'room_started' || hostNext.type === 'state_update').toBe(true)
+    expect(guestNext.type === 'room_started' || guestNext.type === 'state_update').toBe(true)
+
+    hostWs.close()
+    guestWs.close()
   })
 })

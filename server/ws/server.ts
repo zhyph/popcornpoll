@@ -104,7 +104,6 @@ export function attachWebSocketServer(
         if (room) {
           for (const [otherWs, otherMeta] of sockets) {
             if (otherMeta.state.roomCode !== meta.state.roomCode) continue
-            if (otherWs === ws) continue
             for (const m of result.toRoom) send(otherWs, m)
           }
         }
