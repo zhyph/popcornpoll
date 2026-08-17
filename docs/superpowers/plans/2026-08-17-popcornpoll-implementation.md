@@ -7495,6 +7495,7 @@ git commit -m "feat: WS client, room creation/join/lobby pages, swipe deck"
 - Create: `server/plex/fakeClient.ts` (fake Plex client — the fixture-backed implementation the Global Constraints promised but no prior task built, Step 1)
 - Modify: `server/index.ts` (select the fake client under `FAKE_EXTERNAL_APIS`, auto-seed a fixture Plex link, await the resync sync synchronously in fake mode; wire Next.js's request handler into the custom server, since no task before this one ever served a page over HTTP, Step 1)
 - Modify: `server/index.test.ts` (opt its four `/api/*`-only tests out of frontend serving via `skipFrontend: true`, Step 1)
+- Modify: `server/ws/server.ts`, `server/ws/server.test.ts` (broadcast `toRoom` to every participant including the sender — the host who starts a room previously never saw it start, Step 1)
 - Modify: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`, `server/room/roomStore.ts` (test-only env overrides, Step 1)
 - Modify: `components/SwipeDeck.tsx`, `app/room/[code]/page.tsx` (add `data-testid` hooks — attribute-only, no behavior change, Step 1)
 
@@ -7718,6 +7719,98 @@ git commit -m "fix: wire Next.js request handling into the custom server — no 
 ```
 
 **Note for whoever builds Task 24 (deployment):** the production `start` script runs `node dist/server/index.js`, which now calls `next({ dev: false })` at startup — this requires the `.next` build output (from `next build`, already the first half of the `build` script) to be present alongside the compiled server code in the runtime image, not just the `dist/` output from `tsc -p tsconfig.server.json`. Make sure the Dockerfile's runtime stage copies `.next/`, `public/` (if any), `next.config.js`, and `package.json`/`node_modules` (Next needs its own runtime deps available), not only `dist/`.
+
+**A third bug, also discovered by this task and also fixed here:** `server/ws/server.ts`'s `toRoom` delivery loop explicitly excludes the sender (`if (otherWs === ws) continue`, from Task 19). This is correct for `swipe` only in the sense that the swiper's own next card comes through `toSender` — but `state_update`/`match`/`exhausted`/`room_started`/`room_ended` are room-wide facts every connected participant needs, the acting participant included, and every one of `start`/`kick`/`update_settings`/`end_room`'s success paths puts its entire payload in `toRoom` with nothing in `toSender`. Since only the host can ever send `start`, and no one else's action can retroactively deliver it, the host who clicks Start never learns the room started and stays stuck on the lobby screen forever — confirmed live via Playwright by this task, not guessed. `matches`/`exhausted` reaching the swiper who caused them has the same bug, just less visible (another participant's next action happens to relay it).
+
+Fix: broadcast `toRoom` to every socket in the room, including the sender. `next_card` stays correctly sender-specific because it's still delivered separately via `toSender` — nothing about that channel changes.
+
+```ts
+// server/ws/server.ts — replace:
+//   if (result.toRoom.length > 0 && meta.state.roomCode) {
+//     const room = store.get(meta.state.roomCode)
+//     if (room) {
+//       for (const [otherWs, otherMeta] of sockets) {
+//         if (otherMeta.state.roomCode !== meta.state.roomCode) continue
+//         if (otherWs === ws) continue
+//         for (const m of result.toRoom) send(otherWs, m)
+//       }
+//     }
+//   }
+// with:
+if (result.toRoom.length > 0 && meta.state.roomCode) {
+  const room = store.get(meta.state.roomCode)
+  if (room) {
+    for (const [otherWs, otherMeta] of sockets) {
+      if (otherMeta.state.roomCode !== meta.state.roomCode) continue
+      for (const m of result.toRoom) send(otherWs, m)
+    }
+  }
+}
+```
+
+Add a regression test to `server/ws/server.test.ts` proving the actor now receives their own room-wide broadcast (this exact scenario — two participants, the host sends `start`, the host's own socket must see `room_started` — is what was silently broken):
+
+```ts
+// server/ws/server.test.ts — add this import alongside the existing ones:
+import { upsertPlexRow } from '../db/movies'
+
+// server/ws/server.test.ts — add this helper near `connectExpectRejection`:
+function seedPlexRows(db: Database.Database, count: number) {
+  for (let i = 0; i < count; i++) {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: `pk-${i}`,
+      tmdbId: null,
+      imdbId: null,
+      title: `Movie ${i}`,
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2020,
+      genres: ['Drama'],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+  }
+}
+
+// server/ws/server.test.ts — add inside the `describe('attachWebSocketServer', ...)` block:
+it('the host who sends start receives room_started too, not just other participants', async () => {
+  const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+  const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+  seedPlexRows(db, 5) // MIN_POOL_SIZE
+
+  const hostWs = await connect()
+  hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+  await nextMessage(hostWs) // joined
+
+  const guestWs = await connect()
+  guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+  await nextMessage(guestWs) // joined
+  await nextMessage(hostWs) // state_update for the guest's join
+
+  hostWs.send(JSON.stringify({ type: 'start' }))
+  const hostNext = await nextMessage(hostWs)
+  const guestNext = await nextMessage(guestWs)
+
+  // Message order between room_started and state_update isn't guaranteed by
+  // this assertion — either socket may see either one first — so check the
+  // pair of types each side saw rather than a fixed position.
+  expect(hostNext.type === 'room_started' || hostNext.type === 'state_update').toBe(true)
+  expect(guestNext.type === 'room_started' || guestNext.type === 'state_update').toBe(true)
+
+  hostWs.close()
+  guestWs.close()
+})
+```
+
+Run `npx vitest run server/ws/server.test.ts` (RED first if you want to see it fail against the unpatched loop, then GREEN after the fix), then the full `npx vitest run`, then commit:
+
+```bash
+git add server/ws/server.ts server/ws/server.test.ts
+git commit -m "fix: broadcast toRoom to every participant including the sender — the host who starts a room never saw it start"
+```
 
 Now wire the two remaining test-only overrides (pool size, RNG seed) and the e2e `data-testid` hooks.
 
