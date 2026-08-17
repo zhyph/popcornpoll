@@ -5280,6 +5280,17 @@ export async function handleMessage(
           { type: 'room_started', pool: room.pool, seq: update.seq },
           update,
         ],
+        // startRoom() already assigned every participant a pendingCardId
+        // (server-side state is correct from the moment it returns) — but
+        // pendingCardId is per-participant, so it can never ride the
+        // room-wide `state_update`/`room_started` broadcast above. Without
+        // this, no one who was already connected when Start fired ever
+        // receives a live next_card; only a later reconnect/resync would
+        // surface it, via `joined`'s room.pendingCardId field.
+        toParticipant: Array.from(room.participants.values()).map((p) => ({
+          participantId: p.id,
+          messages: [{ type: 'next_card', movieId: p.pendingCardId }],
+        })),
       }
     }
 
@@ -7497,6 +7508,7 @@ git commit -m "feat: WS client, room creation/join/lobby pages, swipe deck"
 - Modify: `server/index.ts` (select the fake client under `FAKE_EXTERNAL_APIS`, auto-seed a fixture Plex link, await the resync sync synchronously in fake mode; wire Next.js's request handler into the custom server, since no task before this one ever served a page over HTTP, Step 1)
 - Modify: `server/index.test.ts` (opt its four `/api/*`-only tests out of frontend serving via `skipFrontend: true`, Step 1)
 - Modify: `server/ws/server.ts`, `server/ws/server.test.ts` (broadcast `toRoom` to every participant including the sender — the host who starts a room previously never saw it start, Step 1)
+- Modify: `server/ws/router.ts`, `server/ws/router.test.ts` (`'start'` now pushes each participant's already-assigned `pendingCardId` via `toParticipant`, since it's per-participant and can never ride the room-wide broadcast, Step 1)
 - Modify: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`, `server/room/roomStore.ts` (test-only env overrides, Step 1)
 - Modify: `components/SwipeDeck.tsx`, `app/room/[code]/page.tsx` (add `data-testid` hooks — attribute-only, no behavior change, Step 1)
 
@@ -7811,6 +7823,52 @@ Run `npx vitest run server/ws/server.test.ts` (RED first if you want to see it f
 ```bash
 git add server/ws/server.ts server/ws/server.test.ts
 git commit -m "fix: broadcast toRoom to every participant including the sender — the host who starts a room never saw it start"
+```
+
+**A fourth bug, discovered after the toRoom-exclusion fix and also fixed here:** with the sender-exclusion gone, the host now correctly learns the room started — but no one (host or guest) who was already connected during the lobby ever receives a live `next_card`. `startRoom()` (Task 15) already assigns every participant a `pendingCardId` server-side — confirmed correct, since a reload/reconnect immediately shows the right card via `joined`'s `room.pendingCardId` field — but `pendingCardId` is per-participant, so it can never ride `state_update`/`room_started`, and the `'start'` case in `server/ws/router.ts` never sends anything through `toParticipant` (the one channel that *can* target a specific participant, exactly like `'kick'` already does).
+
+```ts
+// server/ws/router.ts — inside the 'start' case, replace:
+//   return {
+//     ...emptyOutput(state),
+//     toRoom: [
+//       { type: 'room_started', pool: room.pool, seq: update.seq },
+//       update,
+//     ],
+//   }
+// with:
+return {
+  ...emptyOutput(state),
+  toRoom: [
+    { type: 'room_started', pool: room.pool, seq: update.seq },
+    update,
+  ],
+  toParticipant: Array.from(room.participants.values()).map((p) => ({
+    participantId: p.id,
+    messages: [{ type: 'next_card', movieId: p.pendingCardId }],
+  })),
+}
+```
+
+Extend the existing `'a successful start emits room_started...'` test in `server/ws/router.test.ts` (`describe('handleMessage: start + room_started', ...)`) to also assert both participants get their `next_card`:
+
+```ts
+// server/ws/router.test.ts — inside the existing 'a successful start emits room_started...' test,
+// after the existing `started`/`stateUpdate` assertions, add:
+const room = store.get(code)!
+const hostId = state.participantId!
+const otherId = Array.from(room.participants.keys()).find((id) => id !== hostId)!
+const hostCard = result.toParticipant.find((t) => t.participantId === hostId)
+const otherCard = result.toParticipant.find((t) => t.participantId === otherId)
+expect(hostCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(hostId)!.pendingCardId }])
+expect(otherCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(otherId)!.pendingCardId }])
+```
+
+Run `npx vitest run server/ws/router.test.ts`, then the full `npx vitest run`, then commit:
+
+```bash
+git add server/ws/router.ts server/ws/router.test.ts
+git commit -m "fix: start emits next_card to every already-connected participant via toParticipant, not just on a later reconnect"
 ```
 
 Now wire the two remaining test-only overrides (pool size, RNG seed) and the e2e `data-testid` hooks.
