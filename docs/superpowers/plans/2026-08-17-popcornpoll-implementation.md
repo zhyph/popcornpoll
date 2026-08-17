@@ -6401,32 +6401,49 @@ export function createApp(config: AppConfig) {
   const httpServer = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
     const chunks: Buffer[] = []
+    // A stream 'error' (client aborts mid-upload, malformed transfer-encoding)
+    // is an EventEmitter error with no listener otherwise — Node's default
+    // behavior for that is to throw, which crashes this single-replica
+    // process over one bad connection. Same failure class as the request
+    // dispatch itself below; both need an explicit boundary.
+    req.on('error', () => res.destroy())
     req.on('data', (c) => chunks.push(c))
     req.on('end', async () => {
-      const webReq = new Request(url, {
-        method: req.method,
-        headers: req.headers as Record<string, string>,
-        body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
-      })
-      let webRes: Response
-      if (url.pathname === '/api/health') webRes = await healthHandler(webReq)
-      else if (url.pathname === '/api/rooms' && req.method === 'POST') webRes = await roomsHandler(webReq)
-      else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
-      else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
-      else if (url.pathname === '/api/setup/plex/resync') {
-        webRes = await setupHandlers.resync(webReq)
-        if (webRes.status === 200) void librarySync.run()
-      } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
-      else {
-        res.writeHead(404).end()
-        return
+      try {
+        const webReq = new Request(url, {
+          method: req.method,
+          headers: req.headers as Record<string, string>,
+          body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+        })
+        let webRes: Response
+        if (url.pathname === '/api/health') webRes = await healthHandler(webReq)
+        else if (url.pathname === '/api/rooms' && req.method === 'POST') webRes = await roomsHandler(webReq)
+        else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
+        else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
+        else if (url.pathname === '/api/setup/plex/resync') {
+          webRes = await setupHandlers.resync(webReq)
+          if (webRes.status === 200) void librarySync.run()
+        } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
+        else {
+          res.writeHead(404).end()
+          return
+        }
+        const headerObj: Record<string, string> = {}
+        webRes.headers.forEach((value, key) => {
+          headerObj[key] = value
+        })
+        res.writeHead(webRes.status, headerObj)
+        res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
+      } catch {
+        // Any handler throwing (e.g. a malformed-JSON body reaching a route
+        // that doesn't itself catch req.json() failures) must not crash the
+        // whole process over one bad request — this is the boundary that
+        // makes that true. A live-reproduced bug before this fix: a
+        // malformed-JSON POST to /api/setup/plex/callback took down the
+        // entire server via an unhandled promise rejection.
+        if (!res.headersSent) res.writeHead(500)
+        res.end()
       }
-      const headerObj: Record<string, string> = {}
-      webRes.headers.forEach((value, key) => {
-        headerObj[key] = value
-      })
-      res.writeHead(webRes.status, headerObj)
-      res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
     })
   })
 
