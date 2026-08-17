@@ -129,13 +129,17 @@ export default defineConfig({
 
 ```js
 /** @type {import('next').NextConfig} */
+// package.json declares "type": "module", so this file is loaded as ESM —
+// `module.exports` would throw ReferenceError at Next.js build time. This
+// bug went undetected until Task 22 was the first task to actually run
+// `next build`; fixed here so it's caught by then, not discovered fresh.
 const nextConfig = {
   images: {
     remotePatterns: [{ protocol: 'https', hostname: 'image.tmdb.org' }],
   },
 }
 
-module.exports = nextConfig
+export default nextConfig
 ```
 
 - [ ] **Step 5: Write `.gitignore` and `.env.example`**
