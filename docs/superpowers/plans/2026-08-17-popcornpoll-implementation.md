@@ -6023,7 +6023,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
-import { upsertPlexRow } from '../db/movies'
+import { upsertPlexRow, upsertTmdbOnlyRow } from '../db/movies'
 import { savePlexLink } from '../plex/link'
 import { createImageProxyHandler } from './imageProxy'
 import type Database from 'better-sqlite3'
@@ -6061,8 +6061,11 @@ describe('createImageProxyHandler', () => {
   })
 
   it('rejects a movieId whose poster_source is tmdb, not plex', async () => {
-    const row = upsertPlexRow(db, 1, {
-      plexRatingKey: null as unknown as string,
+    // upsertTmdbOnlyRow, not upsertPlexRow — it's the function that actually
+    // represents a TMDB-sourced row (plex_rating_key genuinely NULL, not a
+    // type-unsafe cast forcing null through a function whose real contract
+    // requires a non-null plexRatingKey).
+    const row = upsertTmdbOnlyRow(db, {
       tmdbId: 1,
       imdbId: null,
       title: 'X',
@@ -6073,8 +6076,6 @@ describe('createImageProxyHandler', () => {
       genres: [],
       rating: null,
       voteCount: null,
-      inLibrary: false,
-      lastUsedAt: null,
     })
     const plex: Partial<PlexClient> = { getThumb: vi.fn() }
     const handler = createImageProxyHandler(db, KEY, plex as PlexClient)
@@ -6125,6 +6126,28 @@ import { findById } from '../db/movies'
 import { getPlexLink } from '../plex/link'
 import type { PlexClient } from '../plex/client'
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+// Enforces the spec's response-size cap on the proxied stream — Plex is a
+// trusted upstream by design (it's the household's own server), but the cap
+// is still real defense-in-depth against a misconfigured server or a bug in
+// Plex's own thumb endpoint streaming something unbounded through this proxy.
+function capStreamSize(stream: ReadableStream, maxBytes: number): ReadableStream {
+  let total = 0
+  return stream.pipeThrough(
+    new TransformStream({
+      transform(chunk: Uint8Array, controller) {
+        total += chunk.byteLength
+        if (total > maxBytes) {
+          controller.error(new Error('Image exceeds size cap'))
+          return
+        }
+        controller.enqueue(chunk)
+      },
+    }),
+  )
+}
+
 export function createImageProxyHandler(
   db: Database.Database,
   encryptionKey: string,
@@ -6149,7 +6172,7 @@ export function createImageProxyHandler(
       return new Response(null, { status: 502 })
     }
 
-    return new Response(thumb.body, {
+    return new Response(capStreamSize(thumb.body, MAX_IMAGE_BYTES), {
       status: 200,
       headers: {
         'Content-Type': thumb.contentType,
