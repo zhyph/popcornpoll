@@ -4531,7 +4531,6 @@ git commit -m "feat: start transition, pendingCard-gated swipes, match evaluatio
 ```ts
 // server/room/lifecycle.test.ts
 import { describe, expect, it } from 'vitest'
-import { joinRoom } from './actions'
 import {
   EVICTION_DELAY_MS,
   INACTIVITY_TIMEOUT_MS,
@@ -4586,6 +4585,19 @@ describe('sweepInactiveRooms', () => {
     const ended = sweepInactiveRooms(store, Date.now() + INACTIVITY_TIMEOUT_MS * 2)
     expect(ended).toEqual([])
   })
+
+  it('processes every eligible room when multiple rooms are inactive, not just the first', () => {
+    const store = createRoomStore()
+    const codes = [store.create({ kind: 'all' }, 'plex', {}).code, store.create({ kind: 'all' }, 'plex', {}).code, store.create({ kind: 'all' }, 'plex', {}).code]
+    for (const code of codes) {
+      store.get(code)!.lastActivityAt = Date.now() - INACTIVITY_TIMEOUT_MS - 1000
+    }
+    const ended = sweepInactiveRooms(store, Date.now())
+    expect(ended.sort()).toEqual([...codes].sort())
+    for (const code of codes) {
+      expect(store.get(code)!.status).toBe('ended')
+    }
+  })
 })
 
 describe('touchActivity', () => {
@@ -4627,6 +4639,20 @@ describe('sweepEvictions', () => {
     const evicted = sweepEvictions(store, Date.now() + EVICTION_DELAY_MS * 10)
     expect(evicted).toEqual([])
     expect(store.get(code)).toBeDefined()
+  })
+
+  it('processes every eligible room when multiple rooms are past eviction delay, not just the first', () => {
+    const store = createRoomStore()
+    const codes = [store.create({ kind: 'all' }, 'plex', {}).code, store.create({ kind: 'all' }, 'plex', {}).code, store.create({ kind: 'all' }, 'plex', {}).code]
+    for (const code of codes) {
+      endRoom(store, code, true)
+      store.get(code)!.endedAt = Date.now() - EVICTION_DELAY_MS - 1000
+    }
+    const evicted = sweepEvictions(store, Date.now())
+    expect(evicted.sort()).toEqual([...codes].sort())
+    for (const code of codes) {
+      expect(store.get(code)).toBeUndefined()
+    }
   })
 })
 ```
@@ -4696,7 +4722,7 @@ export function sweepEvictions(store: RoomStore, now: number): string[] {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run server/room/lifecycle.test.ts`
-Expected: PASS (9 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 5: Commit**
 
