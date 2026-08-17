@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ConfigError, loadConfig } from './config'
 
 const validEnv = {
+  NODE_ENV: 'test' as const,
   TMDB_API_KEY: 'tmdb-key',
   AUTH_ENCRYPTION_KEY: 'a'.repeat(32),
   ADMIN_SETUP_TOKEN: 'setup-token',
@@ -25,9 +26,9 @@ describe('loadConfig', () => {
   })
 
   it('throws ConfigError listing every missing required var', () => {
-    expect(() => loadConfig({})).toThrow(ConfigError)
+    expect(() => loadConfig({ NODE_ENV: 'test' })).toThrow(ConfigError)
     try {
-      loadConfig({})
+      loadConfig({ NODE_ENV: 'test' })
     } catch (err) {
       expect(err).toBeInstanceOf(ConfigError)
       const message = (err as Error).message

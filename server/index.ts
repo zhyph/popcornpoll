@@ -1,5 +1,6 @@
 // server/index.ts
 import { createServer } from 'node:http'
+import next from 'next'
 import { loadConfig, type AppConfig } from './config'
 import { openDb } from './db'
 import { createPlexClient } from './plex/client'
@@ -18,7 +19,7 @@ import { getPlexLink, savePlexLink } from './plex/link'
 
 const SWEEP_INTERVAL_MS = 60_000
 
-export function createApp(config: AppConfig) {
+export async function createApp(config: AppConfig, opts: { skipFrontend?: boolean } = {}) {
   const db = openDb(config.dataDir)
   const store = createRoomStore()
   if (process.env.FAKE_EXTERNAL_APIS === 'true' && !getPlexLink(db, config.authEncryptionKey)) {
@@ -45,8 +46,20 @@ export function createApp(config: AppConfig) {
   const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex)
   const healthHandler = createHealthHandler(config.dataDir)
 
+  const nextApp = opts.skipFrontend ? null : next({ dev: process.env.NODE_ENV !== 'production' })
+  const handleNextRequest = nextApp?.getRequestHandler()
+  if (nextApp) await nextApp.prepare()
+
   const httpServer = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
+    if (!url.pathname.startsWith('/api/')) {
+      if (handleNextRequest) {
+        void handleNextRequest(req, res)
+      } else {
+        res.writeHead(404).end()
+      }
+      return
+    }
     const chunks: Buffer[] = []
     req.on('error', () => res.destroy())
     req.on('data', (c) => chunks.push(c))
@@ -109,12 +122,14 @@ export function createApp(config: AppConfig) {
 
 if (process.argv[1] && process.argv[1].endsWith('index.ts')) {
   const config = loadConfig(process.env)
-  const app = createApp(config)
-  app.httpServer.listen(config.port, () => {
-    console.log(`PopcornPoll listening on :${config.port}`)
-  })
-  process.on('SIGTERM', async () => {
-    await app.shutdown()
-    process.exit(0)
-  })
+  void (async () => {
+    const app = await createApp(config)
+    app.httpServer.listen(config.port, () => {
+      console.log(`PopcornPoll listening on :${config.port}`)
+    })
+    process.on('SIGTERM', async () => {
+      await app.shutdown()
+      process.exit(0)
+    })
+  })()
 }

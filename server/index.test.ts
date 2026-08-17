@@ -7,9 +7,9 @@ import { createApp } from './index'
 import type { AppConfig } from './config'
 
 let dir: string
-let app: ReturnType<typeof createApp>
+let app: Awaited<ReturnType<typeof createApp>>
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'popcornpoll-app-'))
   const config: AppConfig = {
     tmdbApiKey: 'x',
@@ -20,7 +20,7 @@ beforeEach(() => {
     port: 0,
     dataDir: dir,
   }
-  app = createApp(config)
+  app = await createApp(config, { skipFrontend: true })
 })
 
 afterEach(async () => {
