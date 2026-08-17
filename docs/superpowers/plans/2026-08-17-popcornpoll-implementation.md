@@ -2915,7 +2915,7 @@ describe('buildPool', () => {
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     const matchingIds = result.pool.filter((e) => e.title === 'Movie 0')
     expect(matchingIds).toHaveLength(1)
-    expect(matchingIds[0].inLibrary).toBe(true) // resolved via the merged row, not the TMDB-only fallback
+    expect(matchingIds[0]!.inLibrary).toBe(true) // resolved via the merged row, not the TMDB-only fallback
   })
 
   it('backfills from the other source when one falls short of its 70/30 target share', async () => {
@@ -3033,6 +3033,7 @@ async function resolveTmdbCandidatesIntoRows(
       genres: [], // genre IDs are TMDB-numeric; name mapping happens client-side for filters, not stored here
       rating: result.rating,
       voteCount: result.voteCount,
+      lastUsedAt: null,
     })
     rows.push(created)
   }
