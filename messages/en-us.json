@@ -69,6 +69,8 @@
     "not_enough_participants": "At least 2 connected participants are needed to start.",
     "pool_too_small": "Not enough movies to start. Try adjusting your filters.",
     "not_your_card": "That movie is no longer your current card.",
+    "invalid_name": "Invalid name. Use between 1 and 24 characters.",
+    "excluded_at_start": "You were excluded because you were disconnected when the session started.",
     "generic": "Something went wrong."
   },
   "kicked": {
