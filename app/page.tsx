@@ -5,6 +5,9 @@ import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { BulbFrame } from '../components/BulbFrame'
+import BlurText from '../components/ui/reactbits/BlurText'
+import SplitText from '../components/ui/reactbits/SplitText'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -55,8 +58,24 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4">
-      <h1 className="font-display text-5xl text-marquee">POPCORNPOLL</h1>
+    <main className="mx-auto flex flex-1 max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6">
+      <div className="relative flex flex-col items-center gap-4 border-2 border-brass/75 bg-gradient-to-b from-velvet/85 to-ink/90 px-6 py-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,.9)] sm:px-10 sm:py-11">
+        <BulbFrame count={24} />
+        <p className="font-mono text-[11px] uppercase tracking-[.42em] text-brass">{t('performancesTag')}</p>
+        <SplitText
+          text="POPCORNPOLL"
+          tag="h1"
+          className="font-display text-center text-[clamp(46px,11vw,132px)] leading-[.9] tracking-wide text-marquee [animation:chaseGlow_3.4s_ease-in-out_infinite]"
+          splitType="chars"
+          delay={60}
+        />
+        <BlurText
+          text={t('titleSubhead')}
+          animateBy="words"
+          direction="top"
+          className="max-w-[52ch] text-center text-sm leading-relaxed text-ticket/80 sm:text-base"
+        />
+      </div>
       <Card className="w-full border-2 border-brass bg-velvet">
         <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
           {t('title')}

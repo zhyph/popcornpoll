@@ -33,7 +33,9 @@
     "yearToLabel": "Year, to",
     "minRatingLabel": "Minimum rating",
     "createButton": "Create room",
-    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."
+    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+    "performancesTag": "Continuous performances · Balcony open",
+    "titleSubhead": "Everybody swipes, nobody argues. The house picks tonight's feature from your own library — and the marquee lights up the second you agree."
   },
   "joinRoom": {
     "invitedTo": "You're invited to",

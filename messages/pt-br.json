@@ -33,7 +33,9 @@
     "yearToLabel": "Ano, até",
     "minRatingLabel": "Nota mínima",
     "createButton": "Criar sala",
-    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB."
+    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB.",
+    "performancesTag": "Sessões contínuas · Camarote aberto",
+    "titleSubhead": "Todo mundo desliza, ninguém discute. A casa escolhe o filme da noite direto da sua biblioteca — e o letreiro acende assim que todos concordam."
   },
   "joinRoom": {
     "invitedTo": "Você foi convidado para",
