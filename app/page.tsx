@@ -3,9 +3,10 @@
 
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { BulbFrame } from '../components/BulbFrame'
+import CountUp from '../components/ui/reactbits/CountUp'
 import BlurText from '../components/ui/reactbits/BlurText'
 import SplitText from '../components/ui/reactbits/SplitText'
 import StarBorder from '../components/ui/reactbits/StarBorder'
@@ -15,6 +16,7 @@ import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Separator } from '../components/ui/separator'
+import { Skeleton } from '../components/ui/skeleton'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/room/types'
 
 export default function CreateRoomPage() {
@@ -28,6 +30,21 @@ export default function CreateRoomPage() {
   const [yearMin, setYearMin] = useState('')
   const [yearMax, setYearMax] = useState('')
   const [ratingMin, setRatingMin] = useState('')
+  const [stats, setStats] = useState<{
+    libraryCount: number
+    nightsSettled: number
+    recentMatches: { title: string; posterPath: string | null; posterSource: 'plex' | 'tmdb'; year: number | null }[]
+    plexLinked: boolean
+    lastSyncAt: number | null
+  } | null>(null)
+  const eligibleCount: number | null = null // placeholder — Task 11 replaces this with real useState + a debounced fetch effect
+
+  useEffect(() => {
+    fetch('/api/stats')
+      .then((res) => res.json())
+      .then(setStats)
+      .catch(() => {}) // stats are decorative — a failed fetch just keeps the skeleton state, no error UI
+  }, [])
 
   async function createRoom() {
     const matchThreshold: MatchThreshold =
@@ -210,7 +227,83 @@ export default function CreateRoomPage() {
             <p className="mt-3 text-center text-xs text-ink/55">{t('tmdbAttribution')}</p>
           )}
         </div>
-        {/* TODO(Task 10): remove this placeholder and add the real second grid column here, then close the grid */}
+        <div className="flex flex-col gap-4">
+          <div className="border border-brass/40 bg-gradient-to-b from-velvet/60 to-ink/80 p-5 sm:p-6">
+            <p className="mb-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass">{t('houseTonightLabel')}</p>
+            <div className="grid grid-cols-3 gap-3.5">
+              <div className="flex flex-col gap-1">
+                {stats ? (
+                  <CountUp to={stats.libraryCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                ) : (
+                  <Skeleton className="h-10 w-16" />
+                )}
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inLibraryLabel')}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {eligibleCount !== null ? (
+                  <CountUp to={eligibleCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                ) : (
+                  <Skeleton className="h-10 w-16" />
+                )}
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inThePoolLabel')}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {stats ? (
+                  <CountUp to={stats.nightsSettled} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                ) : (
+                  <Skeleton className="h-10 w-16" />
+                )}
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('nightsSettledLabel')}</span>
+              </div>
+            </div>
+          </div>
+
+          {stats && stats.recentMatches.length > 0 && (
+            <div className="relative overflow-hidden border border-brass/40 bg-[#17110E] py-4">
+              <p className="mb-3 px-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass sm:px-6">{t('lastWeekLabel')}</p>
+              <div
+                className="flex w-max gap-3.5"
+                style={{ animation: 'marqueeSlide 32s linear infinite' }}
+              >
+                {[...stats.recentMatches, ...stats.recentMatches].map((m, i) => (
+                  <div key={i} className="flex w-[104px] flex-none flex-col gap-1.5">
+                    <div className="flex h-[150px] w-[104px] items-end border border-brass/35 bg-[repeating-linear-gradient(135deg,#241A15_0_7px,#2E211A_7px_14px)] p-1.5">
+                      <span className="font-mono text-[8.5px] leading-tight tracking-wider text-ticket/50">{m.title}</span>
+                    </div>
+                    <span className="font-mono text-[9px] tracking-wider text-brass">{m.year ?? ''}</span>
+                  </div>
+                ))}
+              </div>
+              <div
+                className="absolute inset-x-0 top-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.22)_0_10px,transparent_10px_26px)]"
+                style={{ animation: 'sprocket 1.1s linear infinite' }}
+              />
+              <div
+                className="absolute inset-x-0 bottom-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.22)_0_10px,transparent_10px_26px)]"
+                style={{ animation: 'sprocket 1.1s linear infinite' }}
+              />
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2.5 border border-dashed border-brass/45 px-4.5 py-3.5 font-mono text-[11px] tracking-wider text-ticket/65">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{
+                background: stats?.plexLinked ? '#1C6666' : '#CF4436',
+                boxShadow: stats?.plexLinked ? '0 0 10px 2px rgba(28,102,102,.6)' : 'none',
+              }}
+            />
+            {stats?.plexLinked
+              ? t('plexLinkedStatus', { minutes: stats.lastSyncAt ? Math.max(0, Math.round((Date.now() - stats.lastSyncAt) / 60_000)) : 0 })
+              : t('plexNotLinkedStatus')}
+            <a
+              href="/setup"
+              className="ml-auto border border-brass/50 px-2.5 py-1.5 text-brass hover:border-marquee hover:text-ticket"
+            >
+              {t('projectionBoothLabel')}
+            </a>
+          </div>
+        </div>
       </div>
     </main>
   )

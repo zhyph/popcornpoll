@@ -17,6 +17,14 @@
     "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB"
   },
   "createRoom": {
+    "houseTonightLabel": "A casa hoje",
+    "inLibraryLabel": "na biblioteca",
+    "inThePoolLabel": "no catálogo",
+    "nightsSettledLabel": "sessões resolvidas",
+    "lastWeekLabel": "Na casa, semana passada",
+    "plexLinkedStatus": "Plex vinculado · biblioteca sincronizada há {minutes} min",
+    "plexNotLinkedStatus": "Plex ainda não vinculado",
+    "projectionBoothLabel": "Cabine de projeção",
     "title": "Sessão de hoje",
     "candidateSourceLabel": "Fonte dos candidatos",
     "candidateSourcePlex": "Somente biblioteca do Plex",

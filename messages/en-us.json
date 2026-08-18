@@ -17,6 +17,14 @@
     "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB"
   },
   "createRoom": {
+    "houseTonightLabel": "The house tonight",
+    "inLibraryLabel": "in library",
+    "inThePoolLabel": "in the pool",
+    "nightsSettledLabel": "nights settled",
+    "lastWeekLabel": "Last week at this house",
+    "plexLinkedStatus": "Plex linked · library synced {minutes} min ago",
+    "plexNotLinkedStatus": "Plex not linked yet",
+    "projectionBoothLabel": "Projection booth",
     "title": "Tonight's showing",
     "candidateSourceLabel": "Candidate source",
     "candidateSourcePlex": "Plex library only",
