@@ -8765,15 +8765,24 @@ export async function setLocaleAction(locale: Locale): Promise<void> {
 
 - [ ] **Step 8: Wire `NextIntlClientProvider` and the switcher into `app/layout.tsx`**
 
-Read the current `app/layout.tsx` (Task 22, unchanged since) before editing — wrap its existing `children` in `NextIntlClientProvider` (no props needed; it inherits locale/messages from `i18n/request.ts` automatically) and render `<LocaleSwitcher />` once, in a fixed corner so it's reachable from every screen:
+Read the current `app/layout.tsx` (Task 22, unchanged since) before editing — wrap its existing `children` in `NextIntlClientProvider` (no props needed; it inherits locale/messages from `i18n/request.ts` automatically), render `<LocaleSwitcher />` once in a fixed corner so it's reachable from every screen, and make the `<html lang>` attribute track the actual resolved locale instead of staying hardcoded (Task 22 shipped `<html lang="en" ...>` statically — with pt-BR as the default, that would falsely claim English for most visitors, which matters for screen readers and browser translate prompts):
 
 ```tsx
-// app/layout.tsx — wrap the existing <body> contents:
+// app/layout.tsx — the component becomes async (it wasn't before) so it can await getLocale():
 import { NextIntlClientProvider } from 'next-intl'
+import { getLocale } from 'next-intl/server'
 import { LocaleSwitcher } from '../components/LocaleSwitcher'
 // ...(keep every existing import from Task 22's layout.tsx)
 
-// inside the returned JSX, replace `<body ...>{children}</body>` with:
+// replace `export default function RootLayout({ children }: ...) {` with:
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale()
+  // ...(keep every existing line from Task 22's layout.tsx body, up to the returned JSX)
+
+// inside the returned JSX, replace `<html lang="en" className={...}>` with:
+<html lang={locale} className={/* keep Task 22's existing className exactly as-is */}>
+
+// and replace `<body ...>{children}</body>` with:
 <body className={/* keep Task 22's existing className exactly as-is */}>
   <NextIntlClientProvider>
     <div className="fixed right-4 top-4 z-50">
