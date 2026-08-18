@@ -4,6 +4,7 @@
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -14,6 +15,7 @@ import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/roo
 
 export default function CreateRoomPage() {
   const t = useTranslations('createRoom')
+  const tErrors = useTranslations('errors')
   const router = useRouter()
   const [candidateSource, setCandidateSource] = useState<CandidateSource>('plex')
   const [thresholdKind, setThresholdKind] = useState<MatchThreshold['kind']>('all')
@@ -36,11 +38,20 @@ export default function CreateRoomPage() {
       method: 'POST',
       body: JSON.stringify({ candidateSource, matchThreshold, tmdbFilters }),
     })
-    const body = await res.json()
-    if (res.ok) {
-      sessionStorage.setItem(`hostClaimToken:${body.roomCode}`, body.hostClaimToken)
-      router.push(`/room/${body.roomCode}`)
+    if (!res.ok) {
+      // A non-2xx response body isn't guaranteed to be valid JSON (a bare
+      // 500 from the top-level HTTP dispatch's catch-all has none at all) —
+      // guard the parse so a network-shaped failure doesn't also throw here.
+      const code = await res
+        .json()
+        .then((b) => b?.error?.code as string | undefined)
+        .catch(() => undefined)
+      toast(code && tErrors.has(code) ? tErrors(code) : tErrors('generic'))
+      return
     }
+    const body = await res.json()
+    sessionStorage.setItem(`hostClaimToken:${body.roomCode}`, body.hostClaimToken)
+    router.push(`/room/${body.roomCode}`)
   }
 
   return (

@@ -97,9 +97,19 @@ export async function startRoom(
   // a pool could be built from a half-synced library, mixing already-removed
   // and not-yet-added titles. Room *creation* deliberately does NOT await a
   // staleness-triggered sync (see server/http/rooms.ts) — only Start does.
-  await librarySync.waitForCurrent()
-
-  const result = await buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
+  let result: Awaited<ReturnType<typeof buildPool>>
+  try {
+    await librarySync.waitForCurrent()
+    result = await buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
+  } catch (error) {
+    // Anything unexpected here (a rejected sync wait, a buildPool throw) must
+    // not leave the room wedged in 'starting' forever — revert and let it
+    // propagate to the WS layer's own crash-hardening (Task 26), which
+    // replies internal_error without crashing the process.
+    room.status = 'lobby'
+    notifyStarting?.()
+    throw error
+  }
   if (result.tooSmall) {
     room.status = 'lobby'
     notifyStarting?.()

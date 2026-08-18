@@ -201,4 +201,42 @@ describe('createRoomsHandler', () => {
     expect(res.status).toBe(200)
     expect(run).toHaveBeenCalledTimes(1)
   })
+
+  it('a rejected staleness-triggered sync does not crash the process and the room is still created', async () => {
+    db.prepare(
+      `INSERT INTO movies (plex_rating_key, title, poster_source, in_library, cached_at) VALUES ('pk-1', 'X', 'plex', 1, '2026-01-01')`,
+    ).run()
+    const store = createRoomStore()
+    // Deliberately a plain function, not vi.fn().mockRejectedValueOnce(...):
+    // vitest's mock wrapper attaches its own internal .then() to track
+    // mock.results, which marks the returned promise as "handled" from
+    // Node's perspective and hides a real unhandled-rejection bug even when
+    // the code under test never adds a .catch() of its own. A plain
+    // Promise.reject is the only way this test can actually catch the bug.
+    let runCallCount = 0
+    const run: ReturnType<typeof fakeLibrarySync>['run'] = () => {
+      runCallCount++
+      return Promise.reject(new Error('Plex unreachable'))
+    }
+    const staleTimestamp = Date.now() - 7 * 60 * 60 * 1000
+    const librarySync = fakeLibrarySync({ run, lastSyncAt: vi.fn().mockReturnValue(staleTimestamp) })
+    const handler = createRoomsHandler(store, db, 'key', config, librarySync)
+
+    const unhandled = vi.fn()
+    process.once('unhandledRejection', unhandled)
+
+    const res = await handler(createRoomRequest(validBody), '127.0.0.1')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.roomCode).toMatch(/^[A-Z]+-[A-Z]+-\d{3}$/)
+
+    // The fire-and-forget sync rejects on a microtask queued after the
+    // response is already built — give it a turn of the event loop before
+    // asserting no unhandled rejection ever fired.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    process.removeListener('unhandledRejection', unhandled)
+
+    expect(unhandled).not.toHaveBeenCalled()
+    expect(runCallCount).toBe(1)
+  })
 })

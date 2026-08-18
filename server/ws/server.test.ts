@@ -212,6 +212,48 @@ describe('attachWebSocketServer', () => {
     guestWs.close()
   })
 
+  it('a participant who joined with a non-canonical-case room code still receives room broadcasts', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5) // MIN_POOL_SIZE
+
+    const hostWs = await connect()
+    const guestWs = await connect()
+    try {
+      hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+      await nextMessage(hostWs) // joined
+
+      // Manually-typed lowercase URL — the store is case-insensitive so the
+      // join itself succeeds, but the connection's stored roomCode must
+      // still end up canonical or this socket is excluded from every
+      // subsequent broadcast to its own room. (Note: the guest's own join
+      // also broadcasts a state_update to the room using the *guest's own*
+      // just-set connection state as the filter key — against the bug, that
+      // broadcast itself never reaches the host either, since it'd be keyed
+      // by the guest's non-canonical code. Race with a timeout rather than
+      // await it directly so a hang here doesn't take down the whole test.)
+      guestWs.send(JSON.stringify({ type: 'join', roomCode: code.toLowerCase(), displayName: 'Guest' }))
+      await nextMessage(guestWs) // joined
+      await Promise.race([nextMessage(hostWs), new Promise((resolve) => setTimeout(resolve, 500))])
+
+      // Trigger a broadcast keyed by the HOST's connection state, which is
+      // always canonical — isolating the assertion to whether the GUEST's
+      // socket (the potentially-mis-cased one) receives it.
+      hostWs.send(JSON.stringify({ type: 'start' }))
+      const guestNext = await Promise.race([
+        nextMessage(guestWs),
+        new Promise<Record<string, unknown>>((resolve) =>
+          setTimeout(() => resolve({ type: 'TIMED_OUT_WAITING_FOR_BROADCAST' }), 1000),
+        ),
+      ])
+
+      expect(guestNext.type === 'room_started' || guestNext.type === 'state_update').toBe(true)
+    } finally {
+      hostWs.close()
+      guestWs.close()
+    }
+  })
+
   it('broadcasts a state_update immediately on disconnect, and only recomputes exhaustion after the reconnect grace period', async () => {
     const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
@@ -325,15 +367,21 @@ describe('attachWebSocketServer: handleMessage failures do not crash the process
     crashDb.close() // simulates a database failure mid-request
 
     ws.send(JSON.stringify({ type: 'start' }))
-    // The room synchronously flips to 'starting' (and broadcasts that,
-    // via notifyStarting) before the async pool build even runs — which is
-    // where the closed-DB failure actually occurs — so the first message is
-    // a transitional state_update, and the second is the error surfaced by
-    // the crash-hardening catch. Both arrive in the same burst (no real
-    // async gap for a 'plex'-only pool build), so collect rather than await
-    // them one at a time.
-    const [started, reply] = await collectMessages(ws, 2)
+    // The room synchronously flips to 'starting' (and broadcasts that, via
+    // notifyStarting) before the async pool build even runs — which is where
+    // the closed-DB failure actually occurs. startRoom's own catch then
+    // reverts the room to 'lobby' (broadcasting that too, via the same
+    // notifyStarting callback) before rethrowing, so the sender sees a
+    // transitional state_update, a revert-to-lobby state_update, and finally
+    // the error surfaced by the crash-hardening catch — proving the room
+    // isn't left wedged in 'starting'. All three arrive in the same burst (no
+    // real async gap for a 'plex'-only pool build), so collect rather than
+    // await them one at a time.
+    const [started, reverted, reply] = await collectMessages(ws, 3)
     expect(started?.type).toBe('state_update')
+    expect(started?.status).toBe('starting')
+    expect(reverted?.type).toBe('state_update')
+    expect(reverted?.status).toBe('lobby')
     expect(reply?.type).toBe('error')
     expect(reply?.code).toBe('internal_error')
 

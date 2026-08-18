@@ -135,7 +135,7 @@ export function createRoomsHandler(
     } else if (!librarySync.isRunning()) {
       const lastSync = librarySync.lastSyncAt()
       if (lastSync === null || Date.now() - lastSync > SYNC_STALE_MS) {
-        void librarySync.run() // fire-and-forget — creation does NOT await a staleness-triggered sync
+        void librarySync.run().catch((err) => console.error('librarySync.run failed', err)) // fire-and-forget — creation does NOT await a staleness-triggered sync
       }
     }
 

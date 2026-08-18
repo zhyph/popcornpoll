@@ -98,7 +98,12 @@ export async function handleMessage(
       }
       touchActivity(result.data.room)
       const newState: ConnectionState = {
-        roomCode: message.roomCode,
+        // Canonical (uppercase) code from the room itself, not the raw
+        // client-supplied message.roomCode — roomStore normalizes case for
+        // get()/delete() but broadcastToRoom/closeRoomSockets filter by exact
+        // string equality against this value, so a non-canonical-case join
+        // would silently exclude the participant from every room broadcast.
+        roomCode: result.data.room.code,
         participantId: result.data.participantId,
         isHost: result.data.hostToken !== null,
       }
@@ -129,7 +134,8 @@ export async function handleMessage(
       touchActivity(result.data.room)
       const participant = result.data.room.participants.get(result.data.participantId)!
       const newState: ConnectionState = {
-        roomCode: message.roomCode,
+        // See the 'join' case above — canonical code, not the raw client input.
+        roomCode: result.data.room.code,
         participantId: result.data.participantId,
         isHost: result.data.isHost,
       }

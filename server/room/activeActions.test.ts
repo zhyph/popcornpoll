@@ -204,6 +204,27 @@ describe('startRoom', () => {
     expect(result.data.degraded).toBe(true)
     expect(store.get(code)!.status).toBe('active') // degraded, not failed — the room still starts
   })
+
+  it('reverts to lobby instead of wedging in "starting" when librarySync.waitForCurrent throws', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
+    if (!host.ok || !other.ok) throw new Error('setup failed')
+    seedPlexRows(20)
+    const throwingLibrarySync: SyncWaiter = {
+      waitForCurrent: vi.fn().mockRejectedValueOnce(new Error('sync wait failed')),
+    }
+
+    await expect(startRoom(store, code, true, db, noOpTmdb, throwingLibrarySync)).rejects.toThrow(
+      'sync wait failed',
+    )
+
+    // The room must not be permanently wedged in 'starting' — a retry should
+    // still be possible instead of only recoverable via the 30-minute
+    // inactivity sweep.
+    expect(store.get(code)!.status).toBe('lobby')
+  })
 })
 
 describe('startRoom notifyStarting callback', () => {
