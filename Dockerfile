@@ -5,6 +5,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
 RUN npm run build
+RUN npm prune --omit=dev
 
 FROM node:22-slim AS runtime
 WORKDIR /app

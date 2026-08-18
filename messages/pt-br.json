@@ -86,5 +86,30 @@
   "localeSwitcher": {
     "english": "English",
     "portuguese": "Português"
+  },
+  "setup": {
+    "title": "Configuração inicial",
+    "boxOffice": "Bilheteria",
+    "tokenExplainer": "Informe o token de administrador (ADMIN_SETUP_TOKEN) definido nas variáveis de ambiente do servidor.",
+    "tokenLabel": "Token de administrador",
+    "tokenPlaceholder": "Cole o token aqui",
+    "startButton": "Gerar código do Plex",
+    "linkPlexTitle": "Vincular ao Plex",
+    "openPlexButton": "Abrir Plex para autorizar",
+    "waitingForApproval": "Aguardando aprovação…",
+    "cancelButton": "Cancelar",
+    "chooseServerTitle": "Escolha o servidor",
+    "noServersFound": "Nenhum servidor encontrado nesta conta do Plex.",
+    "chooseLibrariesTitle": "Escolha as bibliotecas de filmes",
+    "noMovieLibraries": "Nenhuma biblioteca de filmes encontrada neste servidor.",
+    "finishButton": "Concluir vínculo",
+    "successTitle": "Plex vinculado",
+    "successMessage": "Seu servidor Plex está vinculado. Você já pode criar salas.",
+    "syncNowButton": "Sincronizar agora",
+    "syncingButton": "Sincronizando…",
+    "syncTriggeredToast": "Sincronização iniciada",
+    "genericError": "Algo deu errado. Tente novamente.",
+    "unauthorizedError": "Token de administrador inválido.",
+    "pollTimeoutError": "Tempo esgotado aguardando a autorização. Gere um novo código."
   }
 }

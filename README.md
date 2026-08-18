@@ -8,10 +8,10 @@ threshold of yes-votes is reached.
 
 - A Plex Media Server, reachable from wherever you run this container.
 - Docker.
-- Optionally, a [TMDB API key](https://www.themoviedb.org/settings/api) —
-  **required**, not optional: besides the opt-in TMDB-extended candidate
-  source, it's also what lets the app rank your own Plex library by how
-  well-regarded each title is, rather than picking randomly.
+- A [TMDB API key](https://www.themoviedb.org/settings/api) — **required**:
+  it's not just for the opt-in TMDB-extended candidate source, it's also
+  what lets the app rank your own Plex library by how well-regarded each
+  title is, rather than picking randomly.
 
 ## Running it
 
@@ -26,8 +26,14 @@ docker run -d --name popcornpoll \
   popcornpoll:latest
 ```
 
-Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>` once
-to link your Plex server.
+Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>`
+once to link your Plex server — the token pre-fills the admin-token field
+(you can also paste it in by hand instead of using the URL). The page
+walks you through Plex's own PIN-auth flow: it shows a one-time code and
+a link to `app.plex.tv/auth` to approve it from your Plex account, then
+lets you pick which of your Plex servers and which of that server's
+movie libraries to use. Once linked, use the page's "Sync now" button (or
+wait for the periodic library sync) to pull your library in.
 
 ## Environment variables
 

@@ -63,7 +63,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   enrichment.start()
 
   const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey, config)
-  const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex)
+  const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex, clientIdentifier)
   const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex)
   const healthHandler = createHealthHandler(config.dataDir)
 
@@ -96,6 +96,9 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         else if (url.pathname === '/api/rooms' && req.method === 'POST')
           webRes = await roomsHandler(webReq, req.socket.remoteAddress)
         else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
+        else if (url.pathname === '/api/setup/plex/pin-status') webRes = await setupHandlers.pinStatus(webReq)
+        else if (url.pathname === '/api/setup/plex/resources') webRes = await setupHandlers.resources(webReq)
+        else if (url.pathname === '/api/setup/plex/library-sections') webRes = await setupHandlers.librarySections(webReq)
         else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
         else if (url.pathname === '/api/setup/plex/resync') {
           webRes = await setupHandlers.resync(webReq)

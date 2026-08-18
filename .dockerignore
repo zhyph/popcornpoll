@@ -5,3 +5,4 @@ data
 .git
 e2e
 **/*.test.ts
+.env
