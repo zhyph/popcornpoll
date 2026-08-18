@@ -1,5 +1,6 @@
 // server/ws/router.ts
 import type Database from 'better-sqlite3'
+import { insertMatch } from '../db/matchHistory'
 import { joinRoom, kickParticipant, reconnectRoom, updateSettings } from '../room/actions'
 import { startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
 import { endRoom, touchActivity } from '../room/lifecycle'
@@ -194,6 +195,18 @@ export async function handleMessage(
       const toRoom: ServerMessage[] = [stateUpdate(room)]
       for (const movieId of result.data.newMatches) {
         const movie = room.pool.find((p) => p.movieId === movieId)!
+        try {
+          insertMatch(db, {
+            movieId: movie.movieId,
+            roomCode: room.code,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            posterSource: movie.posterSource,
+            year: movie.year,
+          })
+        } catch (err) {
+          console.error('insertMatch failed', err)
+        }
         toRoom.push({ type: 'match', movieId, movie, seq: room.seq })
       }
       if (result.data.exhaustedNow && room.matches.length === 0) {
@@ -263,6 +276,18 @@ export async function handleMessage(
       const toRoom: ServerMessage[] = [stateUpdate(updatedRoom)]
       for (const movieId of result.data.newMatches) {
         const movie = updatedRoom.pool.find((p) => p.movieId === movieId)!
+        try {
+          insertMatch(db, {
+            movieId: movie.movieId,
+            roomCode: updatedRoom.code,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            posterSource: movie.posterSource,
+            year: movie.year,
+          })
+        } catch (err) {
+          console.error('insertMatch failed', err)
+        }
         toRoom.push({ type: 'match', movieId, movie, seq: updatedRoom.seq })
       }
       if (updatedRoom.exhausted && updatedRoom.matches.length === 0) {

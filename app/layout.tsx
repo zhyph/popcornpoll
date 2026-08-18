@@ -2,8 +2,12 @@
 import { NextIntlClientProvider } from 'next-intl'
 import { getLocale } from 'next-intl/server'
 import { Anton, JetBrains_Mono, Work_Sans } from 'next/font/google'
-import { LocaleSwitcher } from '../components/LocaleSwitcher'
-import { SpotlightBackground } from '../components/SpotlightBackground'
+import { AtmosphereLayer } from '../components/chrome/AtmosphereLayer'
+import { ClickSparkProvider } from '../components/chrome/ClickSparkProvider'
+import { CurtainOverlay } from '../components/chrome/CurtainOverlay'
+import { PictureBoothFooter } from '../components/chrome/PictureBoothFooter'
+import { PictureBoothHeader } from '../components/chrome/PictureBoothHeader'
+import { RoomStatusProvider } from '../components/chrome/RoomStatusContext'
 import { Toaster } from '../components/ui/sonner'
 import './globals.css'
 
@@ -19,11 +23,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={locale} className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body>
         <NextIntlClientProvider>
-          <SpotlightBackground />
-          <div className="fixed right-2 top-2 z-50 sm:right-4 sm:top-4">
-            <LocaleSwitcher />
-          </div>
-          {children}
+          <RoomStatusProvider>
+            <AtmosphereLayer />
+            <CurtainOverlay open countdownNumber={null} />
+            <ClickSparkProvider>
+              <div className="flex min-h-screen flex-col">
+                <PictureBoothHeader />
+                <div className="flex flex-1 flex-col">{children}</div>
+                <PictureBoothFooter />
+              </div>
+            </ClickSparkProvider>
+          </RoomStatusProvider>
           <Toaster />
         </NextIntlClientProvider>
       </body>

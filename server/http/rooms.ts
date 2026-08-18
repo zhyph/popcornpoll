@@ -37,7 +37,7 @@ function numOrUndefined(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
-function validateTmdbFilters(raw: TmdbFilters): { ok: true; filters: TmdbFilters } | { ok: false } {
+export function validateTmdbFilters(raw: TmdbFilters): { ok: true; filters: TmdbFilters } | { ok: false } {
   const maxYear = new Date().getFullYear() + 1
   const filters: TmdbFilters = { genre: raw.genre }
 

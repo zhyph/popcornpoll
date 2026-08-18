@@ -182,6 +182,34 @@ describe('handleMessage: swipe -> next_card', () => {
     expect(result.toSender.some((m) => m.type === 'next_card')).toBe(true)
     expect(result.toRoom.some((m) => m.type === 'next_card')).toBe(false)
   })
+
+  it('writes a match_history row when a swipe produces a new match', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'atLeast', n: 1 }, 'plex', {})
+    const hostJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+    const started = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostJoined.newState, { type: 'start' })
+    const hostState = started.newState
+    const room = store.get(code)!
+    const pending = room.participants.get(hostState.participantId!)!.pendingCardId!
+
+    const before = (db.prepare('SELECT COUNT(*) AS n FROM match_history').get() as { n: number }).n
+
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
+      type: 'swipe',
+      movieId: pending,
+      vote: 'yes',
+    })
+    expect(result.toRoom.some((m) => m.type === 'match')).toBe(true)
+
+    const after = (db.prepare('SELECT COUNT(*) AS n FROM match_history').get() as { n: number }).n
+    expect(after).toBe(before + 1)
+  })
 })
 
 describe('handleMessage: start broadcasts a transitional state_update via onBroadcast', () => {

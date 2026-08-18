@@ -3,14 +3,14 @@
 
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from '../components/ui/button'
-import { Card, CardContent, CardHeader } from '../components/ui/card'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
-import { Separator } from '../components/ui/separator'
+import { BulbFrame } from '../components/BulbFrame'
+import CountUp from '../components/ui/reactbits/CountUp'
+import BlurText from '../components/ui/reactbits/BlurText'
+import SplitText from '../components/ui/reactbits/SplitText'
+import StarBorder from '../components/ui/reactbits/StarBorder'
+import { Skeleton } from '../components/ui/skeleton'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/room/types'
 
 export default function CreateRoomPage() {
@@ -24,6 +24,38 @@ export default function CreateRoomPage() {
   const [yearMin, setYearMin] = useState('')
   const [yearMax, setYearMax] = useState('')
   const [ratingMin, setRatingMin] = useState('')
+  const [stats, setStats] = useState<{
+    libraryCount: number
+    nightsSettled: number
+    recentMatches: { title: string; posterPath: string | null; posterSource: 'plex' | 'tmdb'; year: number | null }[]
+    plexLinked: boolean
+    lastSyncAt: number | null
+  } | null>(null)
+  const [eligibleCount, setEligibleCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (genre) params.set('genre', genre)
+    if (ratingMin) params.set('ratingMin', ratingMin)
+    if (yearMin) params.set('yearMin', yearMin)
+    if (yearMax) params.set('yearMax', yearMax)
+
+    const timer = setTimeout(() => {
+      fetch(`/api/eligible-count?${params.toString()}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body) => body && setEligibleCount(body.count))
+        .catch(() => {}) // decorative — a failed fetch just leaves the previous count (or the skeleton) in place
+    }, 400)
+
+    return () => clearTimeout(timer)
+  }, [genre, ratingMin, yearMin, yearMax])
+
+  useEffect(() => {
+    fetch('/api/stats')
+      .then((res) => res.json())
+      .then(setStats)
+      .catch(() => {}) // stats are decorative — a failed fetch just keeps the skeleton state, no error UI
+  }, [])
 
   async function createRoom() {
     const matchThreshold: MatchThreshold =
@@ -55,89 +87,244 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4">
-      <h1 className="font-display text-5xl text-marquee">POPCORNPOLL</h1>
-      <Card className="w-full border-2 border-brass bg-velvet">
-        <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-          {t('title')}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>{t('candidateSourceLabel')}</Label>
-            <Select value={candidateSource} onValueChange={(v) => setCandidateSource(v as CandidateSource)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="plex">{t('candidateSourcePlex')}</SelectItem>
-                <SelectItem value="plex+tmdb">{t('candidateSourcePlexTmdb')}</SelectItem>
-              </SelectContent>
-            </Select>
+    <main className="mx-auto flex flex-1 max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6">
+      <div className="relative flex flex-col items-center gap-4 border-2 border-brass/75 bg-gradient-to-b from-velvet/85 to-ink/90 px-6 py-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,.9)] sm:px-10 sm:py-11">
+        <BulbFrame count={24} />
+        <p className="font-mono text-[11px] uppercase tracking-[.42em] text-brass">{t('performancesTag')}</p>
+        <SplitText
+          text="POPCORNPOLL"
+          tag="h1"
+          className="font-display text-center text-[clamp(46px,11vw,132px)] leading-[.9] tracking-wide text-marquee [animation:chaseGlow_3.4s_ease-in-out_infinite]"
+          splitType="chars"
+          delay={60}
+        />
+        <BlurText
+          text={t('titleSubhead')}
+          animateBy="words"
+          direction="top"
+          className="max-w-[52ch] text-center text-sm leading-relaxed text-ticket/80 sm:text-base"
+        />
+      </div>
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
+        <div
+          className="relative bg-gradient-to-br from-ticket to-ticket/80 p-6 text-ink shadow-[0_30px_60px_-25px_rgba(0,0,0,.9)] sm:p-8"
+          style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%)' }}
+        >
+          <div className="mb-5 flex items-baseline justify-between gap-3 border-b-2 border-dashed border-ink/35 pb-3">
+            <p className="font-display text-2xl tracking-wide sm:text-[28px]">{t('tonightsShowingLabel')}</p>
+            <p className="font-mono text-[11px] uppercase tracking-widest text-ink/60">{t('ticketNoLabel')}</p>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>{t('matchRuleLabel')}</Label>
-            <Select value={thresholdKind} onValueChange={(v) => setThresholdKind(v as MatchThreshold['kind'])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('matchRuleAll')}</SelectItem>
-                <SelectItem value="majority">{t('matchRuleMajority')}</SelectItem>
-                <SelectItem value="atLeast">{t('matchRuleAtLeast')}</SelectItem>
-              </SelectContent>
-            </Select>
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('housePicturesLabel')}</p>
+          <div className="mb-5 grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setCandidateSource('plex')}
+              aria-pressed={candidateSource === 'plex'}
+              className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
+                candidateSource === 'plex' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
+              }`}
+            >
+              <span className="font-display text-[15px]">{t('sourcesPlexTitle')}</span>
+              <span className="text-[11.5px] leading-snug opacity-70">{t('sourcesPlexNote')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCandidateSource('plex+tmdb')}
+              aria-pressed={candidateSource === 'plex+tmdb'}
+              className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
+                candidateSource === 'plex+tmdb' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
+              }`}
+            >
+              <span className="font-display text-[15px]">{t('sourcesTmdbTitle')}</span>
+              <span className="text-[11.5px] leading-snug opacity-70">{t('sourcesTmdbNote')}</span>
+            </button>
+          </div>
+
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('houseRuleLabel')}</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {(['all', 'majority', 'atLeast'] as const).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => setThresholdKind(kind)}
+                aria-pressed={thresholdKind === kind}
+                className={`px-3.5 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                  thresholdKind === kind ? 'bg-ink text-ticket' : 'border border-ink/35 text-ink/70'
+                }`}
+              >
+                {kind === 'all' ? t('matchRuleAll') : kind === 'majority' ? t('matchRuleMajority') : t('matchRuleAtLeast')}
+              </button>
+            ))}
           </div>
 
           {thresholdKind === 'atLeast' && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="atLeastN">{t('atLeastNLabel')}</Label>
-              <Input
-                id="atLeastN"
+            <div className="mb-4 flex items-center justify-between gap-3.5 border border-ink/25 bg-ink/5 p-3">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink/70">{t('yesVotesNeededLabel')}</span>
+              <div className="flex items-center gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => setAtLeastN(Math.max(1, atLeastN - 1))}
+                  className="h-[34px] w-[34px] border border-ink/40 text-lg leading-none"
+                >
+                  −
+                </button>
+                <span className="min-w-8 text-center font-display text-2xl">{atLeastN}</span>
+                <button
+                  type="button"
+                  onClick={() => setAtLeastN(atLeastN + 1)}
+                  className="h-[34px] w-[34px] border border-ink/40 text-lg leading-none"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          )}
+
+          <p className="mb-2.5 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('trimTheBillLabel')}</p>
+          <div className="mb-6 grid grid-cols-2 gap-2.5">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
+              {t('genreLabel')}
+              <input
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                placeholder={t('genrePlaceholder')}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
+              {t('minRatingLabel')}
+              <input
                 type="number"
-                min={1}
-                value={atLeastN}
-                onChange={(e) => setAtLeastN(Number.parseInt(e.target.value, 10) || 1)}
+                step={0.1}
+                min={0}
+                max={10}
+                value={ratingMin}
+                onChange={(e) => setRatingMin(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
+              {t('yearFromLabel')}
+              <input
+                type="number"
+                value={yearMin}
+                onChange={(e) => setYearMin(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
+              {t('yearToLabel')}
+              <input
+                type="number"
+                value={yearMax}
+                onChange={(e) => setYearMax(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+          </div>
+
+          <StarBorder
+            as="button"
+            type="button"
+            onClick={createRoom}
+            data-testid="create-room"
+            color="#F3E9D2"
+            speed="3.2s"
+            className="w-full [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket"
+          >
+            {t('createButton')}
+          </StarBorder>
+          <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-ink/50">{t('tearHereLabel')}</p>
+
+          {candidateSource === 'plex+tmdb' && (
+            <p className="mt-3 text-center text-xs text-ink/55">{t('tmdbAttribution')}</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="border border-brass/40 bg-gradient-to-b from-velvet/60 to-ink/80 p-5 sm:p-6">
+            <p className="mb-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass">{t('houseTonightLabel')}</p>
+            <div className="grid grid-cols-3 gap-3.5">
+              <div className="flex flex-col gap-1">
+                <div data-testid="stat-library">
+                  {stats ? (
+                    <CountUp to={stats.libraryCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                  ) : (
+                    <Skeleton className="h-10 w-16" />
+                  )}
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inLibraryLabel')}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <div data-testid="stat-pool">
+                  {eligibleCount !== null ? (
+                    <CountUp to={eligibleCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                  ) : (
+                    <Skeleton className="h-10 w-16" />
+                  )}
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inThePoolLabel')}</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {stats ? (
+                  <CountUp to={stats.nightsSettled} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                ) : (
+                  <Skeleton className="h-10 w-16" />
+                )}
+                <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('nightsSettledLabel')}</span>
+              </div>
+            </div>
+          </div>
+
+          {stats && stats.recentMatches.length > 0 && (
+            <div className="relative overflow-hidden border border-brass/40 bg-[#17110E] py-4">
+              <p className="mb-3 px-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass sm:px-6">{t('lastWeekLabel')}</p>
+              <div
+                className="flex w-max gap-3.5"
+                style={{ animation: 'marqueeSlide 32s linear infinite' }}
+              >
+                {[...stats.recentMatches, ...stats.recentMatches].map((m, i) => (
+                  <div key={i} className="flex w-[104px] flex-none flex-col gap-1.5">
+                    <div className="flex h-[150px] w-[104px] items-end border border-brass/35 bg-[repeating-linear-gradient(135deg,#241A15_0_7px,#2E211A_7px_14px)] p-1.5">
+                      <span className="font-mono text-[8.5px] leading-tight tracking-wider text-ticket/50">{m.title}</span>
+                    </div>
+                    <span className="font-mono text-[9px] tracking-wider text-brass">{m.year ?? ''}</span>
+                  </div>
+                ))}
+              </div>
+              <div
+                className="absolute inset-x-0 top-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.22)_0_10px,transparent_10px_26px)]"
+                style={{ animation: 'sprocket 1.1s linear infinite' }}
+              />
+              <div
+                className="absolute inset-x-0 bottom-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.22)_0_10px,transparent_10px_26px)]"
+                style={{ animation: 'sprocket 1.1s linear infinite' }}
               />
             </div>
           )}
 
-          <Separator className="bg-brass/40" />
-          <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('filtersLabel')}</p>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="genre">{t('genreLabel')}</Label>
-            <Input id="genre" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder={t('genrePlaceholder')} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMin">{t('yearFromLabel')}</Label>
-              <Input id="yearMin" type="number" value={yearMin} onChange={(e) => setYearMin(e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMax">{t('yearToLabel')}</Label>
-              <Input id="yearMax" type="number" value={yearMax} onChange={(e) => setYearMax(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="ratingMin">{t('minRatingLabel')}</Label>
-            <Input
-              id="ratingMin"
-              type="number"
-              step={0.1}
-              min={0}
-              max={10}
-              value={ratingMin}
-              onChange={(e) => setRatingMin(e.target.value)}
+          <div className="flex flex-wrap items-center gap-2.5 border border-dashed border-brass/45 px-[18px] py-3.5 font-mono text-[11px] tracking-wider text-ticket/65">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{
+                background: stats?.plexLinked ? '#1C6666' : '#CF4436',
+                boxShadow: stats?.plexLinked ? '0 0 10px 2px rgba(28,102,102,.6)' : 'none',
+              }}
             />
+            {stats?.plexLinked
+              ? stats.lastSyncAt !== null
+                ? t('plexLinkedStatus', { minutes: Math.max(0, Math.round((Date.now() - stats.lastSyncAt) / 60_000)) })
+                : t('plexLinkedSyncUnknown')
+              : t('plexNotLinkedStatus')}
+            <a
+              href="/setup"
+              className="ml-auto border border-brass/50 px-2.5 py-1.5 text-brass hover:border-marquee hover:text-ticket"
+            >
+              {t('projectionBoothLabel')}
+            </a>
           </div>
-
-          <Button className="mt-2 bg-marquee text-ink hover:bg-marquee/90" onClick={createRoom}>
-            {t('createButton')}
-          </Button>
-          {candidateSource === 'plex+tmdb' && (
-            <p className="text-center text-xs text-muted-foreground">
-              {t('tmdbAttribution')}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </main>
   )
 }

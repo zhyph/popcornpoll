@@ -8,7 +8,7 @@ test('a kicked participant sees the terminal screen and does not reconnect', asy
   await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
@@ -50,7 +50,7 @@ test('remaining participants see the terminal screen when the host ends the sess
   await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
