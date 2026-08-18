@@ -92,9 +92,9 @@ export function upsertTmdbOnlyRow(
   db.prepare(
     `INSERT INTO movies
        (plex_rating_key, tmdb_id, imdb_id, title, poster_path, poster_source,
-        overview, year, genres, rating, vote_count, in_library, cached_at)
+        overview, year, genres, rating, vote_count, in_library, last_used_at, cached_at)
      VALUES (NULL, @tmdbId, @imdbId, @title, @posterPath, @posterSource,
-             @overview, @year, @genres, @rating, @voteCount, 0, @cachedAt)
+             @overview, @year, @genres, @rating, @voteCount, 0, @lastUsedAt, @cachedAt)
      ON CONFLICT(tmdb_id) WHERE plex_rating_key IS NULL DO UPDATE SET
        title = excluded.title,
        poster_path = excluded.poster_path,
@@ -112,6 +112,7 @@ export function upsertTmdbOnlyRow(
     genres: JSON.stringify(row.genres),
     rating: row.rating,
     voteCount: row.voteCount,
+    lastUsedAt: row.lastUsedAt,
     cachedAt: now,
   })
   const found = db
