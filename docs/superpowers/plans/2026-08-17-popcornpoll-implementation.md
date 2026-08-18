@@ -11608,6 +11608,7 @@ Add to `messages/pt-br.json`, as a new top-level key alongside `common`/`createR
     "openPlexButton": "Abrir Plex para autorizar",
     "waitingForApproval": "Aguardando aprovação…",
     "cancelButton": "Cancelar",
+    "newCodeButton": "Gerar novo código",
     "chooseServerTitle": "Escolha o servidor",
     "noServersFound": "Nenhum servidor encontrado nesta conta do Plex.",
     "chooseLibrariesTitle": "Escolha as bibliotecas de filmes",
@@ -11638,6 +11639,7 @@ Add to `messages/en-us.json`, same key set:
     "openPlexButton": "Open Plex to authorize",
     "waitingForApproval": "Waiting for approval…",
     "cancelButton": "Cancel",
+    "newCodeButton": "Generate a new code",
     "chooseServerTitle": "Choose your server",
     "noServersFound": "No servers found on this Plex account.",
     "chooseLibrariesTitle": "Choose your movie libraries",
@@ -11920,9 +11922,26 @@ function SetupFlow() {
                 {t('waitingForApproval')}
               </Badge>
             )}
-            <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
-              {t('cancelButton')}
-            </Button>
+            {step === 'polling' && (
+              <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
+                {t('cancelButton')}
+              </Button>
+            )}
+            {step === 'pin' && (
+              // Reached after a cancel or a poll timeout — `pin` still holds
+              // the old, now-abandoned-or-expired code with nothing to
+              // approve anymore. Without this, `pollTimeoutError`'s own copy
+              // ("Generate a new code") promised an action the UI never
+              // offered, and the only way out was a full page reload back to
+              // the token step.
+              <Button
+                className="w-full bg-marquee text-ink hover:bg-marquee/90"
+                disabled={busy}
+                onClick={() => void requestPin()}
+              >
+                {t('newCodeButton')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
