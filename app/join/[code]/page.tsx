@@ -15,7 +15,7 @@ export default function JoinRoomPage({ params }: { params: { code: string } }) {
   const [displayName, setDisplayName] = useState('')
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-6 px-4">
+    <main className="mx-auto flex flex-1 max-w-sm flex-col items-center justify-center gap-6 px-4">
       <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('invitedTo')}</p>
       <h1 className="font-display text-3xl tracking-widest text-marquee">{params.code}</h1>
       <Card className="w-full border-2 border-brass bg-velvet">
