@@ -1,5 +1,6 @@
 // app/layout.tsx
 import { NextIntlClientProvider } from 'next-intl'
+import { getLocale } from 'next-intl/server'
 import { Anton, JetBrains_Mono, Work_Sans } from 'next/font/google'
 import { LocaleSwitcher } from '../components/LocaleSwitcher'
 import { SpotlightBackground } from '../components/SpotlightBackground'
@@ -12,9 +13,10 @@ const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' })
 
 export const metadata = { title: 'PopcornPoll' }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale()
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+    <html lang={locale} className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body>
         <NextIntlClientProvider>
           <SpotlightBackground />
