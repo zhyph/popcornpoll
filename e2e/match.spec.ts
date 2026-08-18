@@ -19,8 +19,8 @@ test('two participants reach a match', async ({ baseURL }) => {
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   await guestPage.waitForURL(/\/room\//)
   // Wait for the host's own roster to show both participants before starting
   // — clicking Start immediately after the guest's client-side navigation

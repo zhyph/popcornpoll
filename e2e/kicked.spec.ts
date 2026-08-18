@@ -16,8 +16,8 @@ test('a kicked participant sees the terminal screen and does not reconnect', asy
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   // Wait for both participants to show on the host's roster (one "Remove"
   // button each, host included) before kicking — same join-race reasoning
   // as e2e/reconnect.spec.ts.
@@ -58,8 +58,8 @@ test('remaining participants see the terminal screen when the host ends the sess
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   // Wait for the guest's own client-side navigation to the room page to land
   // before doing anything else with guestPage — without this, a later action
   // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an

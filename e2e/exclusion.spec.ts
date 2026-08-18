@@ -24,16 +24,16 @@ test('a participant disconnected through Start is excluded and their reconnect i
   await pinEnglishLocale(stayingGuestContext, baseURL!)
   const stayingGuestPage = await stayingGuestContext.newPage()
   await stayingGuestPage.goto(`/join/${roomCode}`)
-  await stayingGuestPage.fill('input[placeholder="Your name"]', 'Staying Guest')
-  await stayingGuestPage.click('text=Join')
+  await stayingGuestPage.getByTestId('join-name-input').fill('Staying Guest')
+  await stayingGuestPage.getByTestId('join-submit').click()
   await stayingGuestPage.waitForSelector('text=Admitted')
 
   const guestContext = await browser.newContext()
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Disconnecting Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Disconnecting Guest')
+  await guestPage.getByTestId('join-submit').click()
   await guestPage.waitForSelector('text=Admitted') // the lobby roster panel's heading
   const guestSessionToken = await guestPage.evaluate((code) => sessionStorage.getItem(`sessionToken:${code}`), roomCode)
 

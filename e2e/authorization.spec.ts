@@ -16,8 +16,8 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   // Confirm the guest's join actually completed (both participants visible
   // on the host's roster) before asserting Start stays invisible for the
   // guest — otherwise this could pass vacuously against a silently-failed
