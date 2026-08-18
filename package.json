@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",
-    "build": "next build && tsc -p tsconfig.server.json",
-    "start": "node dist/server/index.js",
+    "build": "next build",
+    "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -36,6 +36,7 @@
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.0",
     "ws": "^8.18.0",
     "zod": "^3.25.76"
   },
@@ -49,7 +50,6 @@
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.19",
-    "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   }
