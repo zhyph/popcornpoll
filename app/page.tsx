@@ -249,19 +249,23 @@ export default function CreateRoomPage() {
             <p className="mb-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass">{t('houseTonightLabel')}</p>
             <div className="grid grid-cols-3 gap-3.5">
               <div className="flex flex-col gap-1">
-                {stats ? (
-                  <CountUp to={stats.libraryCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
-                ) : (
-                  <Skeleton className="h-10 w-16" />
-                )}
+                <div data-testid="stat-library">
+                  {stats ? (
+                    <CountUp to={stats.libraryCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                  ) : (
+                    <Skeleton className="h-10 w-16" />
+                  )}
+                </div>
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inLibraryLabel')}</span>
               </div>
               <div className="flex flex-col gap-1">
-                {eligibleCount !== null ? (
-                  <CountUp to={eligibleCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
-                ) : (
-                  <Skeleton className="h-10 w-16" />
-                )}
+                <div data-testid="stat-pool">
+                  {eligibleCount !== null ? (
+                    <CountUp to={eligibleCount} className="font-display text-[clamp(30px,4vw,44px)] leading-none text-marquee" />
+                  ) : (
+                    <Skeleton className="h-10 w-16" />
+                  )}
+                </div>
                 <span className="font-mono text-[10px] uppercase tracking-wider text-ticket/60">{t('inThePoolLabel')}</span>
               </div>
               <div className="flex flex-col gap-1">
