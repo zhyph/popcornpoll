@@ -33,6 +33,8 @@ describe('openDb', () => {
     const db = openDb(dir)
     const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as { v: number }
     expect(version.v).toBe(1)
+    const count = db.prepare('SELECT COUNT(*) as c FROM schema_version').get() as { c: number }
+    expect(count.c).toBe(1)
     db.close()
   })
 

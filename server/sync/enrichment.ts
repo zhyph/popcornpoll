@@ -38,7 +38,15 @@ export function createEnrichmentWorker(
     start() {
       if (timer) return
       const tick = async () => {
-        await runOnce()
+        try {
+          await runOnce()
+        } catch (err) {
+          // A single failed fetch inside runOnce (TMDB down/rate-limited)
+          // must not permanently kill this recurring worker, nor become an
+          // unhandled rejection that crashes the process — log and let the
+          // schedule continue so the next tick can retry.
+          console.error('enrichment worker: runOnce failed, will retry on next tick', err)
+        }
         timer = setTimeout(tick, 30_000)
       }
       timer = setTimeout(tick, 0)

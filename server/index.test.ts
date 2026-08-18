@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './index'
+import { openDb } from './db'
+import { savePlexLink } from './plex/link'
 import type { AppConfig } from './config'
 
 let dir: string
@@ -68,5 +70,38 @@ describe('createApp', () => {
     // The server process must still be alive and serving other requests.
     const healthRes = await fetch(`http://localhost:${port}/api/health`)
     expect(healthRes.status).toBe(200)
+  })
+
+  it('boots successfully when the stored Plex link cannot be decrypted (AUTH_ENCRYPTION_KEY rotated)', async () => {
+    const rotDir = mkdtempSync(join(tmpdir(), 'popcornpoll-rotate-'))
+    const seedDb = openDb(rotDir)
+    savePlexLink(seedDb, 'b'.repeat(32), {
+      clientIdentifier: 'old-client',
+      serverUrl: 'http://old-plex.local',
+      authToken: 'old-token',
+      librarySectionIds: ['1'],
+      linkedAt: new Date().toISOString(),
+    })
+    seedDb.close()
+
+    const rotatedConfig: AppConfig = {
+      tmdbApiKey: 'x',
+      authEncryptionKey: 'c'.repeat(32), // different key than the one the link above was encrypted with
+      adminSetupToken: 'admin',
+      appOrigin: '',
+      trustedProxyHops: 0,
+      port: 0,
+      dataDir: rotDir,
+    }
+    const rotatedApp = await createApp(rotatedConfig, { skipFrontend: true })
+    try {
+      await new Promise<void>((resolve) => rotatedApp.httpServer.listen(0, resolve))
+      const port = (rotatedApp.httpServer.address() as { port: number }).port
+      const res = await fetch(`http://localhost:${port}/api/health`)
+      expect(res.status).toBe(200)
+    } finally {
+      await rotatedApp.shutdown()
+      rmSync(rotDir, { recursive: true, force: true })
+    }
   })
 })

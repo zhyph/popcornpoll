@@ -91,4 +91,18 @@ describe('createPlexClient', () => {
       expect.anything(),
     )
   })
+
+  it('getThumb sends a request with a bounded AbortSignal timeout', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      body: null,
+      status: 200,
+      headers: { get: () => 'image/jpeg' },
+    }) as unknown as typeof fetch
+    const client = createPlexClient('client-id')
+    await client.getThumb('http://192.168.1.10:32400', 'token', '100')
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/library/metadata/100/thumb'),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
 })

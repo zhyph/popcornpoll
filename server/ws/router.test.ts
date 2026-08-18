@@ -114,6 +114,34 @@ describe('handleMessage: start + room_started', () => {
     expect(otherCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(otherId)!.pendingCardId }])
   })
 
+  it('emits a degraded_to_plex_only notice to the room when TMDB fails during start', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await handleMessage(store, db, failingTmdb, state, { type: 'start' })
+    const notice = result.toRoom.find((m) => m.type === 'notice')
+    expect(notice).toEqual({
+      type: 'notice',
+      level: 'warning',
+      code: 'degraded_to_plex_only',
+      message: expect.any(String),
+    })
+  })
+
   it('a non-host start attempt returns not_host and does not change room status', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Host', hostClaimToken })

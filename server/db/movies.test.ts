@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from './index'
 import {
-  findByTmdbId,
   findEligiblePlexRows,
   findRowsNeedingEnrichment,
   mergeTmdbOnlyIntoPlexRow,
@@ -68,7 +67,6 @@ describe('upsertPlexRow + sweepRemoved', () => {
       lastUsedAt: null,
     })
     sweepRemoved(db, 2) // run 2 didn't touch row (stamped with runId 1)
-    const found = findByTmdbId(db, -1) // not used here; re-read via raw query instead
     const raw = db.prepare('SELECT in_library FROM movies WHERE id = ?').get(row.id) as {
       in_library: number
     }

@@ -1,3 +1,11 @@
+-- server/db/index.ts's runMigrations() strips the statement below out of
+-- this file via a regex before executing the rest of the file, because
+-- schema_version is already created via `CREATE TABLE IF NOT EXISTS` before
+-- migration 001 runs. The regex (see runMigrations in server/db/index.ts)
+-- matches from the literal words "CREATE TABLE" + "schema" + "underscore" +
+-- "version" up through the next semicolon, non-greedily. Reformatting or
+-- relocating the statement below, or adding another semicolon inside it,
+-- will silently break that regex.
 CREATE TABLE schema_version (
   version INTEGER PRIMARY KEY
 );

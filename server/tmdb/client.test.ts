@@ -80,4 +80,26 @@ describe('createTmdbClient', () => {
     mockFetchOnce({ movie_results: [] })
     expect(await client.findByImdbId('tt0000000')).toBeNull()
   })
+
+  it('discoverMovies throws on a non-ok response instead of destructuring an error body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      json: async () => ({ status_message: 'rate limited' }),
+    }) as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    await expect(client.discoverMovies({}, 5)).rejects.toThrow(/429/)
+  })
+
+  it('findByImdbId throws on a non-ok response instead of destructuring an error body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({ status_message: 'invalid api key' }),
+    }) as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    await expect(client.findByImdbId('tt0111161')).rejects.toThrow(/401/)
+  })
 })

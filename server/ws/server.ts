@@ -87,7 +87,19 @@ export function attachWebSocketServer(
 
       if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
 
-      const result = await handleMessage(store, db, tmdb, meta.state, message)
+      let result: Awaited<ReturnType<typeof handleMessage>>
+      try {
+        result = await handleMessage(store, db, tmdb, meta.state, message)
+      } catch (err) {
+        // A thrown/rejected error anywhere inside handleMessage (e.g. a
+        // database error reached through startRoom) is otherwise an
+        // unhandled rejection in this async listener, which crashes the
+        // whole single-replica process over one bad message. Catch, log,
+        // tell the client, and keep this connection and the process alive.
+        console.error('unhandled error in handleMessage', err)
+        send(ws, { type: 'error', code: 'internal_error', message: 'internal error' })
+        return
+      }
       meta.state = result.newState
       for (const m of result.toSender) send(ws, m)
 

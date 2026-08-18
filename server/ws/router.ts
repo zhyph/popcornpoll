@@ -214,12 +214,24 @@ export async function handleMessage(
       // value"). Incrementing seq a second time here, before stateUpdate,
       // would desync the two — a real bug this exact fix closes.
       const update = stateUpdate(room)
+      const toRoom: ServerMessage[] = [
+        { type: 'room_started', pool: room.pool, seq: update.seq },
+        update,
+      ]
+      if (result.data.degraded) {
+        // buildPool couldn't reach TMDB for this round and fell back to a
+        // Plex-only pool — tell the room rather than silently shrinking
+        // the candidate set without explanation.
+        toRoom.push({
+          type: 'notice',
+          level: 'warning',
+          code: 'degraded_to_plex_only',
+          message: 'TMDB is unavailable right now — this round uses your Plex library only.',
+        })
+      }
       return {
         ...emptyOutput(state),
-        toRoom: [
-          { type: 'room_started', pool: room.pool, seq: update.seq },
-          update,
-        ],
+        toRoom,
         toParticipant: Array.from(room.participants.values()).map((p) => ({
           participantId: p.id,
           messages: [{ type: 'next_card', movieId: p.pendingCardId }],

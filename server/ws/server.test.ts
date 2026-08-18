@@ -183,3 +183,66 @@ describe('attachWebSocketServer', () => {
     guestWs.close()
   })
 })
+
+describe('attachWebSocketServer: handleMessage failures do not crash the process', () => {
+  let crashDir: string
+  let crashDb: Database.Database
+  let crashServer: Server
+  let crashPort: number
+
+  beforeEach(async () => {
+    crashDir = mkdtempSync(join(tmpdir(), 'popcornpoll-wscrash-'))
+    crashDb = openDb(crashDir)
+    const store = createRoomStore()
+    crashServer = createServer()
+    attachWebSocketServer(crashServer, store, crashDb, noOpTmdb, { ...config, appOrigin: '' })
+    await new Promise<void>((resolve) => crashServer.listen(0, resolve))
+    crashPort = (crashServer.address() as AddressInfo).port
+    ;(globalThis as { __crashStore?: ReturnType<typeof createRoomStore> }).__crashStore = store
+  })
+
+  afterEach(async () => {
+    rmSync(crashDir, { recursive: true, force: true })
+    await new Promise<void>((resolve) => crashServer.close(() => resolve()))
+    // crashDb is deliberately closed inside the test itself, not here.
+  })
+
+  it('sends an error message and keeps the connection alive when handleMessage throws synchronously', async () => {
+    const store = (globalThis as { __crashStore?: ReturnType<typeof createRoomStore> }).__crashStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const ws = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await new Promise<void>((resolve) => ws.once('message', () => resolve())) // joined
+
+    const guest = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => guest.once('open', () => resolve()))
+    guest.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    // Guest's join broadcasts a state_update to the whole room, including the
+    // host — drain that on ws (host) concurrently with guest's own reply so
+    // it can't race with (and get mistaken for) the 'start' reply awaited below.
+    await Promise.all([
+      new Promise<void>((resolve) => guest.once('message', () => resolve())),
+      new Promise<void>((resolve) => ws.once('message', () => resolve())),
+    ])
+
+    crashDb.close() // simulates a database failure mid-request
+
+    ws.send(JSON.stringify({ type: 'start' }))
+    const reply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(reply.type).toBe('error')
+    expect(reply.code).toBe('internal_error')
+
+    // The connection (and process) must still be alive and responsive afterward.
+    ws.send(JSON.stringify({ type: 'heartbeat' }))
+    const heartbeatReply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(heartbeatReply.type).toBe('heartbeat_ack')
+
+    ws.close()
+    guest.close()
+  })
+})

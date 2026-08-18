@@ -38,6 +38,7 @@ export interface PoolFilters {
 export interface BuildPoolResult {
   pool: PoolEntry[]
   tooSmall: boolean
+  degraded: boolean
 }
 
 function toEntry(row: MovieRow): PoolEntry {
@@ -94,12 +95,25 @@ export async function buildPool(
   const plexRows = findEligiblePlexRows(db, filters)
 
   let tmdbRows: MovieRow[] = []
+  let degraded = false
   if (candidateSource === 'plex+tmdb') {
-    const discovered = await tmdb.discoverMovies(
-      { yearMin: filters.yearMin, yearMax: filters.yearMax, ratingMin: filters.ratingMin },
-      TMDB_DISCOVER_PAGE_CAP,
-    )
-    tmdbRows = await resolveTmdbCandidatesIntoRows(db, discovered)
+    try {
+      const discovered = await tmdb.discoverMovies(
+        { yearMin: filters.yearMin, yearMax: filters.yearMax, ratingMin: filters.ratingMin },
+        TMDB_DISCOVER_PAGE_CAP,
+      )
+      tmdbRows = await resolveTmdbCandidatesIntoRows(db, discovered)
+    } catch (err) {
+      // TMDB is down/rate-limited/misconfigured — degrade to a Plex-only
+      // pool for this room instead of letting the failure propagate up
+      // through startRoom and crash the WS message handler. The
+      // shortfall-backfill logic below naturally fills the pool from Plex
+      // alone once tmdbEligible is empty. The caller (startRoom) surfaces
+      // `degraded` to the room as a notice.
+      console.error('buildPool: tmdb.discoverMovies failed, degrading to plex-only pool', err)
+      tmdbRows = []
+      degraded = true
+    }
   }
 
   // Merge: a row that started as TMDB-only but actually matches a Plex row
@@ -144,5 +158,6 @@ export async function buildPool(
   return {
     pool: finalRows.map(toEntry),
     tooSmall: finalRows.length < POOL_MIN_SIZE,
+    degraded,
   }
 }

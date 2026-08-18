@@ -58,7 +58,7 @@ export async function startRoom(
   callerIsHost: boolean,
   db: Database.Database,
   tmdb: TmdbClient,
-): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[] }>> {
+): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean }>> {
   if (!callerIsHost) return err('not_host')
   const room = store.get(code)
   if (!room) return err('room_not_found')
@@ -100,7 +100,7 @@ export async function startRoom(
   }
   recomputeExhaustion(room)
 
-  return ok({ excludedParticipantIds, pool: room.pool })
+  return ok({ excludedParticipantIds, pool: room.pool, degraded: result.degraded })
 }
 
 export function swipeAction(

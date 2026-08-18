@@ -108,6 +108,7 @@ export function createPlexClient(clientIdentifier: string): PlexClient {
     async getThumb(serverUrl, authToken, ratingKey) {
       const res = await fetch(
         `${serverUrl}/library/metadata/${ratingKey}/thumb?X-Plex-Token=${authToken}`,
+        { signal: AbortSignal.timeout(10_000) },
       )
       return {
         body: res.body,

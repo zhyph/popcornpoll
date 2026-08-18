@@ -88,4 +88,36 @@ describe('createEnrichmentWorker', () => {
     expect(await worker.runOnce()).toBe(0)
     expect(tmdb.getMovieDetails).not.toHaveBeenCalled()
   })
+
+  it('start() survives a rejected runOnce and still reschedules the next tick', async () => {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-crash',
+      tmdbId: 42,
+      imdbId: null,
+      title: 'X',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: null,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    const getMovieDetails = vi.fn().mockRejectedValueOnce(new Error('TMDB down'))
+    const tmdb: Partial<TmdbClient> = { getMovieDetails }
+    const worker = createEnrichmentWorker(db, tmdb as TmdbClient)
+
+    const unhandled = vi.fn()
+    process.once('unhandledRejection', unhandled)
+    worker.start()
+    // start()'s first tick runs on a setTimeout(tick, 0) — give it a turn
+    // of the event loop to run and reject before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    worker.stop()
+
+    expect(unhandled).not.toHaveBeenCalled()
+    expect(getMovieDetails).toHaveBeenCalledTimes(1)
+  })
 })

@@ -56,6 +56,9 @@ export function createTmdbClient(apiKey: string): TmdbClient {
         if (filters.ratingMin) params.set('vote_average.gte', String(filters.ratingMin))
 
         const res = await fetch(`${base}/discover/movie?${params.toString()}`)
+        if (!res.ok) {
+          throw new Error(`TMDB discover request failed: ${res.status} ${res.statusText}`)
+        }
         const body = (await res.json()) as { results: TmdbDiscoverResult[]; total_pages: number }
         for (const r of body.results) {
           movies.push({
@@ -85,6 +88,9 @@ export function createTmdbClient(apiKey: string): TmdbClient {
       const res = await fetch(
         `${base}/find/${imdbId}?api_key=${apiKey}&external_source=imdb_id`,
       )
+      if (!res.ok) {
+        throw new Error(`TMDB find request failed: ${res.status} ${res.statusText}`)
+      }
       const body = (await res.json()) as { movie_results: { id: number }[] }
       return body.movie_results[0]?.id ?? null
     },

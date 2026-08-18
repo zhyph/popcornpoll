@@ -1,10 +1,34 @@
 // server/rateLimit.ts
 export interface TokenBucket {
   tryConsume(key: string): boolean
+  size(): number
 }
 
-export function createTokenBucket(maxTokens: number, refillPerSecond: number): TokenBucket {
+const DEFAULT_IDLE_EVICTION_MS = 30 * 60_000
+const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000
+
+export function createTokenBucket(
+  maxTokens: number,
+  refillPerSecond: number,
+  idleEvictionMs = DEFAULT_IDLE_EVICTION_MS,
+  sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
+): TokenBucket {
   const buckets = new Map<string, { tokens: number; lastRefill: number }>()
+
+  function evictStale(now: number): void {
+    for (const [key, bucket] of buckets) {
+      if (now - bucket.lastRefill > idleEvictionMs) buckets.delete(key)
+    }
+  }
+
+  // Buckets are keyed by client IP and otherwise never removed — over the
+  // life of a long-running process that's an unbounded Map. A periodic
+  // sweep drops any bucket that hasn't been touched in idleEvictionMs, so
+  // memory stays bounded by recently-active keys rather than every IP
+  // that has ever connected. unref() so this timer alone can't keep the
+  // process alive.
+  const sweepTimer = setInterval(() => evictStale(Date.now()), sweepIntervalMs)
+  sweepTimer.unref()
 
   return {
     tryConsume(key) {
@@ -21,6 +45,9 @@ export function createTokenBucket(maxTokens: number, refillPerSecond: number): T
       if (bucket.tokens < 1) return false
       bucket.tokens -= 1
       return true
+    },
+    size() {
+      return buckets.size
     },
   }
 }

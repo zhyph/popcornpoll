@@ -119,4 +119,23 @@ describe('buildPool', () => {
     const b = await buildPool(db, noOpTmdb, 'plex', {}, 42)
     expect(a.pool.map((e) => e.movieId)).toEqual(b.pool.map((e) => e.movieId))
   })
+
+  it('degrades to a plex-only pool and reports degraded: true when discoverMovies rejects', async () => {
+    seedPlexRows(20)
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await buildPool(db, failingTmdb, 'plex+tmdb', {}, 1)
+    expect(result.degraded).toBe(true)
+    expect(result.tooSmall).toBe(false)
+    expect(result.pool.every((e) => e.inLibrary)).toBe(true) // no TMDB-only entries made it in
+  })
+
+  it('reports degraded: false on a normal successful build', async () => {
+    seedPlexRows(150)
+    const result = await buildPool(db, noOpTmdb, 'plex', {}, 1)
+    expect(result.degraded).toBe(false)
+  })
 })

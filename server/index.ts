@@ -1,6 +1,7 @@
 // server/index.ts
 import { createServer } from 'node:http'
 import next from 'next'
+import type Database from 'better-sqlite3'
 import { loadConfig, type AppConfig } from './config'
 import { openDb } from './db'
 import { createPlexClient } from './plex/client'
@@ -15,14 +16,34 @@ import { createRoomsHandler } from './http/rooms'
 import { createSetupHandlers } from './http/setup'
 import { createImageProxyHandler } from './http/imageProxy'
 import { createHealthHandler } from './http/health'
-import { getPlexLink, savePlexLink } from './plex/link'
+import { DecryptionError, getPlexLink, savePlexLink } from './plex/link'
 
 const SWEEP_INTERVAL_MS = 60_000
+
+// getPlexLink throws DecryptionError when AUTH_ENCRYPTION_KEY has changed
+// since the stored link was encrypted. That must not take the whole
+// process down at boot — treat it the same as "not linked yet" so the
+// setup/relink flow (not a crash loop) is the actual recovery path.
+function safeGetPlexLink(db: Database.Database, key: string) {
+  try {
+    return getPlexLink(db, key)
+  } catch (err) {
+    if (err instanceof DecryptionError) {
+      console.error(
+        'Failed to decrypt stored Plex link — AUTH_ENCRYPTION_KEY may have changed. ' +
+          'Continuing boot as if no Plex link were saved; re-link via setup to recover.',
+        err,
+      )
+      return null
+    }
+    throw err
+  }
+}
 
 export async function createApp(config: AppConfig, opts: { skipFrontend?: boolean } = {}) {
   const db = openDb(config.dataDir)
   const store = createRoomStore()
-  if (process.env.FAKE_EXTERNAL_APIS === 'true' && !getPlexLink(db, config.authEncryptionKey)) {
+  if (process.env.FAKE_EXTERNAL_APIS === 'true' && !safeGetPlexLink(db, config.authEncryptionKey)) {
     // e2e/dev fixture mode: seed a fake link so librarySync can run without a
     // real OAuth flow — the fake client below ignores serverUrl/authToken.
     savePlexLink(db, config.authEncryptionKey, {
@@ -33,7 +54,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
       linkedAt: new Date().toISOString(),
     })
   }
-  const clientIdentifier = getPlexLink(db, config.authEncryptionKey)?.clientIdentifier ?? 'popcornpoll-instance'
+  const clientIdentifier = safeGetPlexLink(db, config.authEncryptionKey)?.clientIdentifier ?? 'popcornpoll-instance'
   const plex =
     process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakePlexClient() : createPlexClient(clientIdentifier)
   const tmdb = createTmdbClient(config.tmdbApiKey)
@@ -79,9 +100,13 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
           webRes = await setupHandlers.resync(webReq)
           if (webRes.status === 200) {
             if (process.env.FAKE_EXTERNAL_APIS === 'true') {
-              await librarySync.run() // e2e fixture mode: block so the caller can create a room immediately after
+              // e2e fixture mode: block so the caller can create a room
+              // immediately after — but a failure here must not turn a
+              // successful 200 resync response into a 500, so catch and log
+              // rather than let it reach the outer try/catch.
+              await librarySync.run().catch((err) => console.error('librarySync.run failed', err))
             } else {
-              void librarySync.run()
+              void librarySync.run().catch((err) => console.error('librarySync.run failed', err))
             }
           }
         } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)

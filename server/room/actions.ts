@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'not_enough_participants'
   | 'pool_too_small'
   | 'not_your_card'
+  | 'internal_error'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; code: ErrorCode }
 

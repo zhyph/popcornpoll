@@ -114,6 +114,26 @@ describe('startRoom', () => {
     expect(room.participants.get(host.data.participantId)!.pendingCardId).not.toBeNull()
     expect(room.participants.get(other.data.participantId)!.pendingCardId).not.toBeNull()
   })
+
+  it('propagates buildPool degraded: true through to the caller on TMDB failure', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
+    if (!host.ok || !other.ok) throw new Error('setup failed')
+    seedPlexRows(20)
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+
+    const result = await startRoom(store, code, true, db, failingTmdb)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.degraded).toBe(true)
+    expect(store.get(code)!.status).toBe('active') // degraded, not failed — the room still starts
+  })
 })
 
 describe('swipeAction', () => {
