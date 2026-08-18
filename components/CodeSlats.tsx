@@ -20,7 +20,7 @@ export function slatGroups(code: string): Slat[][] {
 export default function CodeSlats({ code }: { code: string }) {
   const groups = slatGroups(code)
   return (
-    <div className="flex items-center gap-3 sm:gap-4" aria-label={code}>
+    <div className="flex items-center gap-3 sm:gap-4" aria-label={code} role="img">
       {groups.map((letters, gi) => (
         <div key={gi} className="flex gap-1 sm:gap-1.5">
           {letters.map(({ letter, delay }, li) => (

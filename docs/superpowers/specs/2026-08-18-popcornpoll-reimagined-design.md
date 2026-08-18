@@ -216,7 +216,7 @@ place; do not rewrite data/WS wiring:
 | Screen | Files | testid discipline |
 |---|---|---|
 | Box office | `app/page.tsx` | new `data-testid="create-room"` on the submit button (none exists today) |
-| Ticket (join) | `app/join/[code]/page.tsx` | unchanged testids |
+| Ticket (join) | `app/join/[code]/page.tsx` | new `data-testid="join-name-input"`/`"join-submit"` added (previously no testids existed on this screen) |
 | Lobby | `app/room/[code]/page.tsx`, `RoomShare`, `TicketAvatar` | unchanged |
 | Now showing | `SwipeDeck`, `server/pool/buildPool.ts` | keep `data-testid="swipe-card"` on the top card |
 | Match | `MarqueeReveal` | keep `data-testid="match-banner"` on the wrapping element in `RoomPage` |
