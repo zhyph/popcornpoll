@@ -60,6 +60,11 @@ test('remaining participants see the terminal screen when the host ends the sess
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
+  // Wait for the guest's own client-side navigation to the room page to land
+  // before doing anything else with guestPage — without this, a later action
+  // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an
+  // in-flight navigation. See e2e/match.spec.ts, which has this same wait.
+  await guestPage.waitForURL(/\/room\//)
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
   await hostPage.click('text=Start')

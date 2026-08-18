@@ -19,6 +19,11 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
+  // Wait for the guest's own client-side navigation to the room page to land
+  // before doing anything else with guestPage — without this, a later action
+  // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an
+  // in-flight navigation. See e2e/match.spec.ts, which has this same wait.
+  await guestPage.waitForURL(/\/room\//)
   // Wait for the host's own roster to show both participants (one "Remove"
   // button per admitted participant, host included) before starting —
   // clicking Start immediately after the guest's client-side navigation
