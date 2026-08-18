@@ -37,7 +37,24 @@ export default function CreateRoomPage() {
     plexLinked: boolean
     lastSyncAt: number | null
   } | null>(null)
-  const eligibleCount: number | null = null // placeholder — Task 11 replaces this with real useState + a debounced fetch effect
+  const [eligibleCount, setEligibleCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (genre) params.set('genre', genre)
+    if (ratingMin) params.set('ratingMin', ratingMin)
+    if (yearMin) params.set('yearMin', yearMin)
+    if (yearMax) params.set('yearMax', yearMax)
+
+    const timer = setTimeout(() => {
+      fetch(`/api/eligible-count?${params.toString()}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((body) => body && setEligibleCount(body.count))
+        .catch(() => {}) // decorative — a failed fetch just leaves the previous count (or the skeleton) in place
+    }, 400)
+
+    return () => clearTimeout(timer)
+  }, [genre, ratingMin, yearMin, yearMax])
 
   useEffect(() => {
     fetch('/api/stats')
