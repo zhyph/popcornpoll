@@ -38,9 +38,9 @@ describe('openDb', () => {
     db.close()
     db = openDb(dir)
     const version = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as { v: number }
-    expect(version.v).toBe(2)
+    expect(version.v).toBe(3)
     const count = db.prepare('SELECT COUNT(*) as c FROM schema_version').get() as { c: number }
-    expect(count.c).toBe(2)
+    expect(count.c).toBe(3)
   })
 
   it('enforces movies_tmdb_only_uq — two NULL-plex_rating_key rows with the same tmdb_id collide', () => {

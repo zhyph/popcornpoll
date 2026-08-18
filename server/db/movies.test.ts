@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from './index'
+import { insertMatch } from './matchHistory'
 import {
   findEligiblePlexRows,
   findRowsNeedingEnrichment,
@@ -116,6 +117,46 @@ describe('upsertTmdbOnlyRow + mergeTmdbOnlyIntoPlexRow', () => {
     const deleted = db.prepare('SELECT * FROM movies WHERE id = ?').get(tmdbOnly.id)
     expect(deleted).toBeUndefined()
   })
+
+  it('does not throw FOREIGN KEY constraint failed when merging a TMDB-only row that has a match_history entry', () => {
+    const tmdbOnly = upsertTmdbOnlyRow(db, {
+      tmdbId: 300,
+      imdbId: null,
+      title: 'Matched',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2019,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: null,
+    })
+    insertMatch(db, {
+      movieId: tmdbOnly.id,
+      roomCode: 'REG-TEST-1',
+      title: 'Matched',
+      posterPath: null,
+      posterSource: 'tmdb',
+      year: 2019,
+    })
+    const plexRow = upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-reg-1',
+      tmdbId: null,
+      imdbId: null,
+      title: 'Matched',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2019,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    expect(() => mergeTmdbOnlyIntoPlexRow(db, plexRow.id, tmdbOnly.id)).not.toThrow()
+  })
 })
 
 describe('findRowsNeedingEnrichment', () => {
@@ -179,6 +220,33 @@ describe('pruneStaleTmdbOnlyRows', () => {
     expect(deletedCount).toBe(1)
     expect(db.prepare('SELECT * FROM movies WHERE id = ?').get(old.id)).toBeUndefined()
     expect(db.prepare('SELECT * FROM movies WHERE id = ?').get(keep.id)).toBeDefined()
+  })
+
+  it('does not throw FOREIGN KEY constraint failed when pruning a stale TMDB-only row that has a match_history entry', () => {
+    const stale = upsertTmdbOnlyRow(db, {
+      tmdbId: 301,
+      imdbId: null,
+      title: 'StaleMatched',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2018,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: null,
+    })
+    insertMatch(db, {
+      movieId: stale.id,
+      roomCode: 'REG-TEST-2',
+      title: 'StaleMatched',
+      posterPath: null,
+      posterSource: 'tmdb',
+      year: 2018,
+    })
+    db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(stale.id)
+    expect(() => pruneStaleTmdbOnlyRows(db, 30, new Set())).not.toThrow()
+    expect(db.prepare('SELECT * FROM movies WHERE id = ?').get(stale.id)).toBeUndefined()
   })
 })
 

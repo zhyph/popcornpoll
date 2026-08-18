@@ -195,14 +195,18 @@ export async function handleMessage(
       const toRoom: ServerMessage[] = [stateUpdate(room)]
       for (const movieId of result.data.newMatches) {
         const movie = room.pool.find((p) => p.movieId === movieId)!
-        insertMatch(db, {
-          movieId: movie.movieId,
-          roomCode: room.code,
-          title: movie.title,
-          posterPath: movie.posterPath,
-          posterSource: movie.posterSource,
-          year: movie.year,
-        })
+        try {
+          insertMatch(db, {
+            movieId: movie.movieId,
+            roomCode: room.code,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            posterSource: movie.posterSource,
+            year: movie.year,
+          })
+        } catch (err) {
+          console.error('insertMatch failed', err)
+        }
         toRoom.push({ type: 'match', movieId, movie, seq: room.seq })
       }
       if (result.data.exhaustedNow && room.matches.length === 0) {
@@ -272,14 +276,18 @@ export async function handleMessage(
       const toRoom: ServerMessage[] = [stateUpdate(updatedRoom)]
       for (const movieId of result.data.newMatches) {
         const movie = updatedRoom.pool.find((p) => p.movieId === movieId)!
-        insertMatch(db, {
-          movieId: movie.movieId,
-          roomCode: updatedRoom.code,
-          title: movie.title,
-          posterPath: movie.posterPath,
-          posterSource: movie.posterSource,
-          year: movie.year,
-        })
+        try {
+          insertMatch(db, {
+            movieId: movie.movieId,
+            roomCode: updatedRoom.code,
+            title: movie.title,
+            posterPath: movie.posterPath,
+            posterSource: movie.posterSource,
+            year: movie.year,
+          })
+        } catch (err) {
+          console.error('insertMatch failed', err)
+        }
         toRoom.push({ type: 'match', movieId, movie, seq: updatedRoom.seq })
       }
       if (updatedRoom.exhausted && updatedRoom.matches.length === 0) {
