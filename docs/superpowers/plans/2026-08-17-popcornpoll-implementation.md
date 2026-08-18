@@ -8240,11 +8240,36 @@ git commit -m "test: playwright e2e coverage for match, reconnect, exhaustion, a
 - Create: `Dockerfile`
 - Create: `.dockerignore`
 - Create: `README.md`
+- Modify: `package.json` (fix `build`/`start` and move `tsx` to `dependencies` — see Step 1)
 
 **Interfaces:**
-- Consumes: `npm run build` / `npm run start` (Task 1's `package.json` scripts — `start` runs the server via `tsx`, same as `dev`, not an ahead-of-time `tsc` compile; see the note on Task 1's `package.json` step for why), `/api/health` (Task 20)
+- Consumes: `npm run build` / `npm run start` (Task 1's `package.json` scripts — this task fixes them; see Step 1), `/api/health` (Task 20)
 
-- [ ] **Step 1: Write `.dockerignore`**
+- [ ] **Step 1: Fix `package.json`'s `build`/`start` scripts — the ahead-of-time server compile Task 1 specified can't actually work**
+
+Task 1's `package.json` originally shipped `"build": "next build && tsc -p tsconfig.server.json"` and `"start": "node dist/server/index.js"`, compiling the server to CommonJS via a `tsconfig.server.json` this task was originally going to create. That can't work: `server/db/index.ts` (Task 3) uses `import.meta.dirname`, which TypeScript only permits under an ESM-family `module` target — never `CommonJS` — so the compile would fail outright. Fixing the target to an ESM `module` doesn't fully fix it either: Node's native ESM resolver requires explicit `.js` extensions on every relative import, and `server/**/*.ts` (Tasks 1-23, already reviewed and approved) uses extensionless relative imports throughout, which `tsx` resolves transparently at dev-time but plain `node` running compiled output cannot. Rewriting every relative import across the server codebase to add extensions, just to support an ahead-of-time compile step, is a large, invasive change for no real benefit in a small self-hosted app.
+
+Fix: drop the compile step. `start` runs the server via `tsx`, identically to `dev` — the only difference between dev and prod becomes the environment (`NODE_ENV`, etc.), not the command. This also means `tsconfig.server.json` is never created — this task's Dockerfile (Step 3) runs `server/` from source instead.
+
+```json
+// package.json — replace:
+//   "build": "next build && tsc -p tsconfig.server.json",
+//   "start": "node dist/server/index.js",
+// with:
+"build": "next build",
+"start": "tsx server/index.ts",
+```
+
+Move `tsx` from `devDependencies` to `dependencies` — it's now load-bearing at runtime, not just a dev convenience (the version string is unchanged, `^4.19.0`).
+
+Run `npm run build` (should now just run `next build`, no `tsc` step) and `npx vitest run` to confirm nothing broke, then commit this on its own:
+
+```bash
+git add package.json
+git commit -m "fix: package.json build/start scripts specified an ahead-of-time server compile that can't work for this codebase — run via tsx in production too"
+```
+
+- [ ] **Step 2: Write `.dockerignore`**
 
 ```
 node_modules
@@ -8256,7 +8281,7 @@ e2e
 **/*.test.ts
 ```
 
-- [ ] **Step 2: Write the multi-stage `Dockerfile`**
+- [ ] **Step 3: Write the multi-stage `Dockerfile`**
 
 The runtime image needs the compiled Next.js output (`.next/`, produced by `npm run build`) but runs the server itself straight from TypeScript source via `tsx` — so the runtime stage copies `server/`, `next.config.js`, and `tsconfig.json` alongside `.next/`, not a `dist/` directory (there isn't one; see Task 1's `package.json` note).
 
@@ -8293,7 +8318,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 CMD ["npx", "tsx", "server/index.ts"]
 ```
 
-- [ ] **Step 3: Build the image and run the healthcheck manually to confirm the Dockerfile is correct**
+- [ ] **Step 4: Build the image and run the healthcheck manually to confirm the Dockerfile is correct**
 
 ```bash
 docker build -t popcornpoll:local .
@@ -8309,7 +8334,7 @@ docker volume rm popcornpoll-test-data
 
 Expected: the `curl` returns `{"status":"ok"}` with a 200.
 
-- [ ] **Step 4: Write `README.md`**
+- [ ] **Step 5: Write `README.md`**
 
 ```markdown
 # PopcornPoll
@@ -8390,7 +8415,7 @@ npm run test:e2e        # end-to-end tests (Playwright, runs against FAKE_EXTERN
 \`\`\`
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add Dockerfile .dockerignore README.md
