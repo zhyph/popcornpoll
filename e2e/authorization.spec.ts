@@ -8,7 +8,7 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
   await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
@@ -34,7 +34,7 @@ test('reconnecting with only sessionToken (no hostToken) does not grant host con
   await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
   const sessionToken = await hostPage.evaluate((code) => sessionStorage.getItem(`sessionToken:${code}`), roomCode)
@@ -62,7 +62,7 @@ test('host status survives a page reload (hostToken persisted in localStorage)',
   await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
 
   // Generous timeouts (matching e.g. e2e/authorization.spec.ts's other cases

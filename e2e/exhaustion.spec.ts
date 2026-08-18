@@ -11,7 +11,7 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   await hostPage.goto('/')
   // Match rule defaults to 'all' (CreateRoomPage's initial state) — require
   // unanimity, so one "no" prevents any match. No Select interaction needed.
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 

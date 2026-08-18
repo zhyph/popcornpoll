@@ -11,7 +11,7 @@ test('two participants reach a match', async ({ baseURL }) => {
   await hostPage.goto('/')
   // Candidate source defaults to 'plex' (CreateRoomPage's initial state) — no
   // interaction with the shadcn Select needed for this scenario.
-  await hostPage.click('text=Create room')
+  await hostPage.getByTestId('create-room').click()
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
