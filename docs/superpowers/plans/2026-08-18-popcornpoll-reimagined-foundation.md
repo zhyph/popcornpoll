@@ -6,7 +6,9 @@
 
 **Architecture:** Pure frontend addition on top of the existing Next.js App Router app. React Bits components are pulled via the shadcn CLI's `@react-bits` registry (already configured in `components.json`) into a new `components/ui/reactbits/` folder, exactly the way `components/ui/Aurora.tsx` was already vendored. Hand-authored chrome components live in a new `components/chrome/` folder and replace `components/SpotlightBackground.tsx` in `app/layout.tsx`. No backend, no per-screen restyle — those are follow-on plans that build on this one.
 
-**Tech Stack:** Next.js App Router, React 18, TypeScript strict, Tailwind, `framer-motion` (existing), `gsap`/`@gsap/react` (new), `@react-three/fiber`/`@react-three/postprocessing`/`postprocessing`/`three` (new), `ogl` (existing), Playwright.
+**Tech Stack:** Next.js App Router, React 18, TypeScript strict, Tailwind, `framer-motion` (existing), `gsap`/`@gsap/react` (new), `ogl` (existing), Playwright.
+
+**Amendment (mid-execution, Task 2):** the spec's Dither entry was originally planned as a vendored React Bits component via `@react-three/fiber`/`@react-three/postprocessing`/`postprocessing`/`three`. That dependency chain turned out to hard-require React 19 (`@react-three/postprocessing@^3.0.4`'s own peer dependency is `react: "^19.0"`) — this app is pinned to React 18.3.1 on Next.js 14.2, which does not support React 19. Task 2 vendored it, confirmed the incompatibility, and was reverted (commit `fedf5b4`). Dither is dropped from this plan; Task 7's grain layer is hand-authored CSS instead (matching the original mockup's own grain technique, which is CSS, not React Bits, at its core). No React Three Fiber dependency is added anywhere in this plan.
 
 **Spec:** `docs/superpowers/specs/2026-08-18-popcornpoll-reimagined-design.md` — this plan implements that spec's "Shared chrome" and "React Bits components" sections. Executors should have both open. Follow-on plans (not yet written) will cover the spec's per-screen restyles and backend additions.
 
@@ -61,56 +63,11 @@ git commit -m "feat: vendor React Bits SplitText and CardSwap"
 
 ---
 
-## Task 2: Vendor Dither (adds `@react-three/fiber`, `@react-three/postprocessing`, `postprocessing`, `three`)
+## Task 2: Dropped — Dither is not React-19-compatible with this app
 
-**Files:**
-- Create: `components/ui/reactbits/Dither.tsx`
-- Modify: `package.json`
+**Status: SKIPPED.** Originally "Vendor Dither (adds `@react-three/fiber`, `@react-three/postprocessing`, `postprocessing`, `three`)". Attempted, reverted (commit `fedf5b4`) once `npm install` only succeeded via `legacy-peer-deps=true` and independent verification confirmed `@react-three/postprocessing@^3.0.4` (the version Dither's vendored source actually imports) declares a hard peer dependency on `react: "^19.0"` — this app is pinned to `react@^18.3.1`/`react-dom@^18.3.1` on Next.js 14.2, which does not support React 19. `legacy-peer-deps=true` would have suppressed npm's warning without fixing the actual runtime incompatibility (React Three Fiber v9's reconciler targets React 19's concurrent APIs), and an app-wide React 19 upgrade is far outside this plan's scope and blast radius to force through as a side effect of one ambient background layer.
 
-**Interfaces:**
-- Produces: `export default function Dither(props: DitherProps): JSX.Element` at `components/ui/reactbits/Dither.tsx`, where
-  ```ts
-  interface DitherProps {
-    waveSpeed?: number        // default 0.05
-    waveFrequency?: number    // default 3
-    waveAmplitude?: number    // default 0.3
-    waveColor?: [number, number, number]  // default [0.5, 0.5, 0.5]
-    colorNum?: number         // default 4
-    pixelSize?: number        // default 2
-    disableAnimation?: boolean  // default false — freezes the shader on a static frame
-    enableMouseInteraction?: boolean  // default true
-    mouseRadius?: number      // default 1
-  }
-  ```
-  Renders a React Three Fiber `<Canvas className="w-full h-full relative" ...>` — same sizing contract as `Aurora` (needs an explicitly-sized/positioned parent). Consumed by Task 7 (`AtmosphereLayer`).
-
-This is the heaviest dependency addition in this plan: unlike `LightRays`/`MetaBalls` (which reuse the already-installed `ogl`), `Dither`'s vendored source is built on React Three Fiber/`three.js`, a separate WebGL stack. Flagging this explicitly rather than let it arrive as a surprise in a `package.json` diff — the spec's redesign approach was approved with "vendor everything real," which is what this task does, but it's worth knowing the actual cost: `three` alone is a substantial addition next to `ogl`'s minimal footprint.
-
-- [ ] **Step 1: Pull the component**
-
-```bash
-npx shadcn@latest add @react-bits/Dither-TS-TW
-```
-
-Installs `@react-three/fiber`, `@react-three/postprocessing`, `postprocessing`, and `three` (all four are direct imports in the vendored file) and writes `components/Dither.tsx`.
-
-- [ ] **Step 2: Move the fetched file**
-
-```bash
-mv components/Dither.tsx components/ui/reactbits/Dither.tsx
-```
-
-- [ ] **Step 3: Typecheck**
-
-Run: `npm run typecheck`
-Expected: PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add components/ui/reactbits/Dither.tsx package.json package-lock.json
-git commit -m "feat: vendor React Bits Dither (adds react-three-fiber/three)"
-```
+No file is created by this task. `components/ui/reactbits/Dither.tsx` does not exist and is not referenced by any later task — Task 7's `AtmosphereLayer` (below) uses a hand-authored CSS grain layer instead, matching the original mockup's own grain technique (a `repeating-radial-gradient` composite under a `steps()` keyframe shift), which is what the mockup actually built for this element regardless of its footer's React Bits credit line.
 
 ---
 
@@ -358,10 +315,11 @@ git commit -m "feat: vendor React Bits ClickSpark, StarBorder, LetterGlitch"
 **Files:**
 - Create: `lib/usePrefersReducedMotion.ts`
 - Create: `components/chrome/AtmosphereLayer.tsx`
-- Modify: none yet (wired into `app/layout.tsx` in Task 11)
+- Modify: `app/globals.css` (adds the `grainShift` keyframe)
+- `app/layout.tsx` itself is not modified yet — wired in Task 11
 
 **Interfaces:**
-- Consumes: `Dither` (Task 2, props above), `LightRays` (Task 3, props above), `Aurora` (existing, `components/ui/Aurora.tsx`, props `{ colorStops?: string[], amplitude?: number, blend?: number, time?: number, speed?: number }`).
+- Consumes: `LightRays` (Task 3, props above), `Aurora` (existing, `components/ui/Aurora.tsx`, props `{ colorStops?: string[], amplitude?: number, blend?: number, time?: number, speed?: number }`). Does **not** consume `Dither` — Task 2 was dropped (React 19 incompatibility, see its section above); the grain layer below is hand-authored CSS instead, values copied verbatim from the approved mockup (`PopcornPoll Reimagined.dc.html`'s `grainShift` keyframe and grain layer `<div>`), not reinvented.
 - Produces:
   ```ts
   function usePrefersReducedMotion(): boolean
@@ -403,16 +361,16 @@ export function usePrefersReducedMotion(): boolean {
 'use client'
 
 import Aurora from '../ui/Aurora'
-import Dither from '../ui/reactbits/Dither'
 import LightRays from '../ui/reactbits/LightRays'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
 
 // Three stacked ambient layers behind every screen, replacing
 // components/SpotlightBackground.tsx: Aurora (existing colour wash),
-// LightRays (the mockup's beam-sway), Dither (the mockup's film-grain
-// shader). All three freeze to a static frame under prefers-reduced-motion
-// instead of rendering — this is the one app-wide motion gate, not a
-// per-screen or per-user toggle.
+// LightRays (the mockup's beam-sway), and a hand-authored film-grain layer
+// (the mockup's own grainShift keyframe/repeating-radial-gradient recipe —
+// Dither was dropped, see Task 2). All freeze to a static frame under
+// prefers-reduced-motion instead of animating — this is the one app-wide
+// motion gate, not a per-screen or per-user toggle.
 export function AtmosphereLayer() {
   const reducedMotion = usePrefersReducedMotion()
 
@@ -426,22 +384,37 @@ export function AtmosphereLayer() {
           <LightRays raysOrigin="top-center" raysColor="#F5A623" raysSpeed={0.6} lightSpread={1.4} rayLength={1.6} followMouse={false} />
         </div>
       )}
-      <div className="absolute inset-0 opacity-[0.15] mix-blend-overlay">
-        <Dither
-          waveSpeed={0.05}
-          waveColor={[0.95, 0.91, 0.82]}
-          colorNum={4}
-          pixelSize={2}
-          disableAnimation={reducedMotion}
-          enableMouseInteraction={false}
-        />
-      </div>
+      <div
+        className="absolute inset-0"
+        style={{
+          opacity: 0.22,
+          mixBlendMode: 'overlay',
+          animation: reducedMotion ? 'none' : 'grainShift 900ms steps(3) infinite',
+          backgroundImage:
+            'repeating-radial-gradient(circle at 17% 29%, rgba(243,233,210,.11) 0 1px, transparent 1px 3px), repeating-radial-gradient(circle at 71% 63%, rgba(16,12,9,.16) 0 1px, transparent 1px 4px), repeating-radial-gradient(circle at 43% 88%, rgba(243,233,210,.08) 0 1px, transparent 1px 5px)',
+          backgroundSize: '37px 37px, 53px 53px, 71px 71px',
+        }}
+      />
     </div>
   )
 }
 ```
 
-`LightRays` has no `disableAnimation`/pause prop, unlike `Dither` — under reduced motion it's skipped entirely rather than rendered inert, which is why it's the only one of the three behind an `if`.
+`LightRays` has no `disableAnimation`/pause prop — under reduced motion it's skipped entirely rather than rendered inert, which is why it's behind an `if` while the grain layer (which just switches its own CSS `animation` to `none`) and Aurora (`speed={0}`) aren't.
+
+- [ ] **Step 2b: Add the `grainShift` keyframe to `app/globals.css`**
+
+Append to `app/globals.css` (verbatim from the mockup):
+
+```css
+@keyframes grainShift {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-2%, 1%); }
+  50% { transform: translate(1%, -2%); }
+  75% { transform: translate(-1%, -1%); }
+  100% { transform: translate(0, 0); }
+}
+```
 
 - [ ] **Step 3: Typecheck**
 
@@ -451,7 +424,7 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add lib/usePrefersReducedMotion.ts components/chrome/AtmosphereLayer.tsx
+git add lib/usePrefersReducedMotion.ts components/chrome/AtmosphereLayer.tsx app/globals.css
 git commit -m "feat: add usePrefersReducedMotion hook and AtmosphereLayer"
 ```
 
@@ -870,7 +843,7 @@ rm components/SpotlightBackground.tsx
 - [ ] **Step 5: Typecheck and build**
 
 Run: `npm run typecheck && npm run build`
-Expected: PASS. The `build` step matters here specifically because it's the first point at which `next build`'s route analysis touches the React Three Fiber `Canvas` inside `Dither` (Task 2) through the full layout tree — a client/server boundary mistake would surface here, not at `typecheck`.
+Expected: PASS. The `build` step matters here specifically because it's the first point at which `next build`'s route analysis touches every vendored WebGL component (`Aurora`, `LightRays`, `MetaBalls`) through the full layout tree — a client/server boundary mistake would surface here, not at `typecheck`.
 
 - [ ] **Step 6: Run the Playwright smoke test again**
 
