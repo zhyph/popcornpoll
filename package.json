@@ -14,6 +14,7 @@
     "verify": "tsc --noEmit && next build && vitest run"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@hookform/resolvers": "^5.9.1",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -26,6 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^13.1.0",
+    "gsap": "^3.15.0",
     "lucide-react": "^1.32.0",
     "next": "^14.2.5",
     "next-intl": "^4.13.7",
