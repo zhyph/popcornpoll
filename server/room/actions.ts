@@ -26,6 +26,7 @@ export type ErrorCode =
   | 'rate_limited'
   | 'room_cap_reached'
   | 'forbidden_origin'
+  | 'invalid_filters'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; code: ErrorCode }
 

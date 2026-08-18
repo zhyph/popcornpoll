@@ -189,4 +189,17 @@ describe('createLibrarySync', () => {
     expect(merged.plex_rating_key).toBe('a')
     expect(merged.rating).toBe(9.3)
   })
+
+  it('lastSyncAt reflects the completion time of the most recent successful run, null before any run', async () => {
+    const plex: Partial<PlexClient> = {
+      getLibrarySections: vi.fn().mockResolvedValue([{ id: '1', title: 'Movies', type: 'movie' }]),
+      getLibraryItems: vi.fn().mockResolvedValue([]),
+    }
+    const tmdb: Partial<TmdbClient> = { findByImdbId: vi.fn(), getMovieDetails: vi.fn() }
+    const sync = createLibrarySync({ db, plex: plex as PlexClient, tmdb: tmdb as TmdbClient, encryptionKey: KEY })
+    expect(sync.lastSyncAt()).toBeNull()
+    const before = Date.now()
+    await sync.run()
+    expect(sync.lastSyncAt()).toBeGreaterThanOrEqual(before)
+  })
 })

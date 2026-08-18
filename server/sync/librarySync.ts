@@ -31,6 +31,7 @@ export function createLibrarySync(deps: SyncDeps) {
   const chunkSize = deps.chunkSize ?? 200
   const imdbBackfillCap = deps.imdbBackfillCap ?? 50
   let inFlight: Promise<{ runId: number; itemCount: number }> | null = null
+  let lastCompletedAt: number | null = null
 
   async function doRun(): Promise<{ runId: number; itemCount: number }> {
     const link = getPlexLink(deps.db, deps.encryptionKey)
@@ -101,6 +102,7 @@ export function createLibrarySync(deps: SyncDeps) {
     }
 
     sweepRemoved(deps.db, runId)
+    lastCompletedAt = Date.now()
     return { runId, itemCount: allItems.length }
   }
 
@@ -117,6 +119,9 @@ export function createLibrarySync(deps: SyncDeps) {
     },
     async waitForCurrent() {
       if (inFlight) await inFlight
+    },
+    lastSyncAt() {
+      return lastCompletedAt
     },
   }
 }
