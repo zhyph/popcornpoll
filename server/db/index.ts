@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 const MIGRATIONS: Array<{ version: number; file: string }> = [
   { version: 1, file: '001_init.sql' },
+  { version: 2, file: '002_match_history.sql' },
 ]
 
 export function runMigrations(db: Database.Database): void {
