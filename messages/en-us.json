@@ -32,10 +32,21 @@
     "yearFromLabel": "Year, from",
     "yearToLabel": "Year, to",
     "minRatingLabel": "Minimum rating",
-    "createButton": "Create room",
+    "createButton": "PRINT THE TICKETS",
     "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
     "performancesTag": "Continuous performances · Balcony open",
-    "titleSubhead": "Everybody swipes, nobody argues. The house picks tonight's feature from your own library — and the marquee lights up the second you agree."
+    "titleSubhead": "Everybody swipes, nobody argues. The house picks tonight's feature from your own library — and the marquee lights up the second you agree.",
+    "ticketNoLabel": "no. 01",
+    "sourcesPlexTitle": "PLEX ONLY",
+    "sourcesPlexNote": "Everything is already on your shelf.",
+    "sourcesTmdbTitle": "PLEX + TMDB",
+    "sourcesTmdbNote": "Add the ones you have been meaning to get.",
+    "housePicturesLabel": "Where the pictures come from",
+    "houseRuleLabel": "House rule for a match",
+    "yesVotesNeededLabel": "Yes votes needed",
+    "trimTheBillLabel": "Trim the bill",
+    "tearHereLabel": "Tear here · admit up to 12",
+    "tonightsShowingLabel": "TONIGHT'S SHOWING"
   },
   "joinRoom": {
     "invitedTo": "You're invited to",

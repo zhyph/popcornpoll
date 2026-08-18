@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { BulbFrame } from '../components/BulbFrame'
 import BlurText from '../components/ui/reactbits/BlurText'
 import SplitText from '../components/ui/reactbits/SplitText'
+import StarBorder from '../components/ui/reactbits/StarBorder'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Input } from '../components/ui/input'
@@ -76,82 +77,141 @@ export default function CreateRoomPage() {
           className="max-w-[52ch] text-center text-sm leading-relaxed text-ticket/80 sm:text-base"
         />
       </div>
-      <Card className="w-full border-2 border-brass bg-velvet">
-        <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-          {t('title')}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>{t('candidateSourceLabel')}</Label>
-            <Select value={candidateSource} onValueChange={(v) => setCandidateSource(v as CandidateSource)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="plex">{t('candidateSourcePlex')}</SelectItem>
-                <SelectItem value="plex+tmdb">{t('candidateSourcePlexTmdb')}</SelectItem>
-              </SelectContent>
-            </Select>
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
+        <div
+          className="relative bg-gradient-to-br from-ticket to-ticket/80 p-6 text-ink shadow-[0_30px_60px_-25px_rgba(0,0,0,.9)] sm:p-8"
+          style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%)' }}
+        >
+          <div className="mb-5 flex items-baseline justify-between gap-3 border-b-2 border-dashed border-ink/35 pb-3">
+            <p className="font-display text-2xl tracking-wide sm:text-[28px]">{t('tonightsShowingLabel')}</p>
+            <p className="font-mono text-[11px] uppercase tracking-widest text-ink/60">{t('ticketNoLabel')}</p>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>{t('matchRuleLabel')}</Label>
-            <Select value={thresholdKind} onValueChange={(v) => setThresholdKind(v as MatchThreshold['kind'])}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('matchRuleAll')}</SelectItem>
-                <SelectItem value="majority">{t('matchRuleMajority')}</SelectItem>
-                <SelectItem value="atLeast">{t('matchRuleAtLeast')}</SelectItem>
-              </SelectContent>
-            </Select>
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('housePicturesLabel')}</p>
+          <div className="mb-5 grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setCandidateSource('plex')}
+              className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
+                candidateSource === 'plex' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
+              }`}
+            >
+              <span className="font-display text-[15px]">{t('sourcesPlexTitle')}</span>
+              <span className="text-[11.5px] leading-snug opacity-70">{t('sourcesPlexNote')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCandidateSource('plex+tmdb')}
+              className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
+                candidateSource === 'plex+tmdb' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
+              }`}
+            >
+              <span className="font-display text-[15px]">{t('sourcesTmdbTitle')}</span>
+              <span className="text-[11.5px] leading-snug opacity-70">{t('sourcesTmdbNote')}</span>
+            </button>
+          </div>
+
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('houseRuleLabel')}</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {(['all', 'majority', 'atLeast'] as const).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => setThresholdKind(kind)}
+                className={`px-3.5 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                  thresholdKind === kind ? 'bg-ink text-ticket' : 'border border-ink/35 text-ink/70'
+                }`}
+              >
+                {kind === 'all' ? t('matchRuleAll') : kind === 'majority' ? t('matchRuleMajority') : t('matchRuleAtLeast')}
+              </button>
+            ))}
           </div>
 
           {thresholdKind === 'atLeast' && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="atLeastN">{t('atLeastNLabel')}</Label>
-              <Input
-                id="atLeastN"
-                type="number"
-                min={1}
-                value={atLeastN}
-                onChange={(e) => setAtLeastN(Number.parseInt(e.target.value, 10) || 1)}
-              />
+            <div className="mb-4 flex items-center justify-between gap-3.5 border border-ink/25 bg-ink/5 p-3">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink/70">{t('yesVotesNeededLabel')}</span>
+              <div className="flex items-center gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => setAtLeastN(Math.max(1, atLeastN - 1))}
+                  className="h-[34px] w-[34px] border border-ink/40 text-lg leading-none"
+                >
+                  −
+                </button>
+                <span className="min-w-8 text-center font-display text-2xl">{atLeastN}</span>
+                <button
+                  type="button"
+                  onClick={() => setAtLeastN(atLeastN + 1)}
+                  className="h-[34px] w-[34px] border border-ink/40 text-lg leading-none"
+                >
+                  +
+                </button>
+              </div>
             </div>
           )}
 
-          <Separator className="bg-brass/40" />
-          <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('filtersLabel')}</p>
+          <p className="mb-2.5 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('trimTheBillLabel')}</p>
+          <div className="mb-6 grid grid-cols-2 gap-2.5">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+              {t('genreLabel')}
+              <input
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                placeholder={t('genrePlaceholder')}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+              {t('minRatingLabel')}
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                max={10}
+                value={ratingMin}
+                onChange={(e) => setRatingMin(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+              {t('yearFromLabel')}
+              <input
+                type="number"
+                value={yearMin}
+                onChange={(e) => setYearMin(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+              {t('yearToLabel')}
+              <input
+                type="number"
+                value={yearMax}
+                onChange={(e) => setYearMax(e.target.value)}
+                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+            </label>
+          </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="genre">{t('genreLabel')}</Label>
-            <Input id="genre" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder={t('genrePlaceholder')} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMin">{t('yearFromLabel')}</Label>
-              <Input id="yearMin" type="number" value={yearMin} onChange={(e) => setYearMin(e.target.value)} />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMax">{t('yearToLabel')}</Label>
-              <Input id="yearMax" type="number" value={yearMax} onChange={(e) => setYearMax(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="ratingMin">{t('minRatingLabel')}</Label>
-            <Input
-              id="ratingMin"
-              type="number"
-              step={0.1}
-              min={0}
-              max={10}
-              value={ratingMin}
-              onChange={(e) => setRatingMin(e.target.value)}
-            />
-          </div>
-
-          <Button className="mt-2 bg-marquee text-ink hover:bg-marquee/90" onClick={createRoom}>
+          <StarBorder
+            as="button"
+            type="button"
+            onClick={createRoom}
+            data-testid="create-room"
+            color="#F3E9D2"
+            speed="3.2s"
+            className="w-full [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket"
+          >
             {t('createButton')}
-          </Button>
-        </CardContent>
-      </Card>
+          </StarBorder>
+          <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-ink/50">{t('tearHereLabel')}</p>
+
+          {candidateSource === 'plex+tmdb' && (
+            <p className="mt-3 text-center text-xs text-ink/55">{t('tmdbAttribution')}</p>
+          )}
+        </div>
+        {/* TODO(Task 10): remove this placeholder and add the real second grid column here, then close the grid */}
+      </div>
     </main>
   )
 }
