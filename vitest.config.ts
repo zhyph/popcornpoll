@@ -1,6 +1,25 @@
+import { transformSync } from 'esbuild'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  define: {
+    'process.env.NODE_ENV': '"test"',
+  },
+  plugins: [
+    {
+      name: 'jsx-loader',
+      transform(code, id) {
+        if (id.endsWith('.tsx')) {
+          const result = transformSync(code, {
+            loader: 'tsx',
+            jsx: 'automatic',
+            format: 'esm',
+          })
+          return { code: result.code }
+        }
+      },
+    },
+  ],
   test: {
     environment: 'node',
     include: ['**/*.test.ts'],
