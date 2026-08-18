@@ -1,10 +1,10 @@
-// app/room/[code]/page.tsx
 'use client'
 
 import { useTranslations } from 'next-intl'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
+import { useSetRoomStep, type ChapterStep } from '../../../components/chrome/RoomStatusContext'
 import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
 import { SwipeDeck } from '../../../components/SwipeDeck'
@@ -34,25 +34,12 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const [client, setClient] = useState<WsClient | null>(null)
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
-  // Tracks the last-seen per-room `seq` (server/ws/protocol.ts's monotonic
-  // broadcast counter) so a missed update — one that happened while briefly
-  // disconnected — can be detected and repaired via `resync` instead of
-  // silently trusting state that skipped a change. A ref, not state: pure
-  // bookkeeping that drives an outbound send, never a render.
   const lastSeqRef = useRef<number | null>(null)
 
   useEffect(() => {
-    // Authoritative reset: 'joined' (the response to join/reconnect/resync)
-    // always carries the room's true current seq as a full snapshot — adopt
-    // it unconditionally rather than comparing against the previous value.
     function applySeq(seq: number) {
       lastSeqRef.current = seq
     }
-    // Incremental check: a broadcast's seq should equal the last one seen
-    // (multiple messages from the same server-side batch share a seq — see
-    // server/ws/router.ts's 'start'/'end_room' cases) or be exactly one
-    // higher. Anything further ahead means at least one broadcast was
-    // missed — ask the server for a fresh snapshot rather than trust a gap.
     function checkSeq(socket: WsClient, seq: number) {
       if (lastSeqRef.current !== null && seq > lastSeqRef.current + 1) {
         socket.send({ type: 'resync' })
@@ -72,22 +59,11 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
       if (msg.hostToken) {
         setIsHost(true)
-        // localStorage, not sessionStorage: the design doc's Authorization
-        // model requires hostToken to "survive a tab refresh" — sessionStorage
-        // is cleared when the tab closes, which would silently strip host
-        // control the next time this browser reopens the same room (a new
-        // tab, or after the OS/browser restarts the tab). hostClaimToken is
-        // single-use, so once it's consumed, this localStorage copy is the
-        // only way this browser can ever prove host status for this room again.
         localStorage.setItem(`hostToken:${params.code}`, msg.hostToken)
       }
       sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
       applySeq(msg.room.seq)
     })
-    // state_update carries every field that changes over a room's life except
-    // pool/pendingCardId/topCandidates (those arrive via room_started/next_card/
-    // exhausted) — apply it with a merge, not a replace, or status/matches/
-    // exhausted never reach snapshot and the UI can never leave the lobby view.
     const unsubState = ws.on('state_update', (msg) => {
       checkSeq(ws, msg.seq)
       setParticipants(msg.participants)
@@ -100,6 +76,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
           exhausted: msg.exhausted,
           matchThreshold: msg.matchThreshold,
           candidateSource: msg.candidateSource,
+          // Task 3 adds totalVotes here
           seq: msg.seq,
         },
       )
@@ -109,10 +86,6 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       setPool(msg.pool)
     })
     const unsubNextCard = ws.on('next_card', (msg) => setPendingCardId(msg.movieId))
-    // match/exhausted arrive alongside a state_update in the same toRoom batch;
-    // state_update already updates snapshot.matches/exhausted, but the movie
-    // itself (match) and the ranked runner-up list (exhausted) only ever
-    // arrive on these two message types.
     const unsubMatch = ws.on('match', (msg) => {
       checkSeq(ws, msg.seq)
       setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie]))
@@ -125,24 +98,11 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     })
     const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
     const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
-    // Task 27 already subscribes to 'room_ended' for the terminal-state UI —
-    // this is a second, independent subscription (wsClient dispatches to
-    // every registered handler for a type) purely for seq bookkeeping, so a
-    // room_ended broadcast doesn't fall outside gap detection.
     const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
 
-    // Fires on the initial connection AND every reconnect wsClient performs
-    // after a live WS-level drop (socket closes while the tab stays open) —
-    // not just once at mount, unlike the setTimeout(…, 0) this replaces.
-    // Re-reading sessionToken/hostToken from storage on every call, instead
-    // of a value captured once at mount, is what makes a single handler
-    // correct across calls: the first call (nothing stored yet) sends
-    // 'join'; by the time any later reconnect fires, this same handler's
-    // own 'joined' response (Step 6) has already persisted both tokens, so
-    // it naturally sends 'reconnect' — with hostToken — from then on.
     const unsubOpen = ws.onOpen(() => {
       const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
       const storedHostToken = localStorage.getItem(`hostToken:${params.code}`) ?? undefined
@@ -183,16 +143,27 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     }
   }, [params.code])
 
-  // Once a match's id has been shown for MATCH_REVEAL_MS, dismiss it and
-  // don't show it again — without this, deriving latestMatch directly from
-  // snapshot.matches every render means the reveal never goes away once a
-  // match has happened, permanently blocking the swipe deck underneath it.
   const latestMatchId = snapshot && snapshot.matches.length > 0 ? snapshot.matches[snapshot.matches.length - 1]! : null
   useEffect(() => {
     if (latestMatchId === null || latestMatchId === dismissedMatchId) return
     const timer = setTimeout(() => setDismissedMatchId(latestMatchId), MATCH_REVEAL_MS)
     return () => clearTimeout(timer)
   }, [latestMatchId, dismissedMatchId])
+
+  // Computed before any early return (Rules of Hooks: useSetRoomStep must
+  // run every render). Both the exhausted-no-match branch and the terminal
+  // branch map to 'wrapup' — the spec's Chapter indicator section treats
+  // them as the same step despite being visually distinct screens.
+  const step: ChapterStep | null = !snapshot
+    ? null
+    : terminal || snapshot.status === 'ended'
+      ? 'wrapup'
+      : snapshot.status === 'lobby' || snapshot.status === 'starting'
+        ? 'lobby'
+        : snapshot.exhausted && snapshot.matches.length === 0
+          ? 'wrapup'
+          : 'deck'
+  useSetRoomStep(step)
 
   if (!snapshot) return <p className="p-8 font-mono text-brass">{t('connecting')}</p>
 
@@ -263,15 +234,9 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       ? (pool.find((e) => e.movieId === latestMatchId) ?? null)
       : null
 
-  return (
-    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
-      {latestMatch && (
-        <div data-testid="match-banner">
-          <MarqueeReveal movie={latestMatch} />
-        </div>
-      )}
-      <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
-      {snapshot.exhausted && snapshot.matches.length === 0 && (
+  if (snapshot.exhausted && snapshot.matches.length === 0) {
+    return (
+      <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
         <Card data-testid="fallback" className="w-full border-2 border-brass bg-velvet">
           <CardHeader className="font-display text-xl text-ticket">{t('noUnanimousPick')}</CardHeader>
           <CardContent className="flex flex-col gap-1">
@@ -280,7 +245,27 @@ export default function RoomPage({ params }: { params: { code: string } }) {
             ))}
           </CardContent>
         </Card>
+        {isHost && (
+          <Button
+            variant="outline"
+            className="border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
+            onClick={() => client?.send({ type: 'end_room' })}
+          >
+            {t('endSession')}
+          </Button>
+        )}
+      </main>
+    )
+  }
+
+  return (
+    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
+      {latestMatch && (
+        <div data-testid="match-banner">
+          <MarqueeReveal movie={latestMatch} />
+        </div>
       )}
+      <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
       {isHost && (
         <Button
           variant="outline"
