@@ -6,3 +6,6 @@ data/
 .env
 next-env.d.ts
 tsconfig.tsbuildinfo
+.claude/
+.playwright-mcp/
+test-results/
