@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
-import { joinRoom } from './actions'
+import { joinRoom, reconnectRoom } from './actions'
 import { startRoom, swipeAction, type SyncWaiter } from './activeActions'
 import { createRoomStore } from './roomStore'
 import type Database from 'better-sqlite3'
@@ -66,6 +66,75 @@ describe('startRoom', () => {
     seedPlexRows(10)
     const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     expect(result).toEqual({ ok: false, code: 'not_enough_participants' })
+  })
+
+  it('does not revoke or exclude anyone when Start fails due to not_enough_participants after exclusion', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(10)
+
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'not_enough_participants' })
+
+    const room = store.get(code)!
+    expect(room.status).toBe('lobby')
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
+    expect(room.participants.get(flaky.data.participantId)!.connectionStatus).toBe('disconnected')
+    expect(room.revokedSessionTokens.has(flaky.data.sessionToken)).toBe(false)
+    expect(room.kickReasons.has(flaky.data.sessionToken)).toBe(false)
+  })
+
+  it('does not revoke or exclude the would-be-excluded participant when Start fails due to pool_too_small', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !other.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(2) // below POOL_MIN_SIZE (5)
+
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+
+    const room = store.get(code)!
+    expect(room.status).toBe('lobby')
+    expect(room.participants.size).toBe(3)
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
+    expect(room.revokedSessionTokens.has(flaky.data.sessionToken)).toBe(false)
+    expect(room.kickReasons.has(flaky.data.sessionToken)).toBe(false)
+  })
+
+  it('retries and succeeds once the previously-disconnected participant reconnects', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(10)
+
+    const failed = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(failed).toEqual({ ok: false, code: 'not_enough_participants' })
+
+    // The flaky client, still carrying its original (never revoked)
+    // sessionToken, reconnects — exactly what its browser does on any page
+    // reload, since the token was never invalidated by the failed attempt.
+    const reconnected = reconnectRoom(store, code, flaky.data.sessionToken)
+    expect(reconnected.ok).toBe(true)
+    expect(store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus).toBe('connected')
+
+    const retried = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(retried.ok).toBe(true)
+    if (!retried.ok) return
+    expect(retried.data.excludedParticipantIds).toEqual([])
+    const room = store.get(code)!
+    expect(room.status).toBe('active')
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
   })
 
   it('excludes a disconnected participant from the frozen set and revokes their session with excluded_at_start', async () => {

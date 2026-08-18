@@ -70,17 +70,20 @@ export async function startRoom(
   if (!room) return err('room_not_found')
   if (room.status !== 'lobby') return err('already_started')
 
-  const excludedParticipantIds: string[] = []
-  for (const participant of [...room.participants.values()]) {
-    if (participant.connectionStatus === 'disconnected') {
-      room.revokedSessionTokens.add(participant.sessionToken)
-      room.kickReasons.set(participant.sessionToken, 'excluded_at_start')
-      room.participants.delete(participant.id)
-      excludedParticipantIds.push(participant.id)
-    }
-  }
+  // Snapshot who WOULD be excluded (disconnected as of right now) without
+  // mutating anything yet. Both failure paths below (insufficient
+  // post-exclusion count, and a too-small pool) must leave the room fully
+  // retriable — no participant removed, no sessionToken revoked — so a
+  // disconnected participant's browser can still reconnect with its
+  // still-valid session and the host can just try Start again. Actual
+  // mutation is deferred to the very end, once Start is committed to
+  // succeeding.
+  const wouldBeExcluded = [...room.participants.values()].filter(
+    (p) => p.connectionStatus === 'disconnected',
+  )
+  const wouldBeRemainingCount = room.participants.size - wouldBeExcluded.length
 
-  if (room.participants.size < MIN_PARTICIPANTS_TO_START) {
+  if (wouldBeRemainingCount < MIN_PARTICIPANTS_TO_START) {
     return err('not_enough_participants')
   }
 
@@ -101,6 +104,16 @@ export async function startRoom(
     room.status = 'lobby'
     notifyStarting?.()
     return err('pool_too_small')
+  }
+
+  // Start is now guaranteed to succeed — only past this point do we actually
+  // exclude the disconnected participants snapshotted above.
+  const excludedParticipantIds: string[] = []
+  for (const participant of wouldBeExcluded) {
+    room.revokedSessionTokens.add(participant.sessionToken)
+    room.kickReasons.set(participant.sessionToken, 'excluded_at_start')
+    room.participants.delete(participant.id)
+    excludedParticipantIds.push(participant.id)
   }
 
   room.pool = result.pool
