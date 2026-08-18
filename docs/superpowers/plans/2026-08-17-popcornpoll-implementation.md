@@ -8180,10 +8180,23 @@ test('a participant disconnected through Start is excluded and their reconnect i
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
+  // A THIRD participant (stayingGuestPage) is required, not two — Task 16
+  // established that MIN_PARTICIPANTS_TO_START is checked AFTER excluding
+  // disconnected participants (spec-mandated: a room that only "started"
+  // because it silently dropped to 1 real participant would match on the
+  // very first yes swipe). With only host + 1 disconnecting guest, Start
+  // would correctly be rejected — this scenario needs someone who stays
+  // connected through Start so the post-exclusion count is still 2.
+  const stayingGuestPage = await (await browser.newContext()).newPage()
+  await stayingGuestPage.goto(`/join/${roomCode}`)
+  await stayingGuestPage.fill('input[placeholder="Your name"]', 'Staying Guest')
+  await stayingGuestPage.click('text=Join')
+  await stayingGuestPage.waitForSelector('text=Admitted')
+
   const guestContext = await browser.newContext()
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
+  await guestPage.fill('input[placeholder="Your name"]', 'Disconnecting Guest')
   await guestPage.click('text=Join')
   await guestPage.waitForSelector('text=Admitted') // the lobby roster panel's heading
   const guestSessionToken = await guestPage.evaluate((code) => sessionStorage.getItem(`sessionToken:${code}`), roomCode)
