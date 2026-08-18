@@ -7,10 +7,12 @@ import { openDb } from './db'
 import { createPlexClient } from './plex/client'
 import { createFakePlexClient } from './plex/fakeClient'
 import { createTmdbClient } from './tmdb/client'
+import { createFakeTmdbClient } from './tmdb/fakeClient'
 import { createRoomStore } from './room/roomStore'
 import { sweepEvictions, sweepInactiveRooms } from './room/lifecycle'
 import { createLibrarySync } from './sync/librarySync'
 import { createEnrichmentWorker } from './sync/enrichment'
+import { createTmdbPruneWorker } from './sync/tmdbPrune'
 import { attachWebSocketServer } from './ws/server'
 import { createRoomsHandler } from './http/rooms'
 import { createSetupHandlers } from './http/setup'
@@ -57,12 +59,15 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   const clientIdentifier = safeGetPlexLink(db, config.authEncryptionKey)?.clientIdentifier ?? 'popcornpoll-instance'
   const plex =
     process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakePlexClient() : createPlexClient(clientIdentifier)
-  const tmdb = createTmdbClient(config.tmdbApiKey)
+  const tmdb =
+    process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakeTmdbClient() : createTmdbClient(config.tmdbApiKey)
   const librarySync = createLibrarySync({ db, plex, tmdb, encryptionKey: config.authEncryptionKey })
   const enrichment = createEnrichmentWorker(db, tmdb)
   enrichment.start()
+  const tmdbPrune = createTmdbPruneWorker(db, store)
+  tmdbPrune.start()
 
-  const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey, config)
+  const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey, config, librarySync)
   const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex, clientIdentifier)
   const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex)
   const healthHandler = createHealthHandler(config.dataDir)
@@ -131,7 +136,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
     })
   })
 
-  const wsHandle = attachWebSocketServer(httpServer, store, db, tmdb, config)
+  const wsHandle = attachWebSocketServer(httpServer, store, db, tmdb, librarySync, config)
 
   const sweepTimer = setInterval(() => {
     const now = Date.now()
@@ -143,6 +148,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   async function shutdown(): Promise<void> {
     clearInterval(sweepTimer)
     enrichment.stop()
+    tmdbPrune.stop()
     wsHandle.stopHeartbeatSweep()
     for (const room of store.all()) {
       if (room.status !== 'ended') wsHandle.broadcastRoomEnded(room.code, 'server_restarting')

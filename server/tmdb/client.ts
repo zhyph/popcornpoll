@@ -78,16 +78,16 @@ export function createTmdbClient(apiKey: string): TmdbClient {
     },
 
     async getMovieDetails(tmdbId) {
-      const res = await fetch(`${base}/movie/${tmdbId}?api_key=${apiKey}`)
+      const params = new URLSearchParams({ api_key: apiKey })
+      const res = await fetch(`${base}/movie/${tmdbId}?${params.toString()}`)
       if (!res.ok) return null
       const body = (await res.json()) as { vote_average: number; vote_count: number }
       return { rating: body.vote_average, voteCount: body.vote_count }
     },
 
     async findByImdbId(imdbId) {
-      const res = await fetch(
-        `${base}/find/${imdbId}?api_key=${apiKey}&external_source=imdb_id`,
-      )
+      const params = new URLSearchParams({ api_key: apiKey, external_source: 'imdb_id' })
+      const res = await fetch(`${base}/find/${imdbId}?${params.toString()}`)
       if (!res.ok) {
         throw new Error(`TMDB find request failed: ${res.status} ${res.statusText}`)
       }
