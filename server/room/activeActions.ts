@@ -2,7 +2,7 @@
 import type Database from 'better-sqlite3'
 import { buildPool, POOL_MIN_SIZE, type PoolEntry } from '../pool/buildPool'
 import { pickNextCard } from '../pool/nextCard'
-import { recordVote } from '../ranking/affinity'
+import { emptyTally, recordVote } from '../ranking/affinity'
 import { computeCAndM } from '../ranking/reputation'
 import { createRng, type Rng } from '../ranking/rng'
 import type { TmdbClient } from '../tmdb/client'
@@ -139,6 +139,46 @@ export async function startRoom(
   recomputeExhaustion(room)
 
   return ok({ excludedParticipantIds, pool: room.pool, degraded: result.degraded })
+}
+
+export async function restartReel(
+  store: RoomStore,
+  code: string,
+  callerIsHost: boolean,
+  db: Database.Database,
+  tmdb: TmdbClient,
+  librarySync: SyncWaiter,
+): Promise<ActionResult<{ pool: PoolEntry[]; degraded: boolean }>> {
+  if (!callerIsHost) return err('not_host')
+  const room = store.get(code)
+  if (!room) return err('room_not_found')
+  if (room.status !== 'active') return err('room_not_active')
+
+  const result = await (async () => {
+    await librarySync.waitForCurrent()
+    return buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
+  })()
+  if (result.tooSmall) return err('pool_too_small')
+
+  room.pool = result.pool
+  const { c, m } = computeCAndM(result.pool)
+  room.reputationC = c
+  room.reputationM = m
+  room.matches = []
+  room.matchedMovieIds = new Set()
+  room.genreTally = emptyTally()
+  room.totalVotes = 0
+  room.lastActivityAt = Date.now()
+
+  for (const participant of room.participants.values()) {
+    participant.swipes.clear()
+  }
+  for (const participantId of room.participants.keys()) {
+    assignPendingCard(room, participantId)
+  }
+  recomputeExhaustion(room)
+
+  return ok({ pool: room.pool, degraded: result.degraded })
 }
 
 export function swipeAction(

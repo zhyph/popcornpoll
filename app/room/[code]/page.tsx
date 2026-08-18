@@ -76,7 +76,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
           exhausted: msg.exhausted,
           matchThreshold: msg.matchThreshold,
           candidateSource: msg.candidateSource,
-          // Task 3 adds totalVotes here
+          totalVotes: msg.totalVotes,
           seq: msg.seq,
         },
       )

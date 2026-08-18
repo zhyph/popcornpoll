@@ -2,7 +2,7 @@
 import type Database from 'better-sqlite3'
 import { insertMatch } from '../db/matchHistory'
 import { joinRoom, kickParticipant, reconnectRoom, updateSettings } from '../room/actions'
-import { startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
+import { restartReel, startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
 import { endRoom, touchActivity } from '../room/lifecycle'
 import type { RoomStore } from '../room/roomStore'
 import type { Participant, RoomState } from '../room/types'
@@ -46,6 +46,7 @@ export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'st
     exhausted: room.exhausted,
     matchThreshold: room.matchThreshold,
     candidateSource: room.candidateSource,
+    totalVotes: room.totalVotes,
     seq: room.seq,
   }
 }
@@ -70,6 +71,7 @@ function snapshotFor(room: RoomState, participant: Participant): RoomSnapshot {
     exhausted: room.exhausted,
     matchThreshold: room.matchThreshold,
     candidateSource: room.candidateSource,
+    totalVotes: room.totalVotes,
     seq: room.seq,
   }
   if (room.status === 'active' || room.status === 'ended') {
@@ -327,6 +329,34 @@ export async function handleMessage(
       return {
         ...emptyOutput(state),
         toRoom: [{ type: 'room_ended', reason: 'host_ended', seq: update.seq }, update],
+      }
+    }
+
+    case 'restart_reel': {
+      if (!state.roomCode) return emptyOutput(state)
+      const roomCode = state.roomCode
+      const result = await restartReel(store, roomCode, state.isHost, db, tmdb, librarySync)
+      if (!result.ok) {
+        return { ...emptyOutput(state), toSender: [{ type: 'error', code: result.code, message: result.code }] }
+      }
+      const room = store.get(roomCode)!
+      const update = stateUpdate(room) // same seq-source reasoning as 'start' and 'end_room' above
+      const toRoom: ServerMessage[] = [{ type: 'room_started', pool: room.pool, seq: update.seq }, update]
+      if (result.data.degraded) {
+        toRoom.push({
+          type: 'notice',
+          level: 'warning',
+          code: 'degraded_to_plex_only',
+          message: 'TMDB is unavailable right now — this round uses your Plex library only.',
+        })
+      }
+      return {
+        ...emptyOutput(state),
+        toRoom,
+        toParticipant: Array.from(room.participants.values()).map((p) => ({
+          participantId: p.id,
+          messages: [{ type: 'next_card', movieId: p.pendingCardId }],
+        })),
       }
     }
 

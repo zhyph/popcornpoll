@@ -16,6 +16,7 @@ export type ClientMessage =
   | { type: 'swipe'; movieId: number; vote: 'yes' | 'no' }
   | { type: 'start' }
   | { type: 'end_room' }
+  | { type: 'restart_reel' }
   | {
       type: 'update_settings'
       matchThreshold?: MatchThreshold
@@ -40,6 +41,7 @@ export interface RoomSnapshot {
   exhausted: boolean
   matchThreshold: MatchThreshold
   candidateSource: CandidateSource
+  totalVotes: number
   seq: number
   pool?: PoolEntry[]
   pendingCardId?: number | null
@@ -65,6 +67,7 @@ export type ServerMessage =
       exhausted: boolean
       matchThreshold: MatchThreshold
       candidateSource: CandidateSource
+      totalVotes: number
       seq: number
     }
   | { type: 'match'; movieId: number; movie: PoolEntry; seq: number }

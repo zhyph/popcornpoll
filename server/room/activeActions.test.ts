@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
 import { joinRoom, reconnectRoom } from './actions'
-import { startRoom, swipeAction, type SyncWaiter } from './activeActions'
+import { restartReel, startRoom, swipeAction, type SyncWaiter } from './activeActions'
 import { createRoomStore } from './roomStore'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
@@ -257,6 +257,75 @@ describe('startRoom notifyStarting callback', () => {
     expect(result).toEqual({ ok: false, code: 'pool_too_small' })
     expect(notifyStarting).toHaveBeenCalledTimes(2)
     expect(seenStatuses).toEqual(['starting', 'lobby'])
+  })
+})
+
+describe('restartReel', () => {
+  it('rejects a non-host caller', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'Guest')
+    seedPlexRows(10)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    const result = await restartReel(store, code, false, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'not_host' })
+  })
+
+  it('rejects restarting a room that has not been started yet', async () => {
+    const store = createRoomStore()
+    const { code } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(10)
+    const result = await restartReel(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'room_not_active' })
+  })
+
+  it('resets matches, votes, and exhaustion, and reassigns every participant a fresh pendingCardId', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const guest = joinRoom(store, code, 'Guest')
+    if (!host.ok || !guest.ok) throw new Error('setup failed')
+    const hostId = host.data.participantId
+    const guestId = guest.data.participantId
+    seedPlexRows(10)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    const room = store.get(code)!
+    const firstCardId = room.participants.get(hostId)!.pendingCardId!
+    // Force both participants onto the same card so this vote can produce a
+    // match — pendingCardId assignment is per-participant RNG-weighted and
+    // not otherwise guaranteed to line up (see the analogous forcing in
+    // 'fires a match exactly once...' in the swipeAction describe block below).
+    room.participants.get(guestId)!.pendingCardId = firstCardId
+    swipeAction(store, code, hostId, firstCardId, 'yes')
+    swipeAction(store, code, guestId, firstCardId, 'yes')
+    expect(room.matches.length).toBe(1)
+    expect(room.totalVotes).toBe(2)
+
+    const result = await restartReel(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result.ok).toBe(true)
+    expect(room.matches).toEqual([])
+    expect(room.matchedMovieIds.size).toBe(0)
+    expect(room.totalVotes).toBe(0)
+    expect(room.exhausted).toBe(false)
+    expect(room.participants.get(hostId)!.swipes.size).toBe(0)
+    expect(room.participants.get(hostId)!.pendingCardId).not.toBeNull()
+    expect(room.participants.get(guestId)!.pendingCardId).not.toBeNull()
+  })
+
+  it('rejects when the resulting pool has fewer than POOL_MIN_SIZE candidates', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'Guest')
+    seedPlexRows(10)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    rmSync(dir, { recursive: true, force: true })
+    dir = mkdtempSync(join(tmpdir(), 'popcornpoll-active-'))
+    const emptyDb = openDb(dir)
+    const result = await restartReel(store, code, true, emptyDb, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+    emptyDb.close()
   })
 })
 
