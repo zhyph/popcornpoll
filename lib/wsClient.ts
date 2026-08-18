@@ -8,6 +8,7 @@ export interface WsClient {
     type: T,
     handler: (msg: Extract<ServerMessage, { type: T }>) => void,
   ): () => void
+  onOpen(handler: () => void): () => void
   close(): void
 }
 
@@ -19,6 +20,7 @@ export function createWsClient(url: string): WsClient {
   let backoff = INITIAL_BACKOFF_MS
   let closedByCaller = false
   const handlers = new Map<string, Set<(msg: ServerMessage) => void>>()
+  const openHandlers = new Set<() => void>()
   const queue: ClientMessage[] = []
 
   function dispatch(message: ServerMessage) {
@@ -31,6 +33,10 @@ export function createWsClient(url: string): WsClient {
     socket = new WebSocket(url)
     socket.addEventListener('open', () => {
       backoff = INITIAL_BACKOFF_MS
+      // Notify onOpen subscribers (typically: "(re)send join/reconnect")
+      // before flushing anything queued while offline, so re-establishing
+      // identity goes out first on this fresh socket.
+      for (const handler of [...openHandlers]) handler()
       const pending = queue.splice(0, queue.length)
       for (const msg of pending) socket.send(JSON.stringify(msg))
     })
@@ -62,6 +68,10 @@ export function createWsClient(url: string): WsClient {
       set.add(handler as (msg: ServerMessage) => void)
       handlers.set(type, set)
       return () => set.delete(handler as (msg: ServerMessage) => void)
+    },
+    onOpen(handler) {
+      openHandlers.add(handler)
+      return () => openHandlers.delete(handler)
     },
     close() {
       closedByCaller = true

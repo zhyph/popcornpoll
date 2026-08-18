@@ -55,3 +55,22 @@ test('reconnecting with only sessionToken (no hostToken) does not grant host con
   await expect(strippedPage.locator('text=Start')).not.toBeVisible()
   await browser.close()
 })
+
+test('host status survives a page reload (hostToken persisted in localStorage)', async ({ baseURL }) => {
+  const browser = await chromium.launch()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
+  await hostPage.goto('/')
+  await hostPage.click('text=Create room')
+  await hostPage.waitForURL(/\/room\//)
+
+  // Generous timeouts (matching e.g. e2e/authorization.spec.ts's other cases
+  // and playwright.config.ts's own note on Next dev-mode cold-compile cost)
+  // rather than the 5s default: this join round-trip can legitimately take
+  // longer than that on a first hit to a not-yet-compiled route.
+  await expect(hostPage.locator('text=Start')).toBeVisible({ timeout: 15000 })
+  await hostPage.reload()
+  await expect(hostPage.locator('text=Start')).toBeVisible({ timeout: 15000 }) // still recognized as host after the refresh
+  await browser.close()
+})

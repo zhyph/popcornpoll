@@ -2,7 +2,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
 import { MarqueeReveal } from '../../../components/MarqueeReveal'
@@ -34,8 +34,34 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const [client, setClient] = useState<WsClient | null>(null)
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
+  // Tracks the last-seen per-room `seq` (server/ws/protocol.ts's monotonic
+  // broadcast counter) so a missed update — one that happened while briefly
+  // disconnected — can be detected and repaired via `resync` instead of
+  // silently trusting state that skipped a change. A ref, not state: pure
+  // bookkeeping that drives an outbound send, never a render.
+  const lastSeqRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // Authoritative reset: 'joined' (the response to join/reconnect/resync)
+    // always carries the room's true current seq as a full snapshot — adopt
+    // it unconditionally rather than comparing against the previous value.
+    function applySeq(seq: number) {
+      lastSeqRef.current = seq
+    }
+    // Incremental check: a broadcast's seq should equal the last one seen
+    // (multiple messages from the same server-side batch share a seq — see
+    // server/ws/router.ts's 'start'/'end_room' cases) or be exactly one
+    // higher. Anything further ahead means at least one broadcast was
+    // missed — ask the server for a fresh snapshot rather than trust a gap.
+    function checkSeq(socket: WsClient, seq: number) {
+      if (lastSeqRef.current !== null && seq > lastSeqRef.current + 1) {
+        socket.send({ type: 'resync' })
+      }
+      if (lastSeqRef.current === null || seq > lastSeqRef.current) {
+        lastSeqRef.current = seq
+      }
+    }
+
     const ws = createWsClient(`${location.origin.replace('http', 'ws')}/ws`)
     setClient(ws)
 
@@ -44,14 +70,26 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       setParticipants(msg.room.participants)
       if (msg.room.pool) setPool(msg.room.pool)
       if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
-      if (msg.hostToken) setIsHost(true)
+      if (msg.hostToken) {
+        setIsHost(true)
+        // localStorage, not sessionStorage: the design doc's Authorization
+        // model requires hostToken to "survive a tab refresh" — sessionStorage
+        // is cleared when the tab closes, which would silently strip host
+        // control the next time this browser reopens the same room (a new
+        // tab, or after the OS/browser restarts the tab). hostClaimToken is
+        // single-use, so once it's consumed, this localStorage copy is the
+        // only way this browser can ever prove host status for this room again.
+        localStorage.setItem(`hostToken:${params.code}`, msg.hostToken)
+      }
       sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
+      applySeq(msg.room.seq)
     })
     // state_update carries every field that changes over a room's life except
     // pool/pendingCardId/topCandidates (those arrive via room_started/next_card/
     // exhausted) — apply it with a merge, not a replace, or status/matches/
     // exhausted never reach snapshot and the UI can never leave the lobby view.
     const unsubState = ws.on('state_update', (msg) => {
+      checkSeq(ws, msg.seq)
       setParticipants(msg.participants)
       setSnapshot((prev) =>
         prev && {
@@ -66,15 +104,19 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         },
       )
     })
-    const unsubStarted = ws.on('room_started', (msg) => setPool(msg.pool))
+    const unsubStarted = ws.on('room_started', (msg) => {
+      checkSeq(ws, msg.seq)
+      setPool(msg.pool)
+    })
     const unsubNextCard = ws.on('next_card', (msg) => setPendingCardId(msg.movieId))
     // match/exhausted arrive alongside a state_update in the same toRoom batch;
     // state_update already updates snapshot.matches/exhausted, but the movie
     // itself (match) and the ranked runner-up list (exhausted) only ever
     // arrive on these two message types.
-    const unsubMatch = ws.on('match', (msg) =>
-      setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie])),
-    )
+    const unsubMatch = ws.on('match', (msg) => {
+      checkSeq(ws, msg.seq)
+      setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie]))
+    })
     const unsubExhausted = ws.on('exhausted', (msg) =>
       setSnapshot((prev) => prev && { ...prev, topCandidates: msg.topCandidates }),
     )
@@ -83,14 +125,34 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     })
     const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
     const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
+    // Task 27 already subscribes to 'room_ended' for the terminal-state UI —
+    // this is a second, independent subscription (wsClient dispatches to
+    // every registered handler for a type) purely for seq bookkeeping, so a
+    // room_ended broadcast doesn't fall outside gap detection.
+    const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
-    const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
 
-    setTimeout(() => {
+    // Fires on the initial connection AND every reconnect wsClient performs
+    // after a live WS-level drop (socket closes while the tab stays open) —
+    // not just once at mount, unlike the setTimeout(…, 0) this replaces.
+    // Re-reading sessionToken/hostToken from storage on every call, instead
+    // of a value captured once at mount, is what makes a single handler
+    // correct across calls: the first call (nothing stored yet) sends
+    // 'join'; by the time any later reconnect fires, this same handler's
+    // own 'joined' response (Step 6) has already persisted both tokens, so
+    // it naturally sends 'reconnect' — with hostToken — from then on.
+    const unsubOpen = ws.onOpen(() => {
+      const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
+      const storedHostToken = localStorage.getItem(`hostToken:${params.code}`) ?? undefined
       if (storedSessionToken) {
-        ws.send({ type: 'reconnect', roomCode: params.code, sessionToken: storedSessionToken })
+        ws.send({
+          type: 'reconnect',
+          roomCode: params.code,
+          sessionToken: storedSessionToken,
+          hostToken: storedHostToken,
+        })
       } else {
         ws.send({
           type: 'join',
@@ -99,7 +161,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
           hostClaimToken,
         })
       }
-    }, 0)
+    })
 
     const heartbeat = setInterval(() => ws.send({ type: 'heartbeat' }), 15_000)
 
@@ -113,6 +175,9 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       unsubError()
       unsubKicked()
       unsubRoomEnded()
+      unsubSeqOnRoomEnded()
+      unsubOpen()
+      lastSeqRef.current = null
       clearInterval(heartbeat)
       ws.close()
     }

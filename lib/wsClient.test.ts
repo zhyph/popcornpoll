@@ -59,6 +59,49 @@ describe('createWsClient', () => {
     expect(count).toBe(1)
     client.close()
   })
+
+  it('onOpen fires on the initial connection and again after a live WS-level reconnect', async () => {
+    wss.on('connection', (ws) => {
+      ws.on('message', () => ws.send(JSON.stringify({ type: 'heartbeat_ack' })))
+    })
+    const client = createWsClient(url)
+    let openCount = 0
+    const received: unknown[] = []
+    client.onOpen(() => {
+      openCount++
+      client.send({ type: 'heartbeat' })
+    })
+    client.on('heartbeat_ack', (msg) => received.push(msg))
+
+    await new Promise((resolve) => setTimeout(resolve, 50)) // let the initial socket open
+    expect(openCount).toBe(1)
+    expect(received).toHaveLength(1)
+
+    // Simulate a WS-level drop while the tab stays open (not a page reload) —
+    // terminate every live server-side connection and let wsClient's own
+    // backoff reconnect it.
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 1300)) // > INITIAL_BACKOFF_MS
+
+    expect(openCount).toBe(2)
+    expect(received).toHaveLength(2)
+    client.close()
+  }, 10_000)
+
+  it('unsubscribing onOpen stops further notifications', async () => {
+    const client = createWsClient(url)
+    let count = 0
+    const unsubscribe = client.onOpen(() => count++)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(count).toBe(1)
+    unsubscribe()
+
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 1300))
+
+    expect(count).toBe(1)
+    client.close()
+  }, 10_000)
 })
 
 describe('createWsClient: terminal-close reconnect handling', () => {
