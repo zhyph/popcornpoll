@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "tsc --noEmit && next build && vitest run"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
