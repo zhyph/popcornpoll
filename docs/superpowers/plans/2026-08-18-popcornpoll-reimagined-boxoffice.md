@@ -1115,9 +1115,14 @@ Change the `<Card className="w-full border-2 border-brass bg-velvet">...</Card>`
             <p className="mt-3 text-center text-xs text-ink/55">{t('tmdbAttribution')}</p>
           )}
         </div>
+        {/* TODO(Task 10): remove this placeholder and add the real second grid column here, then close the grid */}
+      </div>
+    </main>
+  )
+}
 ```
 
-Leave the grid's closing `</div>` for Task 10 to add (it renders the second column immediately after this one, inside the same grid) — don't close the grid `<div>` in this task.
+**Amendment (mid-execution, Task 8):** the original plan text said to leave the grid `<div>` unclosed for Task 10 to close — that produced an unparseable file (a real execution found `app/page.tsx` truncated with no `</main>`, no closing `)`/`}` at all, since the file's pre-existing trailing lines were never restated here and got silently dropped). Fixed: this task now closes the grid with a placeholder `<div>` (commented as temporary) immediately followed by the exact `</main>\n  )\n}` that must always follow the JSX — every task must leave `app/page.tsx` in a genuinely parseable, buildable state, full stop. Task 10 below is amended to remove the placeholder `<div>` and TODO comment before adding its real second column.
 
 Every `useState` variable referenced above (`candidateSource`, `setCandidateSource`, `thresholdKind`, `setThresholdKind`, `atLeastN`, `setAtLeastN`, `genre`, `setGenre`, `ratingMin`, `setRatingMin`, `yearMin`, `setYearMin`, `yearMax`, `setYearMax`, `createRoom`) already exists in `app/page.tsx` exactly as before — this task changes only the JSX, never the component's state/logic.
 
@@ -1263,9 +1268,17 @@ Add near the top of `CreateRoomPage`, alongside the existing `useState` calls:
 ```
 Add `useEffect` to the existing `import { useState } from 'react'` line, making it `import { useEffect, useState } from 'react'`.
 
-- [ ] **Step 3: Add the sidebar column, closing the grid `<div>` Task 8 left open**
+- [ ] **Step 3: Add the sidebar column, replacing Task 8's placeholder**
 
-Immediately after Task 8's ticket-panel `</div>` (the one closing the first grid column), add the second column and close the grid:
+Task 8 left a placeholder in place of the second grid column:
+```tsx
+        {/* TODO(Task 10): remove this placeholder and add the real second grid column here, then close the grid */}
+      </div>
+    </main>
+  )
+}
+```
+Delete that placeholder `<div>` and the TODO comment. Replace it with the real second column below, which itself closes the grid `<div>` and is immediately followed by the same `</main>\n  )\n}` the placeholder had (don't drop those three closing lines — they must survive this edit):
 
 ```tsx
         <div className="flex flex-col gap-4">
@@ -1346,9 +1359,12 @@ Immediately after Task 8's ticket-panel `</div>` (the one closing the first grid
           </div>
         </div>
       </div>
+    </main>
+  )
+}
 ```
 
-This closes the `grid` `<div>` Task 8 opened. `stats.recentMatches` is duplicated (`[...stats.recentMatches, ...stats.recentMatches]`) to make the `marqueeSlide` keyframe's `-50%` translation loop seamlessly (the same doubling technique the mockup itself uses, and the same as `components/RoomShare.tsx`-adjacent screens will likely reuse later — not invented here). `eligibleCount` (used above) is real state, but its `useState`/fetch effect isn't added until Task 11 — this task must still typecheck and build on its own (every task does), so add this placeholder alongside the `stats` state from Step 2 for now:
+This closes the `grid` `<div>` Task 8 opened, followed immediately by the `</main>`/return-paren/function-brace that were part of the file's original tail (restored here after Task 8's placeholder amendment above — do not drop them again). `stats.recentMatches` is duplicated (`[...stats.recentMatches, ...stats.recentMatches]`) to make the `marqueeSlide` keyframe's `-50%` translation loop seamlessly (the same doubling technique the mockup itself uses, and the same as `components/RoomShare.tsx`-adjacent screens will likely reuse later — not invented here). `eligibleCount` (used above) is real state, but its `useState`/fetch effect isn't added until Task 11 — this task must still typecheck and build on its own (every task does), so add this placeholder alongside the `stats` state from Step 2 for now:
 ```tsx
   const eligibleCount: number | null = null // placeholder — Task 11 replaces this with real useState + a debounced fetch effect
 ```
