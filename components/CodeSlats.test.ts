@@ -26,6 +26,6 @@ describe('slatGroups', () => {
 
   it('staggers the delay across the whole code, not reset per group', () => {
     const groups = slatGroups('AB-CD')
-    expect(groups[1][0].delay).toBe('0.18')
+    expect(groups[1]?.[0]?.delay).toBe('0.18')
   })
 })
