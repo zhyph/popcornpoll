@@ -4,8 +4,7 @@ import Aurora from '../ui/Aurora'
 import LightRays from '../ui/reactbits/LightRays'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
 
-// Three stacked ambient layers behind every screen, replacing
-// components/SpotlightBackground.tsx: Aurora (existing colour wash),
+// Three stacked ambient layers behind every screen: Aurora (existing colour wash),
 // LightRays (the mockup's beam-sway), and a hand-authored film-grain layer
 // (the mockup's own grainShift keyframe/repeating-radial-gradient recipe —
 // Dither was dropped, see Task 2). All freeze to a static frame under

@@ -1,21 +1,11 @@
 // components/chrome/PictureBoothHeader.tsx
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { usePathname } from 'next/navigation'
+import { LocaleSwitcher } from '../LocaleSwitcher'
 import { useRoomStep, type ChapterStep } from './RoomStatusContext'
 
-const HOST_LABELS: Record<ChapterStep, string> = {
-  entry: 'Box office',
-  lobby: 'Lobby',
-  deck: 'Now showing',
-  wrapup: 'Wrap-up',
-}
-const GUEST_LABELS: Record<ChapterStep, string> = {
-  entry: 'Your ticket',
-  lobby: 'Lobby',
-  deck: 'Now showing',
-  wrapup: 'Wrap-up',
-}
 const STEPS: ChapterStep[] = ['entry', 'lobby', 'deck', 'wrapup']
 
 // Route-only inference for screens this plan doesn't wire real state into
@@ -31,6 +21,8 @@ function stepFromPath(pathname: string, pushedStep: ChapterStep | null): Chapter
 }
 
 export function PictureBoothHeader() {
+  const t = useTranslations('common')
+  const tChrome = useTranslations('chrome')
   const pathname = usePathname()
   const pushedStep = useRoomStep()
   // Recomputed every render from the reactive usePathname() value, not
@@ -39,7 +31,19 @@ export function PictureBoothHeader() {
   // stuck on whichever flow the header first mounted under.
   const isGuestFlow = pathname.startsWith('/join/')
   const currentStep = stepFromPath(pathname, pushedStep)
-  const labels = isGuestFlow ? GUEST_LABELS : HOST_LABELS
+  const hostLabels: Record<ChapterStep, string> = {
+    entry: tChrome('hostStepEntry'),
+    lobby: tChrome('hostStepLobby'),
+    deck: tChrome('hostStepDeck'),
+    wrapup: tChrome('hostStepWrapup'),
+  }
+  const guestLabels: Record<ChapterStep, string> = {
+    entry: tChrome('guestStepEntry'),
+    lobby: tChrome('guestStepLobby'),
+    deck: tChrome('guestStepDeck'),
+    wrapup: tChrome('guestStepWrapup'),
+  }
+  const labels = isGuestFlow ? guestLabels : hostLabels
 
   return (
     <header className="relative z-20 flex flex-wrap items-center justify-between gap-4 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-3.5 backdrop-blur-sm sm:px-10">
@@ -49,9 +53,9 @@ export function PictureBoothHeader() {
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee [animation-delay:140ms]" />
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee [animation-delay:280ms]" />
         </span>
-        <span className="font-display text-xl tracking-wide text-ticket">POPCORNPOLL</span>
+        <span className="font-display text-xl uppercase tracking-wide text-ticket">{t('appName')}</span>
         <span className="border border-brass/50 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brass">
-          est. 1952
+          {tChrome('estYear')}
         </span>
       </div>
 
@@ -85,7 +89,8 @@ export function PictureBoothHeader() {
       )}
 
       <div className="flex items-center gap-2.5 font-mono text-[10px] uppercase tracking-widest text-brass">
-        <span>Self-hosted</span>
+        <span>{tChrome('selfHosted')}</span>
+        <LocaleSwitcher />
       </div>
     </header>
   )

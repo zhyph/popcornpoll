@@ -208,7 +208,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     return (
       <main
         data-testid="terminal-screen"
-        className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-4 py-10 text-center"
+        className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-4 px-4 py-10 text-center"
       >
         <p className="font-display text-2xl text-ticket">{message}</p>
       </main>
@@ -217,7 +217,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col items-center gap-6 px-4 py-10">
+      <main className="mx-auto flex flex-1 max-w-md flex-col items-center gap-6 px-4 py-10">
         <RoomShare code={params.code} />
         <Card className="w-full border border-brass/50 bg-velvet">
           <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
@@ -264,7 +264,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       : null
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
+    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
       {latestMatch && (
         <div data-testid="match-banner">
           <MarqueeReveal movie={latestMatch} />

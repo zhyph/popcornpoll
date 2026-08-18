@@ -8,7 +8,6 @@ import { CurtainOverlay } from '../components/chrome/CurtainOverlay'
 import { PictureBoothFooter } from '../components/chrome/PictureBoothFooter'
 import { PictureBoothHeader } from '../components/chrome/PictureBoothHeader'
 import { RoomStatusProvider } from '../components/chrome/RoomStatusContext'
-import { LocaleSwitcher } from '../components/LocaleSwitcher'
 import { Toaster } from '../components/ui/sonner'
 import './globals.css'
 
@@ -28,12 +27,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <AtmosphereLayer />
             <CurtainOverlay open countdownNumber={null} />
             <ClickSparkProvider>
-              <div className="fixed right-2 top-2 z-50 sm:right-4 sm:top-4">
-                <LocaleSwitcher />
-              </div>
               <div className="flex min-h-screen flex-col">
                 <PictureBoothHeader />
-                <div className="flex-1">{children}</div>
+                <div className="flex flex-1 flex-col">{children}</div>
                 <PictureBoothFooter />
               </div>
             </ClickSparkProvider>

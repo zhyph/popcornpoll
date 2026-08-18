@@ -55,7 +55,7 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4">
+    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4">
       <h1 className="font-display text-5xl text-marquee">POPCORNPOLL</h1>
       <Card className="w-full border-2 border-brass bg-velvet">
         <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
@@ -131,11 +131,6 @@ export default function CreateRoomPage() {
           <Button className="mt-2 bg-marquee text-ink hover:bg-marquee/90" onClick={createRoom}>
             {t('createButton')}
           </Button>
-          {candidateSource === 'plex+tmdb' && (
-            <p className="text-center text-xs text-muted-foreground">
-              {t('tmdbAttribution')}
-            </p>
-          )}
         </CardContent>
       </Card>
     </main>

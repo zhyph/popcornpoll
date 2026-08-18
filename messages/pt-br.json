@@ -2,6 +2,20 @@
   "common": {
     "appName": "PopcornPoll"
   },
+  "chrome": {
+    "estYear": "desde 1952",
+    "selfHosted": "Auto-hospedado",
+    "hostStepEntry": "Bilheteria",
+    "hostStepLobby": "Lobby",
+    "hostStepDeck": "Em cartaz",
+    "hostStepWrapup": "Encerramento",
+    "guestStepEntry": "Seu ingresso",
+    "guestStepLobby": "Lobby",
+    "guestStepDeck": "Em cartaz",
+    "guestStepWrapup": "Encerramento",
+    "footerTagline": "Auto-hospedado · sua biblioteca, suas regras",
+    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB"
+  },
   "createRoom": {
     "title": "Sessão de hoje",
     "candidateSourceLabel": "Fonte dos candidatos",
