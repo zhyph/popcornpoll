@@ -750,11 +750,15 @@ git commit -m "feat: add PictureBoothFooter chrome component"
 
 **Files:**
 - Modify: `app/layout.tsx`
+- Create: `components/chrome/ClickSparkProvider.tsx`
 - Delete: `components/SpotlightBackground.tsx` (superseded by `AtmosphereLayer`)
 - Create: `e2e/chrome.spec.ts`
 
 **Interfaces:**
 - Consumes: `AtmosphereLayer` (Task 7), `CurtainOverlay` (Task 8), `RoomStatusProvider`/`PictureBoothHeader` (Task 9), `PictureBoothFooter` (Task 10), `ClickSpark` (Task 6, props `{ sparkColor?, sparkSize?, sparkRadius?, sparkCount?, duration?, easing?, extraScale?, children? }`).
+- Produces: `ClickSparkProvider({ children }: { children: React.ReactNode }): JSX.Element`.
+
+**Amendment (mid-execution, Task 11):** `components/ui/reactbits/ClickSpark.tsx` (Task 6) has no `'use client'` directive — same as every other vendored React Bits file in this plan (Aurora doesn't either). That's fine everywhere else because nothing imports a vendored file directly into a Server Component; `AtmosphereLayer`/`CurtainOverlay`/`PictureBoothHeader` are themselves `'use client'` and sit between the vendored files and `app/layout.tsx`. `ClickSpark` was the one exception in the original plan text: `app/layout.tsx` (an async Server Component) imported it directly, which fails `next build`'s Client/Server boundary check. Fix: a thin `'use client'` wrapper, `ClickSparkProvider`, following the exact precedent `components/SpotlightBackground.tsx` already sets for `Aurora` (bake in the fixed prop values, expose no props beyond `children`) — `app/layout.tsx` imports `ClickSparkProvider`, not the raw vendored `ClickSpark`.
 
 - [ ] **Step 1: Write the failing Playwright smoke test**
 
@@ -781,7 +785,31 @@ test('chapter indicator is hidden on the setup screen', async ({ page }) => {
 Run: `npx playwright test e2e/chrome.spec.ts`
 Expected: FAIL — `app/layout.tsx` still renders the old `SpotlightBackground`/`LocaleSwitcher`-only chrome, so `chapter-indicator` and `curtain-overlay` don't exist yet.
 
-- [ ] **Step 3: Rewrite `app/layout.tsx`**
+- [ ] **Step 3: Write `components/chrome/ClickSparkProvider.tsx`**
+
+```tsx
+// components/chrome/ClickSparkProvider.tsx
+'use client'
+
+import ClickSpark from '../ui/reactbits/ClickSpark'
+
+// Thin client wrapper around the vendored ClickSpark, following the exact
+// precedent components/SpotlightBackground.tsx already sets for Aurora:
+// the vendored file itself has no 'use client' directive (true of every
+// React Bits pull in this plan), so a Server Component (app/layout.tsx)
+// can't import it directly — this wrapper is the client boundary, with the
+// spark's tuning baked in rather than exposed as props, same as
+// SpotlightBackground bakes in Aurora's colorStops/amplitude/speed.
+export function ClickSparkProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <ClickSpark sparkColor="#F5A623" sparkCount={8} duration={460} extraScale={1.0}>
+      {children}
+    </ClickSpark>
+  )
+}
+```
+
+- [ ] **Step 4: Rewrite `app/layout.tsx`**
 
 ```tsx
 // app/layout.tsx
@@ -789,12 +817,12 @@ import { NextIntlClientProvider } from 'next-intl'
 import { getLocale } from 'next-intl/server'
 import { Anton, JetBrains_Mono, Work_Sans } from 'next/font/google'
 import { AtmosphereLayer } from '../components/chrome/AtmosphereLayer'
+import { ClickSparkProvider } from '../components/chrome/ClickSparkProvider'
 import { CurtainOverlay } from '../components/chrome/CurtainOverlay'
 import { PictureBoothFooter } from '../components/chrome/PictureBoothFooter'
 import { PictureBoothHeader } from '../components/chrome/PictureBoothHeader'
 import { RoomStatusProvider } from '../components/chrome/RoomStatusContext'
 import { LocaleSwitcher } from '../components/LocaleSwitcher'
-import ClickSpark from '../components/ui/reactbits/ClickSpark'
 import { Toaster } from '../components/ui/sonner'
 import './globals.css'
 
@@ -813,7 +841,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <RoomStatusProvider>
             <AtmosphereLayer />
             <CurtainOverlay open countdownNumber={null} />
-            <ClickSpark sparkColor="#F5A623" sparkCount={8} duration={460} extraScale={1.0}>
+            <ClickSparkProvider>
               <div className="fixed right-2 top-2 z-50 sm:right-4 sm:top-4">
                 <LocaleSwitcher />
               </div>
@@ -822,7 +850,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <div className="flex-1">{children}</div>
                 <PictureBoothFooter />
               </div>
-            </ClickSpark>
+            </ClickSparkProvider>
           </RoomStatusProvider>
           <Toaster />
         </NextIntlClientProvider>
@@ -832,33 +860,33 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 }
 ```
 
-`ClickSpark` wraps the header/content/footer, not the fixed-position `AtmosphereLayer`/`CurtainOverlay` (which sit behind everything and shouldn't intercept clicks meant for the page — both already have `pointer-events-none` at their root).
+`ClickSparkProvider` wraps the header/content/footer, not the fixed-position `AtmosphereLayer`/`CurtainOverlay` (which sit behind everything and shouldn't intercept clicks meant for the page — both already have `pointer-events-none` at their root).
 
-- [ ] **Step 4: Delete the superseded background component**
+- [ ] **Step 6: Delete the superseded background component**
 
 ```bash
 rm components/SpotlightBackground.tsx
 ```
 
-- [ ] **Step 5: Typecheck and build**
+- [ ] **Step 7: Typecheck and build**
 
 Run: `npm run typecheck && npm run build`
-Expected: PASS. The `build` step matters here specifically because it's the first point at which `next build`'s route analysis touches every vendored WebGL component (`Aurora`, `LightRays`, `MetaBalls`) through the full layout tree — a client/server boundary mistake would surface here, not at `typecheck`.
+Expected: PASS. The `build` step matters here specifically because it's the first point at which `next build`'s route analysis touches every vendored WebGL component (`Aurora`, `LightRays`, `MetaBalls`) and the `ClickSparkProvider` client boundary through the full layout tree — a client/server boundary mistake would surface here, not at `typecheck`.
 
-- [ ] **Step 6: Run the Playwright smoke test again**
+- [ ] **Step 8: Run the Playwright smoke test again**
 
 Run: `npx playwright test e2e/chrome.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Run the full existing Playwright suite**
+- [ ] **Step 9: Run the full existing Playwright suite**
 
 Run: `npx playwright test`
 Expected: PASS — every existing spec (`authorization`, `exclusion`, `exhaustion`, `kicked`, `match`, `rateLimit`, `reconnect`) still passes unmodified, since this task didn't touch any `data-testid` any of them depend on, only added new chrome around the existing pages.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add app/layout.tsx e2e/chrome.spec.ts
+git add app/layout.tsx components/chrome/ClickSparkProvider.tsx e2e/chrome.spec.ts
 git rm components/SpotlightBackground.tsx
 git commit -m "feat: wire shared chrome (atmosphere, curtain, header, footer, click-spark) into layout"
 ```
