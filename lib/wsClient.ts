@@ -1,4 +1,5 @@
 // lib/wsClient.ts
+import { WS_CLOSE_TERMINAL } from '../server/ws/protocol'
 import type { ClientMessage, ServerMessage } from '../server/ws/protocol'
 
 export interface WsClient {
@@ -37,8 +38,11 @@ export function createWsClient(url: string): WsClient {
       const message = JSON.parse(event.data as string) as ServerMessage
       dispatch(message)
     })
-    socket.addEventListener('close', () => {
-      if (closedByCaller) return
+    socket.addEventListener('close', (event) => {
+      // A terminal close (kicked, or the room itself ending) is a deliberate
+      // server-side decision, not a transient network drop — reconnecting
+      // would just rejoin a room the client was explicitly told to leave.
+      if (closedByCaller || event.code === WS_CLOSE_TERMINAL) return
       setTimeout(connect, backoff)
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS)
     })

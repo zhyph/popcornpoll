@@ -132,6 +132,37 @@ describe('reconnectRoom', () => {
     kickParticipant(store, code, true, target.data.participantId)
     expect(reconnectRoom(store, code, target.data.sessionToken)).toEqual({ ok: false, code: 'kicked' })
   })
+
+  it('recomputes exhaustion when an active room participant reconnects', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const guest = joinRoom(store, code, 'Guest')
+    if (!host.ok || !guest.ok) throw new Error('setup failed')
+    const room = store.get(code)!
+    room.status = 'active'
+    const guestParticipant = room.participants.get(guest.data.participantId)!
+    guestParticipant.connectionStatus = 'disconnected'
+    guestParticipant.finished = false
+    room.participants.get(host.data.participantId)!.finished = true
+    room.exhausted = true // stale — as if this had been computed while the guest was still disconnected
+
+    const result = reconnectRoom(store, code, guest.data.sessionToken)
+    expect(result.ok).toBe(true)
+    // the guest is back, connected, and unfinished — the room is blocked on them again
+    expect(room.exhausted).toBe(false)
+  })
+
+  it('clears disconnectedAt on reconnect', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    if (!host.ok) throw new Error('setup failed')
+    const participant = store.get(code)!.participants.get(host.data.participantId)!
+    participant.connectionStatus = 'disconnected'
+    participant.disconnectedAt = Date.now()
+
+    reconnectRoom(store, code, host.data.sessionToken)
+    expect(participant.disconnectedAt).toBeNull()
+  })
 })
 
 describe('kickParticipant', () => {
@@ -168,6 +199,23 @@ describe('kickParticipant', () => {
     if (!c.ok) throw new Error('setup failed')
     kickParticipant(store, code, true, c.data.participantId)
     expect(store.get(code)!.matchThreshold).toEqual({ kind: 'atLeast', n: 2 })
+  })
+
+  it('recomputes exhaustion for the remaining participants in an active room', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const guest = joinRoom(store, code, 'Guest')
+    if (!host.ok || !guest.ok) throw new Error('setup failed')
+    const room = store.get(code)!
+    room.status = 'active'
+    room.participants.get(host.data.participantId)!.finished = true
+    room.participants.get(guest.data.participantId)!.finished = false
+    room.exhausted = false // blocked on the guest
+
+    const result = kickParticipant(store, code, true, guest.data.participantId)
+    expect(result.ok).toBe(true)
+    // the guest (the only unfinished participant) is gone — nobody left to block on
+    expect(room.exhausted).toBe(true)
   })
 })
 

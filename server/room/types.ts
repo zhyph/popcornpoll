@@ -14,6 +14,7 @@ export interface Participant {
   finished: boolean
   swipes: Map<number, 'yes' | 'no'>
   pendingCardId: number | null
+  disconnectedAt: number | null
 }
 
 export interface TmdbFilters {

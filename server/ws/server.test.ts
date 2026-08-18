@@ -9,7 +9,8 @@ import WebSocket from 'ws'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
 import { createRoomStore } from '../room/roomStore'
-import { attachWebSocketServer, MAX_FAILED_JOINS } from './server'
+import { attachWebSocketServer, MAX_FAILED_JOINS, RECONNECT_GRACE_MS } from './server'
+import { WS_CLOSE_TERMINAL } from './protocol'
 import type { Server } from 'node:http'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
@@ -64,6 +65,32 @@ function connect(): Promise<WebSocket> {
 function nextMessage(ws: WebSocket): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+  })
+}
+
+// A single 'start' round-trip can now emit several messages to the same
+// socket (a transitional "starting" state_update from notifyStarting, then
+// room_started + the "active" state_update, then next_card) with no real
+// async gap between them when the pool build has no actual I/O to await
+// (e.g. a 'plex'-only room) — they arrive back-to-back on the same
+// underlying TCP read, and 'ws' parses/emits all of them synchronously in
+// one burst. A sequence of `await nextMessage(ws)` calls loses every message
+// after the first in that burst, because each call only attaches its
+// listener after the previous one already resolved — by which point the
+// rest of the burst has already been emitted with nobody listening. Collect
+// with one persistent listener instead so every message in the burst is
+// captured regardless of arrival timing.
+function collectMessages(ws: WebSocket, count: number): Promise<Record<string, unknown>[]> {
+  return new Promise((resolve) => {
+    const messages: Record<string, unknown>[] = []
+    function onMessage(raw: Buffer) {
+      messages.push(JSON.parse(raw.toString()))
+      if (messages.length >= count) {
+        ws.off('message', onMessage)
+        resolve(messages)
+      }
+    }
+    ws.on('message', onMessage)
   })
 }
 
@@ -182,6 +209,73 @@ describe('attachWebSocketServer', () => {
     hostWs.close()
     guestWs.close()
   })
+
+  it('broadcasts a state_update immediately on disconnect, and only recomputes exhaustion after the reconnect grace period', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    hostWs.send(JSON.stringify({ type: 'start' }))
+    // starting state_update (notifyStarting), room_started, active state_update, next_card
+    await collectMessages(hostWs, 4)
+    await collectMessages(guestWs, 4)
+
+    const room = store.get(code)!
+    room.participants.get(hostJoined.participantId as string)!.finished = true // only the guest is blocking
+
+    // Node's socket I/O runs on libuv's real event loop, not on setTimeout —
+    // so real network traffic keeps working under fake timers, letting us
+    // fast-forward the internal grace-period setTimeout without a real wait.
+    vi.useFakeTimers()
+    try {
+      const immediateUpdate = nextMessage(hostWs)
+      guestWs.close()
+      await vi.advanceTimersByTimeAsync(0)
+      const immediate = await immediateUpdate
+      expect(immediate.type).toBe('state_update')
+      expect(room.exhausted).toBe(false) // grace period — not finalized yet
+
+      const finalizedUpdate = nextMessage(hostWs)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS)
+      const finalized = await finalizedUpdate
+      expect(finalized.type).toBe('state_update')
+      expect(room.exhausted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    hostWs.close()
+  })
+
+  it("closes a kicked participant's socket with the terminal close code", async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    const guestJoined = await nextMessage(guestWs)
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    const closeEvent = new Promise<number>((resolve) => guestWs.once('close', (closeCode) => resolve(closeCode)))
+    hostWs.send(JSON.stringify({ type: 'kick', participantId: guestJoined.participantId }))
+    await nextMessage(guestWs) // kicked
+    expect(await closeEvent).toBe(WS_CLOSE_TERMINAL)
+
+    hostWs.close()
+  })
 })
 
 describe('attachWebSocketServer: handleMessage failures do not crash the process', () => {
@@ -229,11 +323,17 @@ describe('attachWebSocketServer: handleMessage failures do not crash the process
     crashDb.close() // simulates a database failure mid-request
 
     ws.send(JSON.stringify({ type: 'start' }))
-    const reply = await new Promise<Record<string, unknown>>((resolve) => {
-      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
-    })
-    expect(reply.type).toBe('error')
-    expect(reply.code).toBe('internal_error')
+    // The room synchronously flips to 'starting' (and broadcasts that,
+    // via notifyStarting) before the async pool build even runs — which is
+    // where the closed-DB failure actually occurs — so the first message is
+    // a transitional state_update, and the second is the error surfaced by
+    // the crash-hardening catch. Both arrive in the same burst (no real
+    // async gap for a 'plex'-only pool build), so collect rather than await
+    // them one at a time.
+    const [started, reply] = await collectMessages(ws, 2)
+    expect(started?.type).toBe('state_update')
+    expect(reply?.type).toBe('error')
+    expect(reply?.code).toBe('internal_error')
 
     // The connection (and process) must still be alive and responsive afterward.
     ws.send(JSON.stringify({ type: 'heartbeat' }))

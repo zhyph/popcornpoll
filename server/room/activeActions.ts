@@ -44,7 +44,7 @@ function assignPendingCard(room: RoomState, participantId: string): number | nul
   return nextCardId
 }
 
-function recomputeExhaustion(room: RoomState): boolean {
+export function recomputeExhaustion(room: RoomState): boolean {
   const blocking = [...room.participants.values()].some(
     (p) => p.connectionStatus === 'connected' && !p.finished,
   )
@@ -58,6 +58,7 @@ export async function startRoom(
   callerIsHost: boolean,
   db: Database.Database,
   tmdb: TmdbClient,
+  notifyStarting?: () => void,
 ): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean }>> {
   if (!callerIsHost) return err('not_host')
   const room = store.get(code)
@@ -81,10 +82,12 @@ export async function startRoom(
   // Synchronous status flip BEFORE the async pool build — closes the join
   // race described in the spec's Concurrency section.
   room.status = 'starting'
+  notifyStarting?.()
 
   const result = await buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
   if (result.tooSmall) {
     room.status = 'lobby'
+    notifyStarting?.()
     return err('pool_too_small')
   }
 
@@ -114,6 +117,7 @@ export function swipeAction(
   if (!room) return err('room_not_found')
   const participant = room.participants.get(participantId)
   if (!participant) return err('room_not_found')
+  if (room.status !== 'active') return err('room_not_active')
 
   if (movieId !== participant.pendingCardId) {
     if (participant.swipes.has(movieId)) {

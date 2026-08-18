@@ -2,6 +2,7 @@
 import { emptyTally, recordVote } from '../ranking/affinity'
 import { generateToken } from '../auth/tokens'
 import { clampThreshold, evaluateThreshold, isValidThreshold } from './matchThreshold'
+import { recomputeExhaustion } from './activeActions'
 import type { RoomStore } from './roomStore'
 import type { CandidateSource, MatchThreshold, Participant, RoomState, TmdbFilters } from './types'
 
@@ -21,6 +22,7 @@ export type ErrorCode =
   | 'pool_too_small'
   | 'not_your_card'
   | 'internal_error'
+  | 'room_not_active'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; code: ErrorCode }
 
@@ -67,6 +69,7 @@ export function joinRoom(
     finished: false,
     swipes: new Map(),
     pendingCardId: null,
+    disconnectedAt: null,
   }
   room.participants.set(participantId, participant)
   room.lastActivityAt = Date.now()
@@ -106,8 +109,10 @@ export function reconnectRoom(
   if (!participant) return err('bad_token')
 
   participant.connectionStatus = 'connected'
+  participant.disconnectedAt = null
   room.lastActivityAt = Date.now()
   const isHost = hostToken !== undefined && hostToken === room.hostToken && room.hostParticipantId === participant.id
+  if (room.status === 'active') recomputeExhaustion(room)
 
   return ok({ participantId: participant.id, isHost, room })
 }
@@ -165,6 +170,7 @@ export function kickParticipant(
   const newMatches = reevaluateMatches(room)
   room.matchThreshold = clampThreshold(room.matchThreshold, room.participants.size)
   room.lastActivityAt = Date.now()
+  if (room.status === 'active') recomputeExhaustion(room)
 
   return ok({ newMatches })
 }

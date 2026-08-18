@@ -136,7 +136,49 @@ describe('startRoom', () => {
   })
 })
 
+describe('startRoom notifyStarting callback', () => {
+  it('invokes notifyStarting synchronously right after flipping to starting', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'Other')
+    seedPlexRows(10)
+
+    const seenStatuses: string[] = []
+    const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
+    await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+
+    expect(notifyStarting).toHaveBeenCalledTimes(1)
+    expect(seenStatuses).toEqual(['starting'])
+  })
+
+  it('invokes notifyStarting again on revert to lobby when the pool is too small', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'B')
+    seedPlexRows(2) // below POOL_MIN_SIZE (5)
+
+    const seenStatuses: string[] = []
+    const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
+    const result = await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+
+    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+    expect(notifyStarting).toHaveBeenCalledTimes(2)
+    expect(seenStatuses).toEqual(['starting', 'lobby'])
+  })
+})
+
 describe('swipeAction', () => {
+  it('rejects a swipe on a room that has not been started', () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    if (!host.ok) throw new Error('setup failed')
+    const result = swipeAction(store, code, host.data.participantId, 1, 'yes')
+    expect(result).toEqual({ ok: false, code: 'room_not_active' })
+  })
+
   async function startedRoom(threshold: import('./types').MatchThreshold = { kind: 'all' }) {
     const store = createRoomStore()
     const { code, hostClaimToken } = store.create(threshold, 'plex', {})

@@ -35,7 +35,7 @@ function participantViews(room: RoomState): ParticipantView[] {
   }))
 }
 
-function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_update' }> {
+export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_update' }> {
   room.seq++
   return {
     type: 'state_update',
@@ -49,7 +49,7 @@ function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_upd
   }
 }
 
-function topCandidatesFor(room: RoomState): (typeof room.pool) {
+export function topCandidatesFor(room: RoomState): (typeof room.pool) {
   return [...room.pool]
     .filter((entry) => !room.matchedMovieIds.has(entry.movieId))
     .sort((a, b) => {
@@ -87,6 +87,7 @@ export async function handleMessage(
   tmdb: TmdbClient,
   state: ConnectionState,
   message: ClientMessage,
+  onBroadcast?: (messages: ServerMessage[]) => void,
 ): Promise<RouterOutput> {
   switch (message.type) {
     case 'join': {
@@ -202,7 +203,11 @@ export async function handleMessage(
 
     case 'start': {
       if (!state.roomCode) return emptyOutput(state)
-      const result = await startRoom(store, state.roomCode, state.isHost, db, tmdb)
+      const roomCode = state.roomCode
+      const result = await startRoom(store, roomCode, state.isHost, db, tmdb, () => {
+        const room = store.get(roomCode)
+        if (room) onBroadcast?.([stateUpdate(room)])
+      })
       if (!result.ok) {
         return { ...emptyOutput(state), toSender: [{ type: 'error', code: result.code, message: result.code }] }
       }
@@ -252,6 +257,9 @@ export async function handleMessage(
       for (const movieId of result.data.newMatches) {
         const movie = updatedRoom.pool.find((p) => p.movieId === movieId)!
         toRoom.push({ type: 'match', movieId, movie, seq: updatedRoom.seq })
+      }
+      if (updatedRoom.exhausted && updatedRoom.matches.length === 0) {
+        toRoom.push({ type: 'exhausted', topCandidates: topCandidatesFor(updatedRoom) })
       }
       return {
         toSender: [],

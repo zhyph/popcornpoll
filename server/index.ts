@@ -127,17 +127,23 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
     })
   })
 
-  attachWebSocketServer(httpServer, store, db, tmdb, config)
+  const wsHandle = attachWebSocketServer(httpServer, store, db, tmdb, config)
 
   const sweepTimer = setInterval(() => {
     const now = Date.now()
-    sweepInactiveRooms(store, now)
+    const endedCodes = sweepInactiveRooms(store, now)
+    for (const code of endedCodes) wsHandle.broadcastRoomEnded(code, 'inactivity_timeout')
     sweepEvictions(store, now)
   }, SWEEP_INTERVAL_MS)
 
   async function shutdown(): Promise<void> {
     clearInterval(sweepTimer)
     enrichment.stop()
+    wsHandle.stopHeartbeatSweep()
+    for (const room of store.all()) {
+      if (room.status !== 'ended') wsHandle.broadcastRoomEnded(room.code, 'server_restarting')
+    }
+    wsHandle.terminateAllSockets()
     await new Promise<void>((resolve) => httpServer.close(() => resolve()))
     db.close()
   }

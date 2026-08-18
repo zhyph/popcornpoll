@@ -182,6 +182,58 @@ describe('handleMessage: swipe -> next_card', () => {
   })
 })
 
+describe('handleMessage: start broadcasts a transitional state_update via onBroadcast', () => {
+  it('calls onBroadcast with a "starting" state_update before the pool build resolves', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const broadcastStatuses: string[] = []
+    await handleMessage(store, db, noOpTmdb, state, { type: 'start' }, (messages) => {
+      for (const m of messages) if (m.type === 'state_update') broadcastStatuses.push(m.status)
+    })
+
+    expect(broadcastStatuses).toEqual(['starting'])
+  })
+})
+
+describe('handleMessage: kick -> exhausted', () => {
+  it('emits an exhausted event when kicking the last unfinished participant in an active room', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    let hostState = freshState()
+    const hostJoined = await handleMessage(store, db, noOpTmdb, hostState, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    hostState = hostJoined.newState
+    const guestJoined = await handleMessage(store, db, noOpTmdb, freshState(), {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Guest',
+    })
+    seedPlexRows(20)
+    await handleMessage(store, db, noOpTmdb, hostState, { type: 'start' })
+    store.get(code)!.participants.get(hostState.participantId!)!.finished = true
+
+    const result = await handleMessage(store, db, noOpTmdb, hostState, {
+      type: 'kick',
+      participantId: guestJoined.newState.participantId!,
+    })
+
+    expect(result.toRoom.some((m) => m.type === 'exhausted')).toBe(true)
+  })
+})
+
 describe('handleMessage: reconnect', () => {
   it('reconnect with a valid sessionToken rebinds connection state', async () => {
     const { code } = store.create({ kind: 'all' }, 'plex', {})

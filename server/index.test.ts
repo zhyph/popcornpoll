@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import WebSocket from 'ws'
 import { createApp } from './index'
 import { openDb } from './db'
 import { savePlexLink } from './plex/link'
@@ -103,5 +104,18 @@ describe('createApp', () => {
       await rotatedApp.shutdown()
       rmSync(rotDir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('shutdown', () => {
+  it('resolves promptly even while a WebSocket connection is still open', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    const ws = new WebSocket(`ws://localhost:${port}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+
+    const start = Date.now()
+    await app.shutdown()
+    expect(Date.now() - start).toBeLessThan(5000)
   })
 })

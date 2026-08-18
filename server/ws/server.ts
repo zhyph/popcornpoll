@@ -3,10 +3,11 @@ import type { IncomingMessage, Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
+import { recomputeExhaustion } from '../room/activeActions'
 import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
-import { handleMessage, type ConnectionState } from './router'
-import type { ClientMessage, ServerMessage } from './protocol'
+import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
+import { WS_CLOSE_TERMINAL, type ClientMessage, type ServerMessage } from './protocol'
 import { createTokenBucket } from '../rateLimit'
 
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -19,6 +20,14 @@ interface SocketMeta {
   state: ConnectionState
   lastHeartbeatAt: number
   failedJoins: number
+}
+
+export interface WsServerHandle {
+  wss: WebSocketServer
+  broadcastToRoom(roomCode: string, messages: ServerMessage[]): void
+  broadcastRoomEnded(roomCode: string, reason: string): void
+  terminateAllSockets(): void
+  stopHeartbeatSweep(): void
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {
@@ -44,10 +53,67 @@ export function attachWebSocketServer(
   db: Database.Database,
   tmdb: TmdbClient,
   config: AppConfig,
-): WebSocketServer {
+): WsServerHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
   const sockets = new Map<WebSocket, SocketMeta>()
   const upgradeBucket = createTokenBucket(10, 10 / 60)
+
+  function broadcastToRoom(roomCode: string, messages: ServerMessage[]): void {
+    for (const [otherWs, otherMeta] of sockets) {
+      if (otherMeta.state.roomCode !== roomCode) continue
+      for (const m of messages) send(otherWs, m)
+    }
+  }
+
+  function closeRoomSockets(roomCode: string, code: number, reason: string): void {
+    for (const [otherWs, otherMeta] of sockets) {
+      if (otherMeta.state.roomCode !== roomCode) continue
+      otherWs.close(code, reason)
+    }
+  }
+
+  function terminateAllSockets(): void {
+    for (const otherWs of sockets.keys()) otherWs.terminate()
+    sockets.clear()
+  }
+
+  function broadcastRoomEnded(roomCode: string, reason: string): void {
+    const room = store.get(roomCode)
+    if (!room) return
+    if (room.status !== 'ended') {
+      room.status = 'ended'
+      room.endedAt = Date.now()
+    }
+    const update = stateUpdate(room)
+    broadcastToRoom(roomCode, [update, { type: 'room_ended', reason, seq: update.seq }])
+    closeRoomSockets(roomCode, WS_CLOSE_TERMINAL, reason)
+  }
+
+  function finalizeDisconnect(roomCode: string, participantId: string): void {
+    const room = store.get(roomCode)
+    if (!room || room.status !== 'active') return
+    const participant = room.participants.get(participantId)
+    if (!participant || participant.connectionStatus !== 'disconnected') return
+    const exhaustedNow = recomputeExhaustion(room)
+    const toRoom: ServerMessage[] = [stateUpdate(room)]
+    if (exhaustedNow && room.matches.length === 0) {
+      toRoom.push({ type: 'exhausted', topCandidates: topCandidatesFor(room) })
+    }
+    broadcastToRoom(roomCode, toRoom)
+  }
+
+  function markDisconnected(state: ConnectionState): void {
+    if (!state.roomCode || !state.participantId) return
+    const roomCode = state.roomCode
+    const participantId = state.participantId
+    const room = store.get(roomCode)
+    const participant = room?.participants.get(participantId)
+    if (!room || !participant || participant.connectionStatus === 'disconnected') return
+    participant.connectionStatus = 'disconnected'
+    participant.disconnectedAt = Date.now()
+    broadcastToRoom(roomCode, [stateUpdate(room)])
+    setTimeout(() => finalizeDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
+  }
 
   httpServer.on('upgrade', (req, socket, head) => {
     if (req.url !== '/ws') {
@@ -89,7 +155,9 @@ export function attachWebSocketServer(
 
       let result: Awaited<ReturnType<typeof handleMessage>>
       try {
-        result = await handleMessage(store, db, tmdb, meta.state, message)
+        result = await handleMessage(store, db, tmdb, meta.state, message, (messages) => {
+          if (meta.state.roomCode) broadcastToRoom(meta.state.roomCode, messages)
+        })
       } catch (err) {
         // A thrown/rejected error anywhere inside handleMessage (e.g. a
         // database error reached through startRoom) is otherwise an
@@ -113,19 +181,14 @@ export function attachWebSocketServer(
 
       if (result.toRoom.length > 0 && meta.state.roomCode) {
         const room = store.get(meta.state.roomCode)
-        if (room) {
-          for (const [otherWs, otherMeta] of sockets) {
-            if (otherMeta.state.roomCode !== meta.state.roomCode) continue
-            for (const m of result.toRoom) send(otherWs, m)
-          }
-        }
+        if (room) broadcastToRoom(meta.state.roomCode, result.toRoom)
       }
 
       for (const target of result.toParticipant) {
         for (const [otherWs, otherMeta] of sockets) {
           if (otherMeta.state.participantId === target.participantId) {
             for (const m of target.messages) send(otherWs, m)
-            if (target.messages.some((m) => m.type === 'kicked')) otherWs.close()
+            if (target.messages.some((m) => m.type === 'kicked')) otherWs.close(WS_CLOSE_TERMINAL, 'kicked')
           }
         }
       }
@@ -136,28 +199,26 @@ export function attachWebSocketServer(
     ws.on('close', () => {
       const closedMeta = sockets.get(ws)
       sockets.delete(ws)
-      if (closedMeta?.state.roomCode && closedMeta.state.participantId) {
-        const room = store.get(closedMeta.state.roomCode)
-        const participant = room?.participants.get(closedMeta.state.participantId)
-        if (participant) participant.connectionStatus = 'disconnected'
-      }
+      if (closedMeta) markDisconnected(closedMeta.state)
     })
   })
 
-  setInterval(() => {
+  const heartbeatTimer = setInterval(() => {
     const now = Date.now()
     for (const [ws, meta] of sockets) {
       if (now - meta.lastHeartbeatAt > HEARTBEAT_TIMEOUT_MS) {
-        if (meta.state.roomCode && meta.state.participantId) {
-          const room = store.get(meta.state.roomCode)
-          const participant = room?.participants.get(meta.state.participantId)
-          if (participant) participant.connectionStatus = 'disconnected'
-        }
+        markDisconnected(meta.state)
         ws.terminate()
         sockets.delete(ws)
       }
     }
   }, HEARTBEAT_INTERVAL_MS)
 
-  return wss
+  return {
+    wss,
+    broadcastToRoom,
+    broadcastRoomEnded,
+    terminateAllSockets,
+    stopHeartbeatSweep: () => clearInterval(heartbeatTimer),
+  }
 }

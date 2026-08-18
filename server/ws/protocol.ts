@@ -3,6 +3,12 @@ import type { PoolEntry } from '../pool/buildPool'
 import type { ErrorCode } from '../room/actions'
 import type { CandidateSource, ConnectionStatus, MatchThreshold, RoomStatus, TmdbFilters } from '../room/types'
 
+// A custom WS close code (RFC 6455 reserves 4000-4999 for application use).
+// Sent for a deliberate, terminal server-side close — kicked, or the room
+// itself ending — so lib/wsClient.ts can distinguish it from a transient
+// drop and stop its reconnect-with-backoff loop.
+export const WS_CLOSE_TERMINAL = 4001
+
 export type ClientMessage =
   | { type: 'join'; roomCode: string; displayName: string; hostClaimToken?: string }
   | { type: 'reconnect'; roomCode: string; sessionToken: string; hostToken?: string }
