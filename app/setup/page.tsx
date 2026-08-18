@@ -256,9 +256,21 @@ function SetupFlow() {
                 {t('waitingForApproval')}
               </Badge>
             )}
-            <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
-              {t('cancelButton')}
-            </Button>
+            {step === 'polling' && (
+              <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
+                {t('cancelButton')}
+              </Button>
+            )}
+            {step === 'pin' && (
+              <Button
+                variant="outline"
+                className="border-brass text-ticket"
+                disabled={busy}
+                onClick={() => void requestPin()}
+              >
+                {t('newCodeButton')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

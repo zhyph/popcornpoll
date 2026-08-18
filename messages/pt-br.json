@@ -98,6 +98,7 @@
     "openPlexButton": "Abrir Plex para autorizar",
     "waitingForApproval": "Aguardando aprovação…",
     "cancelButton": "Cancelar",
+    "newCodeButton": "Gerar novo código",
     "chooseServerTitle": "Escolha o servidor",
     "noServersFound": "Nenhum servidor encontrado nesta conta do Plex.",
     "chooseLibrariesTitle": "Escolha as bibliotecas de filmes",
