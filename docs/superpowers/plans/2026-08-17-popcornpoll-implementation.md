@@ -8890,3 +8890,4392 @@ Expected: PASS — same specs as Task 23, now passing against an app whose defau
 git add package.json package-lock.json next.config.js i18n messages components/LocaleSwitcher.tsx app/localeAction.ts app/layout.tsx app/page.tsx "app/join/[code]/page.tsx" "app/room/[code]/page.tsx" components/SwipeDeck.tsx components/MarqueeReveal.tsx components/RoomShare.tsx components/TicketAvatar.tsx e2e
 git commit -m "feat: internationalization via next-intl — pt-BR default, en-US option, cookie-based (no URL locale prefix)"
 ```
+
+---
+
+## Task 26: Crash-hardening — unguarded async rejections, TMDB response validation, and boot-time decryption failures
+
+**Files:**
+- Edit: `server/ws/server.ts`
+- Edit: `server/ws/server.test.ts`
+- Edit: `server/room/actions.ts`
+- Edit: `server/sync/enrichment.ts`
+- Edit: `server/sync/enrichment.test.ts`
+- Edit: `server/index.ts`
+- Edit: `server/index.test.ts`
+- Edit: `server/tmdb/client.ts`
+- Edit: `server/tmdb/client.test.ts`
+- Edit: `server/pool/buildPool.ts`
+- Edit: `server/pool/buildPool.test.ts`
+- Edit: `server/room/activeActions.ts`
+- Edit: `server/room/activeActions.test.ts`
+- Edit: `server/ws/router.ts`
+- Edit: `server/ws/router.test.ts`
+- Edit: `server/plex/client.ts`
+- Edit: `server/plex/client.test.ts`
+- Edit: `server/rateLimit.ts`
+- Edit: `server/rateLimit.test.ts`
+- Edit: `server/db/migrations/001_init.sql`
+- Edit: `server/db/index.test.ts`
+- Edit: `server/db/movies.test.ts`
+
+**Interfaces:**
+- Consumes: everything from Tasks 1-21 (the full server) — this task hardens existing behavior, it adds no new feature surface.
+- Produces:
+  ```ts
+  // pool/buildPool.ts
+  interface BuildPoolResult { pool: PoolEntry[]; tooSmall: boolean; degraded: boolean }
+
+  // room/activeActions.ts
+  function startRoom(...): Promise<ActionResult<{
+    excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean
+  }>>
+
+  // room/actions.ts — new ErrorCode member
+  type ErrorCode = /* existing members */ | 'internal_error'
+
+  // ws/router.ts — 'start' case now conditionally emits, in toRoom, after room_started/state_update:
+  // { type: 'notice', level: 'warning', code: 'degraded_to_plex_only', message: string }
+  // (the `notice` ServerMessage variant already exists in ws/protocol.ts; this is its first emitter)
+
+  // rateLimit.ts
+  interface TokenBucket { tryConsume(key: string): boolean; size(): number }
+  function createTokenBucket(
+    maxTokens: number, refillPerSecond: number,
+    idleEvictionMs?: number, sweepIntervalMs?: number,
+  ): TokenBucket
+  ```
+
+---
+
+### Part A — `buildPool` degrades to Plex-only on TMDB failure instead of crashing
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `server/pool/buildPool.test.ts`, inside the `describe('buildPool', ...)` block (after the existing `'is deterministic for a fixed rngSeed'` test, using the file's existing `seedPlexRows`/`noOpTmdb` helpers — no new imports needed):
+
+```ts
+  it('degrades to a plex-only pool and reports degraded: true when discoverMovies rejects', async () => {
+    seedPlexRows(20)
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await buildPool(db, failingTmdb, 'plex+tmdb', {}, 1)
+    expect(result.degraded).toBe(true)
+    expect(result.tooSmall).toBe(false)
+    expect(result.pool.every((e) => e.inLibrary)).toBe(true) // no TMDB-only entries made it in
+  })
+
+  it('reports degraded: false on a normal successful build', async () => {
+    seedPlexRows(150)
+    const result = await buildPool(db, noOpTmdb, 'plex', {}, 1)
+    expect(result.degraded).toBe(false)
+  })
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run server/pool/buildPool.test.ts`
+Expected: FAIL — `result.degraded` is `undefined`, not `true`/`false` (property doesn't exist yet).
+
+- [ ] **Step 3: Implement the fix in `server/pool/buildPool.ts`**
+
+Replace the `BuildPoolResult` interface:
+
+```ts
+export interface BuildPoolResult {
+  pool: PoolEntry[]
+  tooSmall: boolean
+  degraded: boolean
+}
+```
+
+Replace the TMDB-discover block inside `buildPool`:
+
+```ts
+  const plexRows = findEligiblePlexRows(db, filters)
+
+  let tmdbRows: MovieRow[] = []
+  let degraded = false
+  if (candidateSource === 'plex+tmdb') {
+    try {
+      const discovered = await tmdb.discoverMovies(
+        { yearMin: filters.yearMin, yearMax: filters.yearMax, ratingMin: filters.ratingMin },
+        TMDB_DISCOVER_PAGE_CAP,
+      )
+      tmdbRows = await resolveTmdbCandidatesIntoRows(db, discovered)
+    } catch (err) {
+      // TMDB is down/rate-limited/misconfigured — degrade to a Plex-only
+      // pool for this room instead of letting the failure propagate up
+      // through startRoom and crash the WS message handler. The
+      // shortfall-backfill logic below naturally fills the pool from Plex
+      // alone once tmdbEligible is empty. The caller (startRoom) surfaces
+      // `degraded` to the room as a notice.
+      console.error('buildPool: tmdb.discoverMovies failed, degrading to plex-only pool', err)
+      tmdbRows = []
+      degraded = true
+    }
+  }
+```
+
+Replace the final `return`:
+
+```ts
+  return {
+    pool: finalRows.map(toEntry),
+    tooSmall: finalRows.length < POOL_MIN_SIZE,
+    degraded,
+  }
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run server/pool/buildPool.test.ts`
+Expected: PASS (all tests, including the 2 new ones)
+
+**Note for whoever executes this step: verify the exact local variable names used in the real `buildPool` function (`plexRows`, the TMDB-discover call site, `finalRows`, `TMDB_DISCOVER_PAGE_CAP`, `resolveTmdbCandidatesIntoRows`) against the actual current file before applying this diff — this task was drafted by reading the file, but names must match exactly or the edit won't apply.**
+
+---
+
+### Part B — `startRoom` propagates `degraded` to its caller
+
+- [ ] **Step 5: Write the failing test**
+
+Add to `server/room/activeActions.test.ts`, inside `describe('startRoom', ...)`:
+
+```ts
+  it('propagates buildPool degraded: true through to the caller on TMDB failure', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
+    if (!host.ok || !other.ok) throw new Error('setup failed')
+    seedPlexRows(20)
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+
+    const result = await startRoom(store, code, true, db, failingTmdb)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.degraded).toBe(true)
+    expect(store.get(code)!.status).toBe('active') // degraded, not failed — the room still starts
+  })
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: FAIL — `result.data.degraded` is `undefined`.
+
+- [ ] **Step 7: Implement the fix in `server/room/activeActions.ts`**
+
+Replace the `startRoom` signature's return type:
+
+```ts
+export async function startRoom(
+  store: RoomStore,
+  code: string,
+  callerIsHost: boolean,
+  db: Database.Database,
+  tmdb: TmdbClient,
+): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean }>> {
+```
+
+Replace the final `return`:
+
+```ts
+  return ok({ excludedParticipantIds, pool: room.pool, degraded: result.degraded })
+```
+
+**Note: if Task 32 (exclusion rollback) has already landed by the time this task executes, `startRoom`'s body will look different from a from-scratch read of this file — apply this `degraded` field addition on top of Task 32's actual current structure, not the pre-Task-32 shape. The `result.degraded` value comes from `buildPool`'s return (Part A) regardless of which version of `startRoom` is in place.**
+
+- [ ] **Step 8: Run test to verify it passes**
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: PASS (all tests, including the new one)
+
+---
+
+### Part C — WS router's `'start'` case emits the `degraded_to_plex_only` notice
+
+- [ ] **Step 9: Write the failing test**
+
+Add to `server/ws/router.test.ts`, inside `describe('handleMessage: start + room_started', ...)`:
+
+```ts
+  it('emits a degraded_to_plex_only notice to the room when TMDB fails during start', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await handleMessage(store, db, failingTmdb, state, { type: 'start' })
+    const notice = result.toRoom.find((m) => m.type === 'notice')
+    expect(notice).toEqual({
+      type: 'notice',
+      level: 'warning',
+      code: 'degraded_to_plex_only',
+      message: expect.any(String),
+    })
+  })
+```
+
+- [ ] **Step 10: Run test to verify it fails**
+
+Run: `npx vitest run server/ws/router.test.ts`
+Expected: FAIL — `notice` is `undefined`.
+
+- [ ] **Step 11: Implement the fix in `server/ws/router.ts`**
+
+Locate the `case 'start':` block in the real current file and, keeping its existing `not_host`/`room_not_found`/`already_started` checks, the `startRoom(...)` call, and the `toParticipant` next_card delivery (added by an earlier task) unchanged, insert the `degraded` notice into its `toRoom` array construction:
+
+```ts
+      const room = store.get(state.roomCode)!
+      const update = stateUpdate(room)
+      const toRoom: ServerMessage[] = [
+        { type: 'room_started', pool: room.pool, seq: update.seq },
+        update,
+      ]
+      if (result.data.degraded) {
+        // buildPool couldn't reach TMDB for this round and fell back to a
+        // Plex-only pool — tell the room rather than silently shrinking
+        // the candidate set without explanation.
+        toRoom.push({
+          type: 'notice',
+          level: 'warning',
+          code: 'degraded_to_plex_only',
+          message: 'TMDB is unavailable right now — this round uses your Plex library only.',
+        })
+      }
+      return {
+        ...emptyOutput(state),
+        toRoom,
+        toParticipant: Array.from(room.participants.values()).map((p) => ({
+          participantId: p.id,
+          messages: [{ type: 'next_card', movieId: p.pendingCardId }],
+        })),
+      }
+```
+
+**Note: verify the exact current shape of this case block (variable names, whether it's still a single `return {...}` literal or already uses a `toRoom` local from an earlier task) against the real file before applying — adapt the diff to match, preserving every existing behavior (the toParticipant next_card delivery in particular) while adding only the notice-push logic shown above.**
+
+- [ ] **Step 12: Run test to verify it passes**
+
+Run: `npx vitest run server/ws/router.test.ts`
+Expected: PASS (all tests, including the new one)
+
+---
+
+### Part D — WS message handler never lets a thrown/rejected error escape
+
+- [ ] **Step 13: Write the failing test**
+
+Append to `server/ws/server.test.ts`, as a new `describe` block after the existing closing `})` (uses the file's existing imports — `mkdtempSync`, `rmSync`, `tmpdir`, `join`, `openDb`, `createRoomStore`, `attachWebSocketServer`, `WebSocket`, `AddressInfo`, `Server`, `Database`, `config`, `noOpTmdb` — no new imports required). This uses its own isolated `db`/`store`/`httpServer` so closing the db mid-test can't interfere with the other tests' shared fixtures:
+
+```ts
+describe('attachWebSocketServer: handleMessage failures do not crash the process', () => {
+  let crashDir: string
+  let crashDb: Database.Database
+  let crashServer: Server
+  let crashPort: number
+
+  beforeEach(async () => {
+    crashDir = mkdtempSync(join(tmpdir(), 'popcornpoll-wscrash-'))
+    crashDb = openDb(crashDir)
+    const store = createRoomStore()
+    crashServer = createServer()
+    attachWebSocketServer(crashServer, store, crashDb, noOpTmdb, { ...config, appOrigin: '' })
+    await new Promise<void>((resolve) => crashServer.listen(0, resolve))
+    crashPort = (crashServer.address() as AddressInfo).port
+    ;(globalThis as { __crashStore?: ReturnType<typeof createRoomStore> }).__crashStore = store
+  })
+
+  afterEach(async () => {
+    rmSync(crashDir, { recursive: true, force: true })
+    await new Promise<void>((resolve) => crashServer.close(() => resolve()))
+    // crashDb is deliberately closed inside the test itself, not here.
+  })
+
+  it('sends an error message and keeps the connection alive when handleMessage throws synchronously', async () => {
+    const store = (globalThis as { __crashStore?: ReturnType<typeof createRoomStore> }).__crashStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const ws = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+    ws.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await new Promise<void>((resolve) => ws.once('message', () => resolve())) // joined
+
+    const guest = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => guest.once('open', () => resolve()))
+    guest.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await new Promise<void>((resolve) => guest.once('message', () => resolve()))
+
+    crashDb.close() // simulates a database failure mid-request
+
+    ws.send(JSON.stringify({ type: 'start' }))
+    const reply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(reply.type).toBe('error')
+    expect(reply.code).toBe('internal_error')
+
+    // The connection (and process) must still be alive and responsive afterward.
+    ws.send(JSON.stringify({ type: 'heartbeat' }))
+    const heartbeatReply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(heartbeatReply.type).toBe('heartbeat_ack')
+
+    ws.close()
+    guest.close()
+  })
+})
+```
+
+- [ ] **Step 14: Run test to verify it fails**
+
+Run: `npx vitest run server/ws/server.test.ts`
+Expected: FAIL — the unhandled rejection from `handleMessage` either times out the test (no reply ever arrives) or crashes the Vitest worker process.
+
+- [ ] **Step 15: Implement the fix**
+
+In `server/room/actions.ts`, add `'internal_error'` to the `ErrorCode` union (append it to the existing union, keeping every current member):
+
+```ts
+export type ErrorCode =
+  | 'room_not_found'
+  | 'room_full'
+  | 'already_started'
+  | 'invalid_name'
+  | 'not_host'
+  | 'kicked'
+  | 'excluded_at_start'
+  | 'invalid_threshold'
+  | 'bad_token'
+  | 'not_enough_participants'
+  | 'pool_too_small'
+  | 'not_your_card'
+  | 'internal_error'
+```
+
+In `server/ws/server.ts`, replace the start of the `'message'` handler body — up through the `meta.state = result.newState` line — keeping everything after that (`toRoom`/`toParticipant`/`closeSender` handling, the `failedJoins` tracking) unchanged:
+
+```ts
+    ws.on('message', async (raw) => {
+      let message: ClientMessage
+      try {
+        message = JSON.parse(raw.toString())
+      } catch {
+        send(ws, { type: 'error', code: 'bad_token', message: 'malformed message' })
+        return
+      }
+
+      if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
+
+      let result: Awaited<ReturnType<typeof handleMessage>>
+      try {
+        result = await handleMessage(store, db, tmdb, meta.state, message)
+      } catch (err) {
+        // A thrown/rejected error anywhere inside handleMessage (e.g. a
+        // database error reached through startRoom) is otherwise an
+        // unhandled rejection in this async listener, which crashes the
+        // whole single-replica process over one bad message. Catch, log,
+        // tell the client, and keep this connection and the process alive.
+        console.error('unhandled error in handleMessage', err)
+        send(ws, { type: 'error', code: 'internal_error', message: 'internal error' })
+        return
+      }
+      meta.state = result.newState
+      for (const m of result.toSender) send(ws, m)
+```
+
+- [ ] **Step 16: Run test to verify it passes**
+
+Run: `npx vitest run server/ws/server.test.ts`
+Expected: PASS (all tests, including the new one)
+
+---
+
+### Part E — Enrichment worker survives a failed tick and keeps its schedule
+
+- [ ] **Step 17: Write the failing test**
+
+Add to `server/sync/enrichment.test.ts`, inside `describe('createEnrichmentWorker', ...)`:
+
+```ts
+  it('start() survives a rejected runOnce and still reschedules the next tick', async () => {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-crash',
+      tmdbId: 42,
+      imdbId: null,
+      title: 'X',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: null,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    const getMovieDetails = vi.fn().mockRejectedValueOnce(new Error('TMDB down'))
+    const tmdb: Partial<TmdbClient> = { getMovieDetails }
+    const worker = createEnrichmentWorker(db, tmdb as TmdbClient)
+
+    const unhandled = vi.fn()
+    process.once('unhandledRejection', unhandled)
+    worker.start()
+    // start()'s first tick runs on a setTimeout(tick, 0) — give it a turn
+    // of the event loop to run and reject before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    worker.stop()
+
+    expect(unhandled).not.toHaveBeenCalled()
+    expect(getMovieDetails).toHaveBeenCalledTimes(1)
+  })
+```
+
+- [ ] **Step 18: Run test to verify it fails**
+
+Run: `npx vitest run server/sync/enrichment.test.ts`
+Expected: FAIL — `unhandledRejection` fires because the rejected `runOnce()` inside `tick` is unhandled.
+
+- [ ] **Step 19: Implement the fix in `server/sync/enrichment.ts`**
+
+Replace `start()`, keeping `stop()`/`runOnce` unchanged:
+
+```ts
+  return {
+    start() {
+      if (timer) return
+      const tick = async () => {
+        try {
+          await runOnce()
+        } catch (err) {
+          // A single failed fetch inside runOnce (TMDB down/rate-limited)
+          // must not permanently kill this recurring worker, nor become an
+          // unhandled rejection that crashes the process — log and let the
+          // schedule continue so the next tick can retry.
+          console.error('enrichment worker: runOnce failed, will retry on next tick', err)
+        }
+        timer = setTimeout(tick, 30_000)
+      }
+      timer = setTimeout(tick, 0)
+    },
+```
+
+- [ ] **Step 20: Run test to verify it passes**
+
+Run: `npx vitest run server/sync/enrichment.test.ts`
+Expected: PASS (all tests, including the new one)
+
+---
+
+### Part F — TMDB client checks `res.ok` before parsing the response body
+
+- [ ] **Step 21: Write the failing test**
+
+Add to `server/tmdb/client.test.ts`, inside `describe('createTmdbClient', ...)`:
+
+```ts
+  it('discoverMovies throws on a non-ok response instead of destructuring an error body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      json: async () => ({ status_message: 'rate limited' }),
+    }) as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    await expect(client.discoverMovies({}, 5)).rejects.toThrow(/429/)
+  })
+
+  it('findByImdbId throws on a non-ok response instead of destructuring an error body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({ status_message: 'invalid api key' }),
+    }) as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    await expect(client.findByImdbId('tt0111161')).rejects.toThrow(/401/)
+  })
+```
+
+- [ ] **Step 22: Run test to verify it fails**
+
+Run: `npx vitest run server/tmdb/client.test.ts`
+Expected: FAIL — both calls resolve (successfully destructuring the error-shaped body as `results`/`movie_results`, i.e. `undefined`, producing an empty/garbage result) instead of rejecting.
+
+- [ ] **Step 23: Implement the fix in `server/tmdb/client.ts`**
+
+Add a `res.ok` check (matching `getMovieDetails`'s existing pattern, which the file already has — mirror its exact style) to both `discoverMovies` and `findByImdbId`, immediately after each `fetch(...)` call and before the `.json()` call, throwing a clear error naming the endpoint and status:
+
+```ts
+if (!res.ok) {
+  throw new Error(`TMDB <endpoint name> request failed: ${res.status} ${res.statusText}`)
+}
+```
+
+**Note: read the exact current fetch call sites in `discoverMovies` and `findByImdbId` (URL construction, variable names) before applying — insert the check in the right place in each, matching the existing code's style exactly rather than rewriting the surrounding lines.**
+
+- [ ] **Step 24: Run test to verify it passes**
+
+Run: `npx vitest run server/tmdb/client.test.ts`
+Expected: PASS (all tests, including the 2 new ones)
+
+---
+
+### Part G — Boot survives a `DecryptionError` from a rotated `AUTH_ENCRYPTION_KEY`, and `librarySync.run()` call sites can't crash the process
+
+- [ ] **Step 25: Write the failing test**
+
+Add to `server/index.test.ts`. First, add to the existing import block: `import { openDb } from './db'` and `import { savePlexLink } from './plex/link'` (keep every existing import).
+
+Then add this test inside `describe('createApp', ...)`, after the existing malformed-JSON test:
+
+```ts
+  it('boots successfully when the stored Plex link cannot be decrypted (AUTH_ENCRYPTION_KEY rotated)', async () => {
+    const rotDir = mkdtempSync(join(tmpdir(), 'popcornpoll-rotate-'))
+    const seedDb = openDb(rotDir)
+    savePlexLink(seedDb, 'b'.repeat(32), {
+      clientIdentifier: 'old-client',
+      serverUrl: 'http://old-plex.local',
+      authToken: 'old-token',
+      librarySectionIds: ['1'],
+      linkedAt: new Date().toISOString(),
+    })
+    seedDb.close()
+
+    const rotatedConfig: AppConfig = {
+      tmdbApiKey: 'x',
+      authEncryptionKey: 'c'.repeat(32), // different key than the one the link above was encrypted with
+      adminSetupToken: 'admin',
+      appOrigin: '',
+      trustedProxyHops: 0,
+      port: 0,
+      dataDir: rotDir,
+    }
+    const rotatedApp = await createApp(rotatedConfig, { skipFrontend: true })
+    try {
+      await new Promise<void>((resolve) => rotatedApp.httpServer.listen(0, resolve))
+      const port = (rotatedApp.httpServer.address() as { port: number }).port
+      const res = await fetch(`http://localhost:${port}/api/health`)
+      expect(res.status).toBe(200)
+    } finally {
+      await rotatedApp.shutdown()
+      rmSync(rotDir, { recursive: true, force: true })
+    }
+  })
+```
+
+- [ ] **Step 26: Run test to verify it fails**
+
+Run: `npx vitest run server/index.test.ts`
+Expected: FAIL — `createApp` throws `DecryptionError` before `httpServer.listen` is even reachable.
+
+- [ ] **Step 27: Implement the fix in `server/index.ts`**
+
+Add `DecryptionError` to the existing `import { getPlexLink, savePlexLink } from './plex/link'` line (making it `import { DecryptionError, getPlexLink, savePlexLink } from './plex/link'`), then add a `safeGetPlexLink` helper right above `createApp` and replace every call site of `getPlexLink(db, config.authEncryptionKey)` inside `createApp` with `safeGetPlexLink(db, config.authEncryptionKey)`:
+
+```ts
+// getPlexLink throws DecryptionError when AUTH_ENCRYPTION_KEY has changed
+// since the stored link was encrypted. That must not take the whole
+// process down at boot — treat it the same as "not linked yet" so the
+// setup/relink flow (not a crash loop) is the actual recovery path.
+function safeGetPlexLink(db: Database.Database, key: string) {
+  try {
+    return getPlexLink(db, key)
+  } catch (err) {
+    if (err instanceof DecryptionError) {
+      console.error(
+        'Failed to decrypt stored Plex link — AUTH_ENCRYPTION_KEY may have changed. ' +
+          'Continuing boot as if no Plex link were saved; re-link via setup to recover.',
+        err,
+      )
+      return null
+    }
+    throw err
+  }
+}
+```
+
+(`Database` needs to be a type import in this file if it isn't already — check the existing imports; `better-sqlite3`'s default type import is likely already present for other uses in this file.)
+
+Then, in the same file, make both `librarySync.run()` call sites `.catch()` their failure rather than letting either a `void`-called or `await`-ed rejection propagate:
+
+```ts
+        else if (url.pathname === '/api/setup/plex/resync') {
+          webRes = await setupHandlers.resync(webReq)
+          if (webRes.status === 200) {
+            if (process.env.FAKE_EXTERNAL_APIS === 'true') {
+              // e2e fixture mode: block so the caller can create a room
+              // immediately after — but a failure here must not turn a
+              // successful 200 resync response into a 500, so catch and log
+              // rather than let it reach the outer try/catch.
+              await librarySync.run().catch((err) => console.error('librarySync.run failed', err))
+            } else {
+              void librarySync.run().catch((err) => console.error('librarySync.run failed', err))
+            }
+          }
+        }
+```
+
+**Note: read the exact current shape of this block (and every other place `getPlexLink` is called inside `createApp`, and every other `librarySync.run()` call site if there is more than the one shown here) against the real file before applying, preserving all surrounding logic unchanged.**
+
+- [ ] **Step 28: Run test to verify it passes**
+
+Run: `npx vitest run server/index.test.ts`
+Expected: PASS (all tests, including the new one)
+
+---
+
+### Part H — Minor cleanup: `getThumb` timeout, rate-limit bucket eviction, migration-coupling comment, and test hardening
+
+- [ ] **Step 29: Write the failing test for `getThumb`'s timeout**
+
+Add to `server/plex/client.test.ts`, inside `describe('createPlexClient', ...)`, before the closing `})`:
+
+```ts
+  it('getThumb sends a request with a bounded AbortSignal timeout', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      body: null,
+      status: 200,
+      headers: { get: () => 'image/jpeg' },
+    }) as unknown as typeof fetch
+    const client = createPlexClient('client-id')
+    await client.getThumb('http://192.168.1.10:32400', 'token', '100')
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/library/metadata/100/thumb'),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+```
+
+- [ ] **Step 30: Run test to verify it fails**
+
+Run: `npx vitest run server/plex/client.test.ts`
+Expected: FAIL — `getThumb` calls `fetch` with only the URL, no second `options` argument.
+
+- [ ] **Step 31: Implement the fix in `server/plex/client.ts`**
+
+Replace `getThumb`:
+
+```ts
+    async getThumb(serverUrl, authToken, ratingKey) {
+      const res = await fetch(
+        `${serverUrl}/library/metadata/${ratingKey}/thumb?X-Plex-Token=${authToken}`,
+        { signal: AbortSignal.timeout(10_000) },
+      )
+      return {
+        body: res.body,
+        contentType: res.headers.get('content-type'),
+        status: res.status,
+      }
+    },
+```
+
+- [ ] **Step 32: Run test to verify it passes**
+
+Run: `npx vitest run server/plex/client.test.ts`
+Expected: PASS (all tests, including the new one)
+
+- [ ] **Step 33: Write the failing test for rate-limit bucket eviction**
+
+Add to `server/rateLimit.test.ts`, inside `describe('createTokenBucket', ...)`:
+
+```ts
+  it('evicts buckets untouched past idleEvictionMs on its periodic sweep', async () => {
+    const bucket = createTokenBucket(3, 0, 10, 5) // idleEvictionMs=10, sweepIntervalMs=5 — real short timers for a fast test
+    bucket.tryConsume('ip-1')
+    expect(bucket.size()).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(bucket.size()).toBe(0)
+  })
+```
+
+- [ ] **Step 34: Run test to verify it fails**
+
+Run: `npx vitest run server/rateLimit.test.ts`
+Expected: FAIL — `bucket.size` is not a function, and `createTokenBucket` doesn't accept a 3rd/4th argument.
+
+- [ ] **Step 35: Implement the fix in `server/rateLimit.ts`**
+
+Replace the whole file. This is backward compatible with the existing `createTokenBucket(10, 10 / 60)` call site in `server/ws/server.ts` (Task 19) — the two new parameters are optional with defaults, so that call site needs no change:
+
+```ts
+// server/rateLimit.ts
+export interface TokenBucket {
+  tryConsume(key: string): boolean
+  size(): number
+}
+
+const DEFAULT_IDLE_EVICTION_MS = 30 * 60_000
+const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000
+
+export function createTokenBucket(
+  maxTokens: number,
+  refillPerSecond: number,
+  idleEvictionMs = DEFAULT_IDLE_EVICTION_MS,
+  sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS,
+): TokenBucket {
+  const buckets = new Map<string, { tokens: number; lastRefill: number }>()
+
+  function evictStale(now: number): void {
+    for (const [key, bucket] of buckets) {
+      if (now - bucket.lastRefill > idleEvictionMs) buckets.delete(key)
+    }
+  }
+
+  // Buckets are keyed by client IP and otherwise never removed — over the
+  // life of a long-running process that's an unbounded Map. A periodic
+  // sweep drops any bucket that hasn't been touched in idleEvictionMs, so
+  // memory stays bounded by recently-active keys rather than every IP
+  // that has ever connected. unref() so this timer alone can't keep the
+  // process alive.
+  const sweepTimer = setInterval(() => evictStale(Date.now()), sweepIntervalMs)
+  sweepTimer.unref()
+
+  return {
+    tryConsume(key) {
+      const now = Date.now()
+      let bucket = buckets.get(key)
+      if (!bucket) {
+        bucket = { tokens: maxTokens, lastRefill: now }
+        buckets.set(key, bucket)
+      }
+      const elapsedSeconds = (now - bucket.lastRefill) / 1000
+      bucket.tokens = Math.min(maxTokens, bucket.tokens + elapsedSeconds * refillPerSecond)
+      bucket.lastRefill = now
+
+      if (bucket.tokens < 1) return false
+      bucket.tokens -= 1
+      return true
+    },
+    size() {
+      return buckets.size
+    },
+  }
+}
+```
+
+- [ ] **Step 36: Run test to verify it passes**
+
+Run: `npx vitest run server/rateLimit.test.ts`
+Expected: PASS (all tests, including the new one)
+
+- [ ] **Step 37: Add the migration-coupling comment (comment-only, no test)**
+
+In `server/db/migrations/001_init.sql`, add a comment directly above the `CREATE TABLE schema_version (...)` statement explaining that `server/db/index.ts`'s `runMigrations()` strips this exact statement out via a regex before executing the file (because `schema_version` is already created via `CREATE TABLE IF NOT EXISTS` before migration 001 runs), and that reformatting or relocating this statement would silently break that regex. Read the actual current regex in `server/db/index.ts` and quote it accurately in the comment rather than approximating it.
+
+- [ ] **Step 38: Strengthen the schema-version idempotency test**
+
+In `server/db/index.test.ts`, find the `'is idempotent — reopening does not re-apply or fail'` test and add a second assertion — `SELECT COUNT(*) as c FROM schema_version` expected to equal `1` — alongside its existing `MAX(version)` assertion, so a regression that silently duplicate-inserts into `schema_version` on reopen is actually caught (today only `MAX(version)` is checked, which would stay `1` even with a duplicate row).
+
+Run: `npx vitest run server/db/index.test.ts`
+Expected: PASS — this strengthens an assertion against already-correct code, so it should pass immediately without any production-code change.
+
+- [ ] **Step 39: Remove the dead `findByTmdbId(-1)` call**
+
+In `server/db/movies.test.ts`, find the test that calls `findByTmdbId(db, -1)` with no assertion on its result and remove that dead line (and `findByTmdbId` from the file's import list, if nothing else in the file uses it — check first).
+
+Run: `npx vitest run server/db/movies.test.ts`
+Expected: PASS — unused-code removal, no behavioral change.
+
+---
+
+### Part I — Full suite and commit
+
+- [ ] **Step 40: Run the full test suite to confirm nothing broke**
+
+Run: `npx vitest run`
+Expected: PASS — every test file, including all changes from Parts A-H.
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+- [ ] **Step 41: Commit**
+
+```bash
+git add server/pool/buildPool.ts server/pool/buildPool.test.ts \
+  server/room/activeActions.ts server/room/activeActions.test.ts \
+  server/room/actions.ts \
+  server/ws/router.ts server/ws/router.test.ts \
+  server/ws/server.ts server/ws/server.test.ts \
+  server/sync/enrichment.ts server/sync/enrichment.test.ts \
+  server/tmdb/client.ts server/tmdb/client.test.ts \
+  server/index.ts server/index.test.ts \
+  server/plex/client.ts server/plex/client.test.ts \
+  server/rateLimit.ts server/rateLimit.test.ts \
+  server/db/migrations/001_init.sql server/db/index.test.ts server/db/movies.test.ts
+git commit -m "fix: crash-harden async error paths across WS, enrichment, TMDB client, and boot"
+```
+
+---
+
+## Task 27: Server-initiated broadcasts, kicked/room_ended terminal states, and graceful shutdown
+
+**Files:**
+- Modify: `server/room/types.ts`
+- Modify: `server/room/actions.ts`, `server/room/actions.test.ts`
+- Modify: `server/room/activeActions.ts`, `server/room/activeActions.test.ts`
+- Modify: `server/ws/protocol.ts`
+- Modify: `server/ws/router.ts`, `server/ws/router.test.ts`
+- Modify: `server/ws/server.ts`, `server/ws/server.test.ts`
+- Modify: `server/index.ts`, `server/index.test.ts`
+- Modify: `lib/wsClient.ts`
+- Create: `lib/wsClient.test.ts`
+- Modify: `app/room/[code]/page.tsx`
+- Modify: `messages/en-us.json`, `messages/pt-br.json`
+- Modify: `components/RoomShare.tsx`
+- Modify: `components/LocaleSwitcher.tsx`, `app/layout.tsx`
+- Modify: `e2e/match.spec.ts`, `e2e/exhaustion.spec.ts`, `e2e/reconnect.spec.ts`, `e2e/authorization.spec.ts`
+- Create: `e2e/kicked.spec.ts`
+
+**⚠️ SIGNATURE LEDGER — cross-task function-signature reconciliation. Read this before Step 9/11.** Three functions this task touches are ALSO touched by Tasks 26 and 31 (which run before and after this task respectively, in the batch's 26→27→28→29→30→31→32 order). The FINAL, authoritative parameter order every task must converge on — regardless of what any individual task's own illustrative code shows — is:
+
+```ts
+// server/room/activeActions.ts
+function startRoom(
+  store: RoomStore, code: string, callerIsHost: boolean, db: Database.Database, tmdb: TmdbClient,
+  librarySync: SyncWaiter,        // added by Task 31 — required, comes before the optional one
+  notifyStarting?: () => void,    // added by THIS task — optional, comes last
+): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean }>>
+// (degraded: boolean in the return, added by Task 26, must also survive)
+
+// server/ws/router.ts
+function handleMessage(
+  store: RoomStore, db: Database.Database, tmdb: TmdbClient,
+  librarySync: SyncWaiter,                          // added by Task 31 — comes right after tmdb
+  state: ConnectionState, message: ClientMessage,
+  onBroadcast?: (messages: ServerMessage[]) => void, // added by THIS task — optional, comes last
+): Promise<RouterOutput>
+
+// server/ws/server.ts
+function attachWebSocketServer(
+  httpServer: Server, store: RoomStore, db: Database.Database, tmdb: TmdbClient,
+  librarySync: SyncWaiter, // added by Task 31 — comes right after tmdb
+  config: AppConfig,
+): WsServerHandle // return type changed by THIS task (was: WebSocketServer)
+```
+
+**THIS task (27) runs before Task 31 — you will not see `librarySync` anywhere in these three functions when you do this task's work, and that's correct.** Just make sure the parameter slot you're adding (`notifyStarting?`/`onBroadcast?`) goes LAST in each signature, so Task 31 can cleanly insert `librarySync` earlier in the list without colliding with what you add. Do not reorder anything Task 26 already added (the `degraded` return field, the try/catch around `handleMessage`'s call site).
+
+**Interfaces:**
+- **Assumes Task 26 has already landed — read the real current files, do not treat the "before" code shown in this task's steps as ground truth.** Task 26 has already: (a) wrapped `ws.on('message', ...)`'s call to `handleMessage` in a try/catch in `server/ws/server.ts` (catching any thrown/rejected error, sending `{type:'error', code:'internal_error', ...}`, and returning early without crashing); (b) added a `safeGetPlexLink` helper and `DecryptionError` handling to `server/index.ts`'s boot sequence; (c) added `.catch()` to both `librarySync.run()` call sites in `server/index.ts`; (d) added `'internal_error'` to the `ErrorCode` union in `server/room/actions.ts`; (e) possibly changed `buildPool`'s TMDB-discover call site and `startRoom`'s return shape (`degraded: boolean`). **Steps 9 and 11 below show a "rewrite the whole file" listing for `server/ws/server.ts` and `server/index.ts` — these are illustrative of the TARGET shape this task's own additions need, assuming a pre-Task-26 baseline. They are NOT safe to paste over the real files verbatim. Read the real current file, and apply only THIS task's specific additions (the broadcast helper, disconnect/heartbeat-timeout broadcasting, the WsServerHandle return shape, shutdown socket-tracking) on top of whatever Task 26 already put there — preserving Task 26's try/catch around `handleMessage`, its `safeGetPlexLink` helper, and its `.catch()`-wrapped `librarySync.run()` calls exactly as they are.**
+- Consumes: `RoomState`, `Participant` (Task 15's `server/room/types.ts`); `handleMessage`, `ConnectionState` (Task 18's `server/ws/router.ts`); `attachWebSocketServer`, `RECONNECT_GRACE_MS` (Task 19's `server/ws/server.ts`); `createWsClient` (Task 22's `lib/wsClient.ts`).
+- Produces:
+  ```ts
+  // server/room/types.ts — Participant gains:
+  disconnectedAt: number | null
+
+  // server/room/actions.ts — ErrorCode gains (append after Task 26's 'internal_error'):
+  'room_not_active'
+
+  // server/room/activeActions.ts
+  export function recomputeExhaustion(room: RoomState): boolean // now exported
+
+  // server/ws/protocol.ts
+  export const WS_CLOSE_TERMINAL = 4001 // custom WS close code: "don't reconnect"
+
+  // server/ws/router.ts
+  export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_update' }> // now exported
+  export function topCandidatesFor(room: RoomState): PoolEntry[] // now exported
+
+  // server/ws/server.ts
+  export interface WsServerHandle {
+    wss: WebSocketServer
+    broadcastToRoom(roomCode: string, messages: ServerMessage[]): void
+    broadcastRoomEnded(roomCode: string, reason: string): void
+    terminateAllSockets(): void
+    stopHeartbeatSweep(): void
+  }
+  ```
+  (See the Signature Ledger above for `startRoom`/`handleMessage`/`attachWebSocketServer`'s exact final parameter order — this task adds only the LAST parameter to each.)
+
+- [ ] **Step 1: Write failing tests for `recomputeExhaustion` wiring into `reconnectRoom` and `kickParticipant`**
+
+Append to `server/room/actions.test.ts`:
+
+```ts
+describe('reconnectRoom', () => {
+  it('recomputes exhaustion when an active room participant reconnects', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const guest = joinRoom(store, code, 'Guest')
+    if (!host.ok || !guest.ok) throw new Error('setup failed')
+    const room = store.get(code)!
+    room.status = 'active'
+    const guestParticipant = room.participants.get(guest.data.participantId)!
+    guestParticipant.connectionStatus = 'disconnected'
+    guestParticipant.finished = false
+    room.participants.get(host.data.participantId)!.finished = true
+    room.exhausted = true // stale — as if this had been computed while the guest was still disconnected
+
+    const result = reconnectRoom(store, code, guest.data.sessionToken)
+    expect(result.ok).toBe(true)
+    // the guest is back, connected, and unfinished — the room is blocked on them again
+    expect(room.exhausted).toBe(false)
+  })
+
+  it('clears disconnectedAt on reconnect', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    if (!host.ok) throw new Error('setup failed')
+    const participant = store.get(code)!.participants.get(host.data.participantId)!
+    participant.connectionStatus = 'disconnected'
+    participant.disconnectedAt = Date.now()
+
+    reconnectRoom(store, code, host.data.sessionToken)
+    expect(participant.disconnectedAt).toBeNull()
+  })
+})
+
+describe('kickParticipant', () => {
+  it('recomputes exhaustion for the remaining participants in an active room', () => {
+    const { store, code, hostClaimToken } = newRoom()
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const guest = joinRoom(store, code, 'Guest')
+    if (!host.ok || !guest.ok) throw new Error('setup failed')
+    const room = store.get(code)!
+    room.status = 'active'
+    room.participants.get(host.data.participantId)!.finished = true
+    room.participants.get(guest.data.participantId)!.finished = false
+    room.exhausted = false // blocked on the guest
+
+    const result = kickParticipant(store, code, true, guest.data.participantId)
+    expect(result.ok).toBe(true)
+    // the guest (the only unfinished participant) is gone — nobody left to block on
+    expect(room.exhausted).toBe(true)
+  })
+})
+```
+
+Run: `npx vitest run server/room/actions.test.ts`
+Expected: FAIL — `recomputeExhaustion` isn't wired into either function yet (both new tests fail on the `room.exhausted` assertion).
+
+**Note: if `newRoom()` isn't an existing helper in the real current `server/room/actions.test.ts`, adapt these tests to whatever setup helper (or inline `createRoomStore()`/`store.create(...)`) the file actually uses — read it first.**
+
+- [ ] **Step 2: Add `disconnectedAt`, export `recomputeExhaustion`, wire it into `reconnectRoom`/`kickParticipant`, add `room_not_active`**
+
+Edit `server/room/types.ts` — add the field to `Participant`:
+
+```ts
+export interface Participant {
+  // ...(keep every existing field)
+  disconnectedAt: number | null
+}
+```
+
+Edit `server/room/activeActions.ts` — export `recomputeExhaustion` (find the existing, currently-unexported function and add `export`):
+
+```ts
+export function recomputeExhaustion(room: RoomState): boolean {
+  const blocking = [...room.participants.values()].some(
+    (p) => p.connectionStatus === 'connected' && !p.finished,
+  )
+  room.exhausted = !blocking
+  return room.exhausted
+}
+```
+
+**Read the real current `recomputeExhaustion` first — this may already differ from the illustrative version above (e.g. it might already factor in something else). Add `export` to the real function and keep its actual logic; do not replace working logic with this illustrative version if they differ.**
+
+Edit `server/room/actions.ts` — add the error code (append after whatever Task 26 already added, e.g. `'internal_error'`), import `recomputeExhaustion`, initialize `disconnectedAt: null` on every new `Participant` object, and call `recomputeExhaustion(room)` (guarded by `room.status === 'active'`) at the end of both `reconnectRoom` and `kickParticipant`, plus set `participant.disconnectedAt = null` in `reconnectRoom`.
+
+(This import from `./activeActions` is type-safe against a runtime cycle: `activeActions.ts` only imports `ActionResult`/`ErrorCode` from `actions.ts` via `import type`, which is erased at compile time — so there's no actual runtime module cycle, only `actions.ts → activeActions.ts`. Verify this against the real current import graph before relying on it.)
+
+Run: `npx vitest run server/room/actions.test.ts`
+Expected: PASS
+
+- [ ] **Step 3: Write failing tests for `startRoom`'s `notifyStarting` callback and `swipeAction`'s status guard**
+
+Append to `server/room/activeActions.test.ts`:
+
+```ts
+describe('startRoom notifyStarting callback', () => {
+  it('invokes notifyStarting synchronously right after flipping to starting', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'Other')
+    seedPlexRows(10)
+
+    const seenStatuses: string[] = []
+    const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
+    // Pass whatever noOpLibrarySync stub the real current test file already
+    // uses (Task 31 will have added one by the time this runs — if it
+    // hasn't yet, this positional argument doesn't exist; adapt accordingly).
+    await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+
+    expect(notifyStarting).toHaveBeenCalledTimes(1)
+    expect(seenStatuses).toEqual(['starting'])
+  })
+
+  it('invokes notifyStarting again on revert to lobby when the pool is too small', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'B')
+    seedPlexRows(2) // below POOL_MIN_SIZE (5)
+
+    const seenStatuses: string[] = []
+    const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
+    const result = await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+
+    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+    expect(notifyStarting).toHaveBeenCalledTimes(2)
+    expect(seenStatuses).toEqual(['starting', 'lobby'])
+  })
+})
+
+describe('swipeAction', () => {
+  it('rejects a swipe on a room that has not been started', () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    if (!host.ok) throw new Error('setup failed')
+    const result = swipeAction(store, code, host.data.participantId, 1, 'yes')
+    expect(result).toEqual({ ok: false, code: 'room_not_active' })
+  })
+})
+```
+
+**Per the Signature Ledger above, `notifyStarting` is the LAST parameter of `startRoom` — if Task 26/31's additions haven't landed yet in your read of the file (they haven't, this task runs before Task 31 and after Task 26), the calls above (`db, noOpTmdb, notifyStarting`) are correct for the file's current state. If for some reason you're re-running this step after Task 31 has already landed, add a `noOpLibrarySync` stub before `notifyStarting`, matching the ledger's order.**
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: FAIL — `startRoom` doesn't accept/call a callback yet; `swipeAction` doesn't check `room.status`.
+
+- [ ] **Step 4: Implement the `notifyStarting` callback and the `swipeAction` status guard**
+
+Edit `server/room/activeActions.ts` — **read the real current `startRoom` first (it already has Task 26's `degraded` field in its return).** Add `notifyStarting?: () => void` as the LAST parameter. Call `notifyStarting?.()` immediately after the synchronous `room.status = 'starting'` flip, and again immediately after `room.status = 'lobby'` on the `tooSmall` revert path — keep every other line (including the `degraded` field's computation and inclusion in the final `ok(...)` return) exactly as Task 26 left it.
+
+Add a `room.status !== 'active'` guard returning `err('room_not_active')` at the top of `swipeAction`, right after its existing `room_not_found`/participant-lookup checks (read the real function to place it correctly relative to those).
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Add `WS_CLOSE_TERMINAL` to the shared protocol module**
+
+Edit `server/ws/protocol.ts` — add near the top, after the imports:
+
+```ts
+// A custom WS close code (RFC 6455 reserves 4000-4999 for application use).
+// Sent for a deliberate, terminal server-side close — kicked, or the room
+// itself ending — so lib/wsClient.ts can distinguish it from a transient
+// drop and stop its reconnect-with-backoff loop.
+export const WS_CLOSE_TERMINAL = 4001
+```
+
+- [ ] **Step 6: Write failing router tests for the `start` transitional broadcast and the `kick` exhausted event**
+
+Append to `server/ws/router.test.ts`:
+
+```ts
+describe('handleMessage: start broadcasts a transitional state_update via onBroadcast', () => {
+  it('calls onBroadcast with a "starting" state_update before the pool build resolves', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const broadcastStatuses: string[] = []
+    await handleMessage(store, db, noOpTmdb, state, { type: 'start' }, (messages) => {
+      for (const m of messages) if (m.type === 'state_update') broadcastStatuses.push(m.status)
+    })
+
+    expect(broadcastStatuses).toEqual(['starting'])
+  })
+})
+
+describe('handleMessage: kick -> exhausted', () => {
+  it('emits an exhausted event when kicking the last unfinished participant in an active room', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    let hostState = freshState()
+    const hostJoined = await handleMessage(store, db, noOpTmdb, hostState, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    hostState = hostJoined.newState
+    const guestJoined = await handleMessage(store, db, noOpTmdb, freshState(), {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Guest',
+    })
+    seedPlexRows(20)
+    await handleMessage(store, db, noOpTmdb, hostState, { type: 'start' })
+    store.get(code)!.participants.get(hostState.participantId!)!.finished = true
+
+    const result = await handleMessage(store, db, noOpTmdb, hostState, {
+      type: 'kick',
+      participantId: guestJoined.newState.participantId!,
+    })
+
+    expect(result.toRoom.some((m) => m.type === 'exhausted')).toBe(true)
+  })
+})
+```
+
+**Per the Signature Ledger, `onBroadcast` is the LAST parameter of `handleMessage` (after `message`) — matches what's shown above, since `librarySync` hasn't landed in this signature yet at this point in execution.**
+
+Run: `npx vitest run server/ws/router.test.ts`
+Expected: FAIL — `handleMessage` ignores a 6th argument and the `start`/`kick` cases don't produce the expected messages yet.
+
+- [ ] **Step 7: Export `stateUpdate`/`topCandidatesFor`, thread `onBroadcast` through `handleMessage`, wire `start` and `kick`**
+
+Edit `server/ws/router.ts` — **read the real current file first; the `stateUpdate` and `topCandidatesFor` functions already exist internally (used by the `'start'`/`'kick'`/etc. cases) — just add `export` to each rather than rewriting their bodies, unless they genuinely differ from what's shown below (they shouldn't).**
+
+```ts
+export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'state_update' }> {
+  room.seq++
+  return {
+    type: 'state_update',
+    participants: participantViews(room),
+    status: room.status,
+    matches: room.matches,
+    exhausted: room.exhausted,
+    matchThreshold: room.matchThreshold,
+    candidateSource: room.candidateSource,
+    seq: room.seq,
+  }
+}
+
+export function topCandidatesFor(room: RoomState): (typeof room.pool) {
+  return [...room.pool]
+    .filter((entry) => !room.matchedMovieIds.has(entry.movieId))
+    .sort((a, b) => {
+      const yesA = [...room.participants.values()].filter((p) => p.swipes.get(a.movieId) === 'yes').length
+      const yesB = [...room.participants.values()].filter((p) => p.swipes.get(b.movieId) === 'yes').length
+      return yesB - yesA
+    })
+    .slice(0, 5)
+}
+```
+
+Add `onBroadcast?: (messages: ServerMessage[]) => void` as the LAST parameter of `handleMessage`'s signature (per the Signature Ledger).
+
+Inside `case 'start':` — **read the real current case block first (it may already include Task 26's `degraded_to_plex_only` notice-push if Task 26's own case-block edit landed on the exact same lines you're touching; if so, keep that logic and add the `notifyStarting` callback around it, don't drop it).** Pass a callback as `startRoom`'s new last argument that calls `onBroadcast?.([stateUpdate(room)])` for the transitional `'starting'`/reverted-`'lobby'` states, in addition to the existing final `toRoom` construction for a successful start.
+
+Replace the `'kick'` case to also recompute-and-broadcast `exhausted` when it flips true with zero matches, following the same pattern the `'swipe'` case already uses for the `exhausted` message (read that case for the exact shape).
+
+Run: `npx vitest run server/ws/router.test.ts`
+Expected: PASS (all existing router tests still pass since `onBroadcast` is optional and unused call sites are unaffected).
+
+- [ ] **Step 8: Write failing `server/ws/server.ts` tests for broadcast-on-disconnect, the reconnect grace period, and the terminal close code on kick**
+
+Append to `server/ws/server.test.ts` (add `RECONNECT_GRACE_MS` to the existing `./server` import and `WS_CLOSE_TERMINAL` from `./protocol`):
+
+```ts
+import { attachWebSocketServer, MAX_FAILED_JOINS, RECONNECT_GRACE_MS } from './server'
+import { WS_CLOSE_TERMINAL } from './protocol'
+```
+
+```ts
+  it('broadcasts a state_update immediately on disconnect, and only recomputes exhaustion after the reconnect grace period', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    hostWs.send(JSON.stringify({ type: 'start' }))
+    await nextMessage(hostWs) // room_started or state_update
+    await nextMessage(hostWs) // the other of the pair
+    await nextMessage(guestWs)
+    await nextMessage(guestWs)
+
+    const room = store.get(code)!
+    room.participants.get(hostJoined.participantId as string)!.finished = true // only the guest is blocking
+
+    // Node's socket I/O runs on libuv's real event loop, not on setTimeout —
+    // so real network traffic keeps working under fake timers, letting us
+    // fast-forward the internal grace-period setTimeout without a real wait.
+    vi.useFakeTimers()
+    try {
+      const immediateUpdate = nextMessage(hostWs)
+      guestWs.close()
+      await vi.advanceTimersByTimeAsync(0)
+      const immediate = await immediateUpdate
+      expect(immediate.type).toBe('state_update')
+      expect(room.exhausted).toBe(false) // grace period — not finalized yet
+
+      const finalizedUpdate = nextMessage(hostWs)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS)
+      const finalized = await finalizedUpdate
+      expect(finalized.type).toBe('state_update')
+      expect(room.exhausted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    hostWs.close()
+  })
+
+  it("closes a kicked participant's socket with the terminal close code", async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    const guestJoined = await nextMessage(guestWs)
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    const closeEvent = new Promise<number>((resolve) => guestWs.once('close', (closeCode) => resolve(closeCode)))
+    hostWs.send(JSON.stringify({ type: 'kick', participantId: guestJoined.participantId }))
+    await nextMessage(guestWs) // kicked
+    expect(await closeEvent).toBe(WS_CLOSE_TERMINAL)
+
+    hostWs.close()
+  })
+```
+
+Run: `npx vitest run server/ws/server.test.ts`
+Expected: FAIL — no broadcast happens on disconnect at all yet, and kick still closes with no code.
+
+- [ ] **Step 9: Merge broadcast/disconnect/heartbeat/shutdown logic into `server/ws/server.ts` — ADD to the real current file, do not paste a full rewrite over it**
+
+**Read the real current `server/ws/server.ts` first. It already has Task 26's try/catch around the `handleMessage` call inside `ws.on('message', ...)` (catching thrown/rejected errors, sending `{type:'error', code:'internal_error'}`, returning early) and Task 29's `getClientIp` imported from `../rateLimit` instead of defined locally in this file. Every one of those must survive. Make these specific additions to the real file, each independently:**
+
+1. Add a `disconnectedAt`-aware `SocketMeta` shape isn't needed here (that field lives on `Participant`, not the WS-layer's own connection metadata) — no change to `SocketMeta`.
+2. Add a `broadcastToRoom(roomCode, messages)` function: iterates the existing `sockets` map, sends each message to every socket whose `meta.state.roomCode === roomCode`. Factor the existing per-message-type room-delivery logic already inside `ws.on('message', ...)`'s `toRoom` handling into a call to this new helper, rather than duplicating the loop.
+3. Add `closeRoomSockets(roomCode, code, reason)` and `terminateAllSockets()` helpers.
+4. Add `broadcastRoomEnded(roomCode, reason)`: builds a `state_update` (via the router's now-exported `stateUpdate`) + `room_ended` sharing one seq, broadcasts both via `broadcastToRoom`, then closes every socket in that room with `WS_CLOSE_TERMINAL`.
+5. Add `markDisconnected(state)` and `finalizeDisconnect(roomCode, participantId)`: on a socket's `close` event, immediately flip the participant to `disconnected`, set `disconnectedAt`, and broadcast a `state_update` — but defer recomputing `exhausted` until `RECONNECT_GRACE_MS` later (a `setTimeout(..., RECONNECT_GRACE_MS).unref()`), checking the participant is still disconnected and the room still `active` before finalizing. Wire `markDisconnected` into the existing `ws.on('close', ...)` handler and into the heartbeat-timeout sweep's existing per-socket loop (in place of whatever it currently does when a heartbeat times out).
+6. Change `attachWebSocketServer`'s return value from the raw `WebSocketServer` (`wss`) to a `WsServerHandle` object: `{ wss, broadcastToRoom, broadcastRoomEnded, terminateAllSockets, stopHeartbeatSweep }`, where `stopHeartbeatSweep` clears the existing heartbeat `setInterval` (capture its handle in a variable if the current code doesn't already).
+7. Add `RECONNECT_GRACE_MS` as an exported constant (2 minutes) if it doesn't already exist as one (Task 19's earlier ledger note flagged this constant as declared-but-unused — if it's already there, reuse it; if not, add it).
+8. In the WS-upgrade rate-limit/origin-check code path (if `server/ws/server.ts` has one — Task 19 built it), leave it completely alone; this task's changes are additive to the connection/message-handling logic, not the upgrade path.
+
+Run: `npx vitest run server/ws/server.test.ts`
+Expected: PASS (including every pre-existing test — the `attachWebSocketServer` return-value shape change from `WebSocketServer` to `WsServerHandle` needs to be checked against every existing call site in this test file and updated if any destructure or type-check the return value directly, though most existing tests likely discard it).
+
+- [ ] **Step 10: Write a failing `server/index.test.ts` test for prompt shutdown with an open socket**
+
+Add `import WebSocket from 'ws'` to `server/index.test.ts`'s imports (if not already present), then append:
+
+```ts
+describe('shutdown', () => {
+  it('resolves promptly even while a WebSocket connection is still open', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    const ws = new WebSocket(`ws://localhost:${port}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+
+    const start = Date.now()
+    await app.shutdown()
+    expect(Date.now() - start).toBeLessThan(5000)
+  })
+})
+```
+
+Run: `npx vitest run server/index.test.ts`
+Expected: FAIL (or hang past the test timeout) — `httpServer.close()`'s callback never fires while the upgraded WS connection is still open.
+
+- [ ] **Step 11: Wire `server/index.ts`'s sweep and shutdown through the new `WsServerHandle` — ADD to the real current file, do not paste a full rewrite over it**
+
+**Read the real current `server/index.ts` first. It already has, from Task 26: a `safeGetPlexLink` helper wrapping `getPlexLink` in try/catch for `DecryptionError`, used at both call sites inside `createApp`; `.catch()` on both `librarySync.run()` call sites. Every one of those must survive — do not replace them with the plain `getPlexLink(...)` / un-caught `librarySync.run()` calls this task's own illustrative examples elsewhere might imply.** Make these specific additions:
+
+1. Capture `attachWebSocketServer(...)`'s return value (now a `WsServerHandle`, from Task 27's own Step 9) in a `wsHandle` variable instead of discarding it.
+2. In the periodic sweep (`sweepTimer`), when `sweepInactiveRooms` finalizes a room to `ended` (check its actual current return value — does it already return the list of codes it just ended, or does this task need to add that? Read `server/room/lifecycle.ts` to confirm before assuming), call `wsHandle.broadcastRoomEnded(code, 'inactivity_timeout')` for each.
+3. In `shutdown()`: before awaiting `httpServer.close(...)`, call `wsHandle.stopHeartbeatSweep()`, broadcast `room_ended {reason: 'server_restarting'}` to every non-`ended` room via `wsHandle.broadcastRoomEnded(...)`, then `wsHandle.terminateAllSockets()` — so the `httpServer.close()` callback can actually fire (Node's `http.Server.close()` waits for all connections, including upgraded WS sockets, to close). Keep the existing `enrichment.stop()`/`clearInterval(sweepTimer)`/`db.close()` lines exactly where they are, just add these new lines around them.
+
+Run: `npx vitest run server/index.test.ts`
+Expected: PASS
+
+- [ ] **Step 12: Write failing `lib/wsClient.test.ts` for terminal-close recognition**
+
+Add tests confirming: (a) `createWsClient` reconnects after an ordinary close (existing behavior, unchanged); (b) it does NOT reconnect after a close carrying `WS_CLOSE_TERMINAL`; (c) it does NOT reconnect after the caller's own `close()`. Use a fake `WebSocket` global (a minimal class recording `addEventListener`/`close`/emitting `open`/`close` events) and `vi.useFakeTimers()` to avoid real network/timers, following whatever fake-timer/fake-global conventions the rest of this codebase's WS-adjacent tests already use.
+
+Run: `npx vitest run lib/wsClient.test.ts`
+Expected: FAIL — the terminal-close case currently reconnects (no terminal-code recognition yet).
+
+- [ ] **Step 13: Recognize `WS_CLOSE_TERMINAL` in `lib/wsClient.ts`**
+
+**Read the real current `lib/wsClient.ts` first — it may already have Task 28's `onOpen` addition if Task 28 runs before this... it doesn't; Task 27 runs before Task 28. So the file here is whatever Task 22 originally built, unmodified.** Import `WS_CLOSE_TERMINAL` from `../server/ws/protocol`. In the `socket.addEventListener('close', (event) => {...})` handler, add a check: if `closedByCaller` OR `event.code === WS_CLOSE_TERMINAL`, do not schedule a reconnect — return early instead. Keep the existing backoff-reconnect logic for every other close reason.
+
+Run: `npx vitest run lib/wsClient.test.ts`
+Expected: PASS
+
+- [ ] **Step 14: Add `kicked`/`room_ended` terminal handling and a one-shot match reveal to the room page**
+
+**Read the real current `app/room/[code]/page.tsx` first — by this point it already has Task 25's i18n wiring (`useTranslations`, `errors` namespace toast handler) and Task 22's original structure.** Add:
+
+- A `TerminalState` union (`{type:'kicked', reason}` | `{type:'room_ended', reason}`) and `terminal` state.
+- `ws.on('kicked', ...)` and `ws.on('room_ended', ...)` handlers setting `terminal`, with matching `unsubKicked()`/`unsubRoomEnded()` calls added to the effect's cleanup.
+- A render branch, checked before the `lobby`/`starting`/active-swipe branches, that shows a terminal full-screen message (translated via new `kicked`/`roomEnded` namespaces, added in Step 15) when `terminal` is set or `snapshot.status === 'ended'`. Give it `data-testid="terminal-screen"` for e2e coverage.
+- One-shot match reveal: track a `dismissedMatchId` state, and derive `latestMatch` as null once its id has already been shown-and-dismissed (e.g. via a `setTimeout` a few seconds after it first appears), instead of the current logic which derives it directly from `snapshot.matches` every render (and therefore never goes away once a match has happened).
+
+Preserve every existing subscription (`joined`, `state_update`, `room_started`, `next_card`, `match`, `exhausted`, `error`) and the existing join/reconnect dispatch logic exactly as they are — this task only adds the two new subscriptions, the terminal-state render branch, and the one-shot match-dismiss logic.
+
+- [ ] **Step 15: Add the `roomEnded` translation namespace and `errors.room_not_active`**
+
+Edit `messages/en-us.json` and `messages/pt-br.json` — **read both real current files first (they already have Task 25's `errors`/`kicked` namespaces with `invalid_name`/`excluded_at_start` — Task 26/29 may also have added more `errors` keys by this point, e.g. `internal_error`, `rate_limited`, `room_cap_reached`, `forbidden_origin`, `invalid_filters` if Tasks 26/29/31 landed keys there — keep every one of them).** Add `room_not_active` to the `errors` namespace in both files, and a new top-level `roomEnded` namespace with `host_ended`/`inactivity_timeout`/`server_restarting` keys, in both files, symmetric (the existing `messages/messages.test.ts` parity test will catch any drift).
+
+- [ ] **Step 16: Fix the `RoomShare` hydration mismatch**
+
+Edit `components/RoomShare.tsx` — add a `canShare` state, set via `useEffect` (`typeof navigator !== 'undefined' && 'share' in navigator`) instead of checking `'share' in navigator` directly during render (which differs between server and client render passes and triggers a hydration-mismatch warning). Gate the Share button's visibility on `canShare` instead of the inline check. Keep every other line of the component (QR code rendering, copy-link logic, i18n) unchanged.
+
+- [ ] **Step 17: Make the locale switcher mobile-safe**
+
+Edit `app/layout.tsx`'s fixed-position wrapper around `<LocaleSwitcher />` and `components/LocaleSwitcher.tsx`'s own text sizing to shrink on narrow viewports (e.g. `right-2 top-2 sm:right-4 sm:top-4` and a smaller `text-[10px] sm:text-xs`), so it can't overlay page content on a small screen.
+
+- [ ] **Step 18: Update the stale "no error handler" e2e comments**
+
+`app/room/[code]/page.tsx` has had a `ws.on('error', ...)` toast handler since Task 25 — comments in `e2e/match.spec.ts`, `e2e/reconnect.spec.ts`, and `e2e/exhaustion.spec.ts` claiming otherwise (search each file for "the client has no 'error' handler" or similar phrasing) are stale. Update each to remove the now-incorrect claim while keeping the actual explanation (the join-race reasoning) intact.
+
+- [ ] **Step 19: Add the missing join-completion wait to `e2e/authorization.spec.ts`'s non-host test**
+
+In the first test in `e2e/authorization.spec.ts` (`'a non-host cannot start the room'`), add a wait confirming the guest's join actually completed (e.g. `await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })`, matching the pattern the other specs already use) before asserting `Start` stays invisible for the guest — otherwise the test could pass vacuously against a silently-failed join.
+
+- [ ] **Step 20: Add `e2e/kicked.spec.ts` covering the kicked and room_ended terminal states**
+
+Two scenarios, following the established e2e conventions (`pinEnglishLocale`/`seedFakeLibrary` fixtures, waiting for both participants' "Remove" buttons before proceeding): (1) host kicks the guest from the lobby; guest sees the terminal `data-testid="terminal-screen"` with the "removed from the room" message, and it's still showing after waiting past one reconnect-backoff cycle (proving `wsClient` didn't try to reconnect and flash back to "Connecting…"). (2) host starts the room, then ends the session; the remaining participant sees the terminal screen with the "host ended this session" message.
+
+- [ ] **Step 21: Full verification pass**
+
+Run: `npx vitest run`
+Expected: PASS — all server/room/actions, activeActions, router, server, index, and lib/wsClient tests green, including everything Task 26 already added.
+
+Run: `npx tsc --noEmit`
+Expected: no errors.
+
+Run: `npx playwright test e2e/kicked.spec.ts e2e/authorization.spec.ts e2e/match.spec.ts e2e/exhaustion.spec.ts e2e/reconnect.spec.ts`
+Expected: PASS
+
+---
+
+## Task 28: Persist host authorization, replay join/reconnect on live reconnects, and detect seq gaps
+
+**Files:**
+- Modify: `lib/wsClient.ts`, `lib/wsClient.test.ts`
+- Modify: `app/room/[code]/page.tsx`
+- Modify: `e2e/authorization.spec.ts`
+
+**Interfaces:**
+- Extends `WsClient` (Task 22) with one new method:
+  ```ts
+  interface WsClient {
+    send(message: ClientMessage): void
+    on<T extends ServerMessage['type']>(type: T, handler: (msg: Extract<ServerMessage, { type: T }>) => void): () => void
+    onOpen(handler: () => void): () => void
+    close(): void
+  }
+  ```
+  `onOpen` fires every time the underlying socket transitions to `OPEN` — the initial connection **and** every reconnect `wsClient`'s own backoff loop performs after a live WS-level drop (socket closes while the tab stays open) — not just once at mount.
+- Consumes existing protocol surface **unchanged**: `ClientMessage`'s `{ type: 'reconnect'; roomCode: string; sessionToken: string; hostToken?: string }` and `{ type: 'resync' }` variants (`server/ws/protocol.ts`, Task 18). Verified before writing this task, not assumed: `server/room/actions.ts`'s `reconnectRoom` already does real, cryptographic verification of a client-supplied `hostToken` (`hostToken === room.hostToken && room.hostParticipantId === participant.id`) rather than trusting it, and `server/ws/router.ts`'s `'resync'` case is already fully implemented, returning a fresh authoritative `joined` snapshot from server-held state. **No protocol or server changes are needed for this task** — the gap is entirely client-side: the browser never persists `hostToken`, never sends it, never replays `join`/`reconnect` after a live reconnect, and never tracks `seq` to know when to ask for one.
+- Assumption on Task 27: by the time this task is implemented, `app/room/[code]/page.tsx`'s mount effect already has `ws.on('kicked', ...)` and `ws.on('room_ended', ...)` subscriptions (plus corresponding `unsubKicked()`/`unsubRoomEnded()` calls in the effect's cleanup) added by Task 27 for terminal-state handling. This task's edits below target different regions of that same effect — the join/reconnect dispatch, the `joined` handler, and new seq-tracking hooks on `state_update`/`room_started`/`match` — and add one new, *independent* `ws.on('room_ended', ...)` subscription purely for seq bookkeeping (`wsClient`'s `on()` dispatches to every registered handler per message type, so this coexists with Task 27's handler without touching it). **Do not remove or merge into Task 27's `kicked`/`room_ended` code** — apply these edits alongside it.
+
+- [ ] **Step 1: Write failing tests for `WsClient.onOpen` in `lib/wsClient.test.ts`**
+
+Append to the existing `describe('createWsClient', ...)` block:
+
+```ts
+  it('onOpen fires on the initial connection and again after a live WS-level reconnect', async () => {
+    wss.on('connection', (ws) => {
+      ws.on('message', () => ws.send(JSON.stringify({ type: 'heartbeat_ack' })))
+    })
+    const client = createWsClient(url)
+    let openCount = 0
+    const received: unknown[] = []
+    client.onOpen(() => {
+      openCount++
+      client.send({ type: 'heartbeat' })
+    })
+    client.on('heartbeat_ack', (msg) => received.push(msg))
+
+    await new Promise((resolve) => setTimeout(resolve, 50)) // let the initial socket open
+    expect(openCount).toBe(1)
+    expect(received).toHaveLength(1)
+
+    // Simulate a WS-level drop while the tab stays open (not a page reload) —
+    // terminate every live server-side connection and let wsClient's own
+    // backoff reconnect it.
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 1300)) // > INITIAL_BACKOFF_MS
+
+    expect(openCount).toBe(2)
+    expect(received).toHaveLength(2)
+    client.close()
+  }, 10_000)
+
+  it('unsubscribing onOpen stops further notifications', async () => {
+    const client = createWsClient(url)
+    let count = 0
+    const unsubscribe = client.onOpen(() => count++)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(count).toBe(1)
+    unsubscribe()
+
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise((resolve) => setTimeout(resolve, 1300))
+
+    expect(count).toBe(1)
+    client.close()
+  }, 10_000)
+```
+
+- [ ] **Step 2: Run to verify the new tests fail**
+
+Run: `npx vitest run lib/wsClient.test.ts`
+Expected: FAIL — `client.onOpen` is not a function.
+
+- [ ] **Step 3: Add `onOpen` to `lib/wsClient.ts`**
+
+```ts
+// lib/wsClient.ts
+import type { ClientMessage, ServerMessage } from '../server/ws/protocol'
+
+export interface WsClient {
+  send(message: ClientMessage): void
+  on<T extends ServerMessage['type']>(
+    type: T,
+    handler: (msg: Extract<ServerMessage, { type: T }>) => void,
+  ): () => void
+  onOpen(handler: () => void): () => void
+  close(): void
+}
+
+const INITIAL_BACKOFF_MS = 1000
+const MAX_BACKOFF_MS = 30_000
+
+export function createWsClient(url: string): WsClient {
+  let socket: WebSocket
+  let backoff = INITIAL_BACKOFF_MS
+  let closedByCaller = false
+  const handlers = new Map<string, Set<(msg: ServerMessage) => void>>()
+  const openHandlers = new Set<() => void>()
+  const queue: ClientMessage[] = []
+
+  function dispatch(message: ServerMessage) {
+    const set = handlers.get(message.type)
+    if (!set) return
+    for (const handler of [...set]) handler(message)
+  }
+
+  function connect() {
+    socket = new WebSocket(url)
+    socket.addEventListener('open', () => {
+      backoff = INITIAL_BACKOFF_MS
+      // Notify onOpen subscribers (typically: "(re)send join/reconnect")
+      // before flushing anything queued while offline, so re-establishing
+      // identity goes out first on this fresh socket.
+      for (const handler of [...openHandlers]) handler()
+      const pending = queue.splice(0, queue.length)
+      for (const msg of pending) socket.send(JSON.stringify(msg))
+    })
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data as string) as ServerMessage
+      dispatch(message)
+    })
+    socket.addEventListener('close', () => {
+      if (closedByCaller) return
+      setTimeout(connect, backoff)
+      backoff = Math.min(backoff * 2, MAX_BACKOFF_MS)
+    })
+  }
+  connect()
+
+  return {
+    send(message) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message))
+      } else {
+        queue.push(message)
+      }
+    },
+    on(type, handler) {
+      const set = handlers.get(type) ?? new Set()
+      set.add(handler as (msg: ServerMessage) => void)
+      handlers.set(type, set)
+      return () => set.delete(handler as (msg: ServerMessage) => void)
+    },
+    onOpen(handler) {
+      openHandlers.add(handler)
+      return () => openHandlers.delete(handler)
+    },
+    close() {
+      closedByCaller = true
+      socket.close()
+    },
+  }
+}
+```
+
+- [ ] **Step 4: Run to verify the tests pass**
+
+Run: `npx vitest run lib/wsClient.test.ts`
+Expected: PASS (4 tests — the 2 from Task 22 plus the 2 above).
+
+- [ ] **Step 5: Add `useRef` and the seq-tracking helpers to `app/room/[code]/page.tsx`**
+
+Replace the import:
+```ts
+// app/room/[code]/page.tsx — replace:
+import { useEffect, useState } from 'react'
+// with:
+import { useEffect, useRef, useState } from 'react'
+```
+
+Insert a ref right after the existing `client` state, and the two seq helpers as the first statements inside the mount effect (before `const ws = createWsClient(...)`):
+```ts
+// app/room/[code]/page.tsx — replace:
+  const [isHost, setIsHost] = useState(false)
+  const [client, setClient] = useState<WsClient | null>(null)
+
+  useEffect(() => {
+    const ws = createWsClient(`${location.origin.replace('http', 'ws')}/ws`)
+    setClient(ws)
+// with:
+  const [isHost, setIsHost] = useState(false)
+  const [client, setClient] = useState<WsClient | null>(null)
+  // Tracks the last-seen per-room `seq` (server/ws/protocol.ts's monotonic
+  // broadcast counter) so a missed update — one that happened while briefly
+  // disconnected — can be detected and repaired via `resync` instead of
+  // silently trusting state that skipped a change. A ref, not state: pure
+  // bookkeeping that drives an outbound send, never a render.
+  const lastSeqRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    // Authoritative reset: 'joined' (the response to join/reconnect/resync)
+    // always carries the room's true current seq as a full snapshot — adopt
+    // it unconditionally rather than comparing against the previous value.
+    function applySeq(seq: number) {
+      lastSeqRef.current = seq
+    }
+    // Incremental check: a broadcast's seq should equal the last one seen
+    // (multiple messages from the same server-side batch share a seq — see
+    // server/ws/router.ts's 'start'/'end_room' cases) or be exactly one
+    // higher. Anything further ahead means at least one broadcast was
+    // missed — ask the server for a fresh snapshot rather than trust a gap.
+    function checkSeq(socket: WsClient, seq: number) {
+      if (lastSeqRef.current !== null && seq > lastSeqRef.current + 1) {
+        socket.send({ type: 'resync' })
+      }
+      if (lastSeqRef.current === null || seq > lastSeqRef.current) {
+        lastSeqRef.current = seq
+      }
+    }
+
+    const ws = createWsClient(`${location.origin.replace('http', 'ws')}/ws`)
+    setClient(ws)
+```
+
+- [ ] **Step 6: Persist `hostToken` to `localStorage` and call `applySeq` in the `joined` handler**
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    const unsubJoined = ws.on('joined', (msg) => {
+      setSnapshot(msg.room)
+      setParticipants(msg.room.participants)
+      if (msg.room.pool) setPool(msg.room.pool)
+      if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
+      if (msg.hostToken) setIsHost(true)
+      sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
+    })
+// with:
+    const unsubJoined = ws.on('joined', (msg) => {
+      setSnapshot(msg.room)
+      setParticipants(msg.room.participants)
+      if (msg.room.pool) setPool(msg.room.pool)
+      if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
+      if (msg.hostToken) {
+        setIsHost(true)
+        // localStorage, not sessionStorage: the design doc's Authorization
+        // model requires hostToken to "survive a tab refresh" — sessionStorage
+        // is cleared when the tab closes, which would silently strip host
+        // control the next time this browser reopens the same room (a new
+        // tab, or after the OS/browser restarts the tab). hostClaimToken is
+        // single-use, so once it's consumed, this localStorage copy is the
+        // only way this browser can ever prove host status for this room again.
+        localStorage.setItem(`hostToken:${params.code}`, msg.hostToken)
+      }
+      sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
+      applySeq(msg.room.seq)
+    })
+```
+
+- [ ] **Step 7: Track `seq` on `state_update`, `room_started`, and `match`**
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    const unsubState = ws.on('state_update', (msg) => {
+      setParticipants(msg.participants)
+// with:
+    const unsubState = ws.on('state_update', (msg) => {
+      checkSeq(ws, msg.seq)
+      setParticipants(msg.participants)
+```
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    const unsubStarted = ws.on('room_started', (msg) => setPool(msg.pool))
+// with:
+    const unsubStarted = ws.on('room_started', (msg) => {
+      checkSeq(ws, msg.seq)
+      setPool(msg.pool)
+    })
+```
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    const unsubMatch = ws.on('match', (msg) =>
+      setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie])),
+    )
+// with:
+    const unsubMatch = ws.on('match', (msg) => {
+      checkSeq(ws, msg.seq)
+      setPool((prev) => (prev.some((e) => e.movieId === msg.movieId) ? prev : [...prev, msg.movie]))
+    })
+```
+
+Add one more, independent subscription right after `unsubExhausted`'s declaration (do not touch Task 27's own `room_ended`/`kicked` subscriptions elsewhere in this effect — this is additive):
+```ts
+    // Task 27 already subscribes to 'room_ended' for the terminal-state UI —
+    // this is a second, independent subscription (wsClient dispatches to
+    // every registered handler for a type) purely for seq bookkeeping, so a
+    // room_ended broadcast doesn't fall outside gap detection.
+    const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
+```
+
+- [ ] **Step 8: Replace the one-shot `setTimeout` join/reconnect dispatch with `onOpen`-driven replay**
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
+    const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
+    const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
+
+    setTimeout(() => {
+      if (storedSessionToken) {
+        ws.send({ type: 'reconnect', roomCode: params.code, sessionToken: storedSessionToken })
+      } else {
+        ws.send({
+          type: 'join',
+          roomCode: params.code,
+          displayName: pendingDisplayName ?? 'Guest',
+          hostClaimToken,
+        })
+      }
+    }, 0)
+// with:
+    const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
+    const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
+
+    // Fires on the initial connection AND every reconnect wsClient performs
+    // after a live WS-level drop (socket closes while the tab stays open) —
+    // not just once at mount, unlike the setTimeout(…, 0) this replaces.
+    // Re-reading sessionToken/hostToken from storage on every call, instead
+    // of a value captured once at mount, is what makes a single handler
+    // correct across calls: the first call (nothing stored yet) sends
+    // 'join'; by the time any later reconnect fires, this same handler's
+    // own 'joined' response (Step 6) has already persisted both tokens, so
+    // it naturally sends 'reconnect' — with hostToken — from then on.
+    const unsubOpen = ws.onOpen(() => {
+      const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
+      const storedHostToken = localStorage.getItem(`hostToken:${params.code}`) ?? undefined
+      if (storedSessionToken) {
+        ws.send({
+          type: 'reconnect',
+          roomCode: params.code,
+          sessionToken: storedSessionToken,
+          hostToken: storedHostToken,
+        })
+      } else {
+        ws.send({
+          type: 'join',
+          roomCode: params.code,
+          displayName: pendingDisplayName ?? 'Guest',
+          hostClaimToken,
+        })
+      }
+    })
+```
+
+(The `const heartbeat = setInterval(...)` line that already follows this block is unchanged.)
+
+- [ ] **Step 9: Unsubscribe the two new subscriptions in the effect's cleanup**
+
+```ts
+// app/room/[code]/page.tsx — replace:
+    return () => {
+      unsubJoined()
+      unsubState()
+      unsubStarted()
+      unsubNextCard()
+      unsubMatch()
+      unsubExhausted()
+      unsubError()
+      clearInterval(heartbeat)
+      ws.close()
+    }
+// with:
+    return () => {
+      unsubJoined()
+      unsubState()
+      unsubStarted()
+      unsubNextCard()
+      unsubMatch()
+      unsubExhausted()
+      unsubError()
+      unsubSeqOnRoomEnded()
+      unsubOpen()
+      lastSeqRef.current = null
+      clearInterval(heartbeat)
+      ws.close()
+    }
+```
+
+By the time this task is implemented, Task 27 will have added its own `unsubKicked()`/`unsubRoomEnded()` calls (or similarly named) somewhere in this same cleanup block — keep those; only add `unsubSeqOnRoomEnded()`, `unsubOpen()`, and the `lastSeqRef.current = null` reset alongside them.
+
+- [ ] **Step 10: Run the full unit/component test suite**
+
+Run: `npx vitest run`
+Expected: PASS — all tests from Tasks 1-27 plus Step 1-4 above.
+
+- [ ] **Step 11: Add an e2e check that host status survives a page reload**
+
+Append to `e2e/authorization.spec.ts`:
+
+```ts
+test('host status survives a page reload (hostToken persisted in localStorage)', async ({ baseURL }) => {
+  const browser = await chromium.launch()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
+  await hostPage.goto('/')
+  await hostPage.click('text=Create room')
+  await hostPage.waitForURL(/\/room\//)
+
+  await expect(hostPage.locator('text=Start')).toBeVisible()
+  await hostPage.reload()
+  await expect(hostPage.locator('text=Start')).toBeVisible() // still recognized as host after the refresh
+  await browser.close()
+})
+```
+
+Note on coverage this task deliberately doesn't add: a genuine `seq` gap (a broadcast actually missed mid-connection) isn't practically inducible from Playwright without a server-side test hook to pause/drop delivery — none exists yet. The `resync` recovery path's *server*-side correctness is already covered by existing router tests; this task's client-side gap-detection logic is covered structurally (Step 5/7) and via the `onOpen` reconnect-replay tests in Step 1, which exercise the same "drop and recover" mechanics the gap-detection path depends on. Treat a dedicated seq-gap e2e as a follow-up once a server-side fault-injection hook exists, not as done here.
+
+- [ ] **Step 12: Run the e2e suite**
+
+Run: `npx playwright install --with-deps chromium && npm run test:e2e`
+Expected: PASS — all existing specs plus the new host-survives-reload case in `e2e/authorization.spec.ts`.
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add lib/wsClient.ts lib/wsClient.test.ts app/room/[code]/page.tsx e2e/authorization.spec.ts
+git commit -m "fix: persist hostToken, replay join/reconnect on live WS reconnects, detect seq gaps"
+```
+
+---
+
+## Task 29: Room creation hardening — Origin validation, rate limiting, concurrent-room cap, and room-code fixes
+
+**Files:**
+- Modify: `server/auth/tokens.ts`, `server/auth/tokens.test.ts`
+- Create: `server/room/roomStore.test.ts`
+- Modify: `server/room/roomStore.ts`
+- Modify: `server/rateLimit.ts`, `server/rateLimit.test.ts`
+- Modify: `server/ws/server.ts`
+- Modify: `server/room/actions.ts`
+- Modify: `server/http/rooms.ts`, `server/http/rooms.test.ts`
+- Modify: `server/index.ts`
+- Create: `e2e/rateLimit.spec.ts`
+
+**Interfaces:**
+- Consumes: `RoomStore`/`createRoomStore` (Task 15); `TokenBucket`/`createTokenBucket` (Task 19, already extended by Task 26 with `size()`/idle eviction — read that version, not a from-scratch one); `AppConfig` (Task 1); `createRoomsHandler` (Task 20); `createApp` (Task 21); `ErrorCode` (Task 15/16, already extended by Task 26 with `'internal_error'` — this task appends to whatever the union looks like after Task 26, not the pristine pre-Task-26 list).
+- Produces:
+  ```ts
+  // rateLimit.ts — new export, transport-agnostic (moved out of ws/server.ts's
+  // private, IncomingMessage-only copy so server/http/rooms.ts can share it).
+  // Added ALONGSIDE Task 26's createTokenBucket/size()/eviction additions —
+  // do not revert those.
+  function getClientIp(forwardedFor: string | null, remoteAddress: string | undefined, trustedProxyHops: number): string
+
+  // room/roomStore.ts
+  const MAX_CONCURRENT_ROOMS = 50 // design spec's own example figure, used as-is
+  function createRoomStore(codeGenerator?: () => string): RoomStore // now DI-able for deterministic collision tests
+
+  // room/actions.ts — ErrorCode gains (appended after Task 26's 'internal_error'):
+  //   'rate_limited' | 'room_cap_reached' | 'forbidden_origin'
+
+  // http/rooms.ts
+  function createRoomsHandler(
+    store: RoomStore, db: Database.Database, encryptionKey: string, config: AppConfig,
+  ): (req: Request, remoteAddress: string | undefined) => Promise<Response>
+  ```
+
+**IMPORTANT — execution-order note:** this task runs after Task 26 (crash-hardening), which already modified both `server/rateLimit.ts` (added `size()`, idle-eviction params, an `evictStale` sweep) and `server/room/actions.ts`'s `ErrorCode` union (added `'internal_error'`). Every instruction below that touches those two files must be applied ON TOP of Task 26's actual current state, verified by reading the real file first — never as a "replace the whole file" that would silently revert Task 26's fixes. Where a step below shows a full-file listing for `server/rateLimit.ts`, treat it as "the shape this file must end up in" (for review/verification purposes) and hand-merge it against whatever Task 26 actually left behind, preserving every one of Task 26's additions.
+
+**Judgment calls made in this task (flagging per review request, not spec-mandated exact values):**
+- The 429/403/503 HTTP status codes for rate-limit/Origin/cap rejections aren't spec-mandated — chosen as the closest standard fit (503 for "temporarily can't accept more," matching a capacity condition rather than a permissions one).
+- Max-concurrent-room cap testing is done at the Vitest level (`server/http/rooms.test.ts`), not in the new e2e file, even though scenario (e) groups "rate-limit and cap behavior" together. Reaching the cap (50) through real HTTP round-trips against the shared Playwright dev server is now blocked by the very rate limiter this task adds (10/minute from one IP) — exhausting the cap for real would take minutes and would permanently inflate the shared room store for every later spec file in the run. The e2e file covers the boundary-crossing rate-limit and Origin behavior instead, since those are genuinely about wire-level behavior a browser-adjacent client experiences; the cap is exercised directly against `store.create()` in a fast, deterministic unit test.
+- `server/room/roomStore.ts`'s collision-retry test uses dependency injection (an optional `codeGenerator` param defaulting to `generateRoomCode`) rather than a mocking library — this codebase has no `vi.mock` precedent anywhere, and DI keeps the test deterministic without introducing one.
+- Word-list replacement (`REED`) is a plain thematic pick (matches the surrounding row's 4-letter nature-word style: `WIND, DUSK, DAWN, GLOW, RUST, OPAL, ___, SILK, CORD, BOLT`), not a spec requirement.
+
+---
+
+- [ ] **Step 1: Write failing tests for the room-code fixes**
+
+```ts
+// server/auth/tokens.test.ts
+import { describe, expect, it } from 'vitest'
+import { generateRoomCode, generateToken, WORDS } from './tokens'
+
+describe('generateToken', () => {
+  it('generates a 32-character hex string (128 bits)', () => {
+    const token = generateToken()
+    expect(token).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('generates distinct tokens across calls', () => {
+    const tokens = new Set(Array.from({ length: 100 }, () => generateToken()))
+    expect(tokens.size).toBe(100)
+  })
+})
+
+describe('generateRoomCode', () => {
+  it('matches the WORD-WORD-NNN format', () => {
+    const code = generateRoomCode()
+    expect(code).toMatch(/^[A-Z]+-[A-Z]+-\d{3}$/)
+  })
+
+  it('generates different codes across calls (not exhaustively unique — collision handling is the room store\'s job)', () => {
+    const codes = new Set(Array.from({ length: 20 }, () => generateRoomCode()))
+    expect(codes.size).toBeGreaterThan(1)
+  })
+})
+
+describe('WORDS', () => {
+  it('has no duplicate entries', () => {
+    expect(new Set(WORDS).size).toBe(WORDS.length)
+  })
+
+  it('has the documented 100-word list size (design spec Network exposure: "a 100-word list")', () => {
+    expect(WORDS.length).toBe(100)
+  })
+})
+```
+
+```ts
+// server/room/roomStore.test.ts
+import { describe, expect, it } from 'vitest'
+import { createRoomStore } from './roomStore'
+
+describe('createRoomStore', () => {
+  it('looks up a room case-insensitively', () => {
+    const store = createRoomStore()
+    const { code } = store.create({ kind: 'all' }, 'plex', {})
+    expect(store.get(code.toLowerCase())?.code).toBe(code)
+  })
+
+  it('normalizes case on delete too', () => {
+    const store = createRoomStore()
+    const { code } = store.create({ kind: 'all' }, 'plex', {})
+    store.delete(code.toLowerCase())
+    expect(store.get(code)).toBeUndefined()
+  })
+
+  it('accepts an injected code generator, defaulting to generateRoomCode', () => {
+    const store = createRoomStore(() => 'ZEBRA-OTTER-999')
+    const { code } = store.create({ kind: 'all' }, 'plex', {})
+    expect(code).toBe('ZEBRA-OTTER-999')
+  })
+
+  it('throws instead of silently overwriting a live room once the collision-retry budget is exhausted', () => {
+    const store = createRoomStore(() => 'FOX-WOLF-001')
+    store.create({ kind: 'all' }, 'plex', {}) // occupies the only code this generator can ever produce
+    expect(() => store.create({ kind: 'all' }, 'plex', {})).toThrow()
+  })
+})
+```
+
+**Note: `server/auth/tokens.ts` may already export `generateToken`/`generateRoomCode`/`WORDS` in a different shape than assumed here (this task was drafted from the plan's Task 14 text, not a guaranteed byte-for-byte read of the shipped file) — read the actual current file before writing this test, and adjust the WORDS array replacement in Step 3 to be a minimal edit (dedupe `SAGE`, add one replacement word) against the REAL current 100-entry list, not a wholesale rewrite. Only the duplicate-`SAGE` fix and case-insensitivity/collision-throw behavior are the actual required changes — don't restructure a working file beyond what's needed.**
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npx vitest run server/auth/tokens.test.ts server/room/roomStore.test.ts`
+Expected: FAIL — `WORDS` isn't exported yet (or has the duplicate), and `createRoomStore` doesn't accept a `codeGenerator` argument or throw on exhausted retries.
+
+- [ ] **Step 3: Fix `server/auth/tokens.ts` (dedupe `WORDS`, minimal edit against the real file) and `server/room/roomStore.ts`**
+
+For `server/auth/tokens.ts`: read the real current `WORDS` array, find the duplicate `'SAGE'` entry, and replace the second occurrence with `'REED'` (a plain thematic pick matching the surrounding words' style — verify against the real list's actual style/theme, this may differ from the illustrative example below). Do not otherwise change `generateToken`/`generateRoomCode`.
+
+For `server/room/roomStore.ts`, apply this shape (verified interface below; hand-merge against the real current file's actual field names for `RoomState` and any other fields `create()` currently sets that aren't shown here — read the real file first):
+
+```ts
+// server/room/roomStore.ts
+import { generateRoomCode, generateToken } from '../auth/tokens'
+// ...(keep every other existing import from the real file)
+
+export interface RoomStore {
+  create(matchThreshold: MatchThreshold, candidateSource: CandidateSource, tmdbFilters: TmdbFilters): {
+    code: string
+    hostClaimToken: string
+  }
+  get(code: string): RoomState | undefined
+  delete(code: string): void
+  all(): RoomState[]
+}
+
+const MAX_CODE_GENERATION_ATTEMPTS = 20
+// Network exposure's cap ("max concurrent rooms, e.g. 50, counting `ended`
+// rooms until they're evicted") — enforced by the HTTP handler
+// (server/http/rooms.ts) against store.all().length before calling
+// create(), not in here; this constant lives with the store it's measured
+// against.
+export const MAX_CONCURRENT_ROOMS = 50
+
+function normalizeCode(code: string): string {
+  return code.trim().toUpperCase()
+}
+
+// codeGenerator defaults to the real generateRoomCode; overriding it is what
+// lets roomStore.test.ts force a deterministic collision without a mocking
+// library.
+export function createRoomStore(codeGenerator: () => string = generateRoomCode): RoomStore {
+  const rooms = new Map<string, RoomState>()
+
+  return {
+    create(matchThreshold, candidateSource, tmdbFilters) {
+      let code = normalizeCode(codeGenerator())
+      let attempts = 0
+      while (rooms.has(code)) {
+        if (attempts >= MAX_CODE_GENERATION_ATTEMPTS) {
+          // Previously this loop fell through after MAX_CODE_GENERATION_ATTEMPTS
+          // and called rooms.set() regardless, silently overwriting whatever
+          // live room already held that code. With the ~10^7-code space and
+          // the MAX_CONCURRENT_ROOMS cap above this is effectively
+          // unreachable in production, but it must fail loudly rather than
+          // clobber a live room if it's ever hit.
+          throw new Error(`Could not generate a unique room code after ${MAX_CODE_GENERATION_ATTEMPTS} attempts`)
+        }
+        code = normalizeCode(codeGenerator())
+        attempts++
+      }
+      const hostClaimToken = generateToken()
+      // ...(keep every existing field the real create() sets on RoomState —
+      // this task only changes the code-generation/collision loop above and
+      // the two lookups below, not the room's initial field values)
+      rooms.set(code, room)
+      return { code, hostClaimToken }
+    },
+    get(code) {
+      return rooms.get(normalizeCode(code))
+    },
+    delete(code) {
+      rooms.delete(normalizeCode(code))
+    },
+    all() {
+      return [...rooms.values()]
+    },
+  }
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npx vitest run server/auth/tokens.test.ts server/room/roomStore.test.ts`
+Expected: PASS (6 + 4 tests)
+
+- [ ] **Step 5: Write the failing test for a shared, transport-agnostic `getClientIp`**
+
+Append to `server/rateLimit.test.ts` (keep every existing `describe` block from Task 26 — the `createTokenBucket` tests including its eviction test — unchanged, above this):
+
+```ts
+import { createTokenBucket, getClientIp } from './rateLimit'
+
+// ... existing describe('createTokenBucket', ...) block (including Task 26's
+// eviction test) stays unchanged ...
+
+describe('getClientIp', () => {
+  it('ignores X-Forwarded-For when trustedProxyHops is 0', () => {
+    expect(getClientIp('203.0.113.9', '10.0.0.5', 0)).toBe('10.0.0.5')
+  })
+
+  it('reads the (length - trustedProxyHops)th entry of X-Forwarded-For when hops > 0', () => {
+    expect(getClientIp('1.1.1.1, 2.2.2.2, 3.3.3.3', '10.0.0.2', 1)).toBe('3.3.3.3')
+  })
+
+  it('falls back to remoteAddress when X-Forwarded-For is absent', () => {
+    expect(getClientIp(null, '10.0.0.5', 1)).toBe('10.0.0.5')
+  })
+
+  it("falls back to 'unknown' when neither is available", () => {
+    expect(getClientIp(null, undefined, 0)).toBe('unknown')
+  })
+})
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `npx vitest run server/rateLimit.test.ts`
+Expected: FAIL — `getClientIp` is not exported from `server/rateLimit.ts` yet. All of Task 26's `createTokenBucket` tests (including eviction) still PASS unchanged.
+
+- [ ] **Step 7: Add `getClientIp` to `server/rateLimit.ts` ALONGSIDE Task 26's existing `createTokenBucket`/`size()`/eviction code (do not remove or replace any of it), and update `server/ws/server.ts` to consume the shared version**
+
+Read the real current `server/rateLimit.ts` (post-Task-26) first. Append this export to the end of the file, unchanged from Task 26's content above it:
+
+```ts
+// Resolves the real client IP for rate-limiting purposes, honoring
+// TRUSTED_PROXY_HOPS — an untrusted client can set X-Forwarded-For to
+// anything, so it's only consulted when the deployer has explicitly said
+// how many trusted proxy hops sit in front of this process. Takes plain
+// values instead of a transport-specific request type so both the WS
+// upgrade handler (Node IncomingMessage) and the HTTP route handlers
+// (Web-standard Request, which carries no socket) share one implementation
+// instead of each keeping their own copy. Was previously a private
+// function inside server/ws/server.ts.
+export function getClientIp(
+  forwardedFor: string | null,
+  remoteAddress: string | undefined,
+  trustedProxyHops: number,
+): string {
+  if (trustedProxyHops > 0 && forwardedFor) {
+    const ips = forwardedFor.split(',').map((ip) => ip.trim())
+    const index = ips.length - trustedProxyHops
+    const candidate = index >= 0 ? ips[index] : undefined
+    if (candidate) return candidate
+  }
+  return remoteAddress ?? 'unknown'
+}
+```
+
+In `server/ws/server.ts`:
+
+Update the import line — read the real current import list (it already includes `createTokenBucket` from `../rateLimit`; add `getClientIp` alongside it) and drop `IncomingMessage` from the `node:http` import only if nothing else in the file still needs it (check before removing).
+
+Delete the now-duplicated local `getClientIp` function (the one that takes an `IncomingMessage` directly).
+
+Replace its call site:
+```ts
+    const clientIp = getClientIp(req, config.trustedProxyHops)
+```
+with:
+```ts
+    const forwardedFor = req.headers['x-forwarded-for']
+    const clientIp = getClientIp(
+      typeof forwardedFor === 'string' ? forwardedFor : null,
+      req.socket.remoteAddress,
+      config.trustedProxyHops,
+    )
+```
+
+- [ ] **Step 8: Run tests to verify everything still passes**
+
+Run: `npx vitest run server/rateLimit.test.ts server/ws/server.test.ts`
+Expected: PASS — `getClientIp`'s 4 new tests pass, Task 26's `createTokenBucket`/eviction tests still pass unchanged, and all pre-existing `attachWebSocketServer` tests still pass unchanged (confirms the relocation preserved behavior).
+
+- [ ] **Step 9: Write failing tests for `createRoomsHandler`'s Origin validation, rate limit, and cap**
+
+```ts
+// server/http/rooms.test.ts
+import { describe, expect, it } from 'vitest'
+import type { AppConfig } from '../config'
+import { createRoomStore, MAX_CONCURRENT_ROOMS } from '../room/roomStore'
+import { createRoomsHandler } from './rooms'
+
+const config: AppConfig = {
+  tmdbApiKey: 'x',
+  authEncryptionKey: 'a'.repeat(32),
+  adminSetupToken: 'admin',
+  appOrigin: 'http://localhost:3100',
+  trustedProxyHops: 0,
+  port: 0,
+  dataDir: '',
+}
+const validBody = { candidateSource: 'plex', matchThreshold: { kind: 'all' } }
+
+function createRoomRequest(body: unknown, origin = config.appOrigin): Request {
+  return new Request('http://localhost/api/rooms', {
+    method: 'POST',
+    headers: { origin },
+    body: JSON.stringify(body),
+  })
+}
+
+describe('createRoomsHandler', () => {
+  it('creates a room and returns roomCode + hostClaimToken', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    const res = await handler(createRoomRequest(validBody), '127.0.0.1')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.roomCode).toMatch(/^[A-Z]+-[A-Z]+-\d{3}$/)
+    expect(typeof body.hostClaimToken).toBe('string')
+  })
+
+  it('rejects a malformed body with a 400 and an error code', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    const req = new Request('http://localhost/api/rooms', {
+      method: 'POST',
+      headers: { origin: config.appOrigin },
+      body: 'not json',
+    })
+    const res = await handler(req, '127.0.0.1')
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error.code).toBe('invalid_threshold')
+  })
+
+  it('rejects a request whose Origin does not match APP_ORIGIN', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    const res = await handler(createRoomRequest(validBody, 'http://evil.example'), '127.0.0.1')
+    expect(res.status).toBe(403)
+    const body = await res.json()
+    expect(body.error.code).toBe('forbidden_origin')
+  })
+
+  it('does not enforce Origin when APP_ORIGIN is empty (test-mode escape hatch, matches ws/server.ts)', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', { ...config, appOrigin: '' })
+    const res = await handler(createRoomRequest(validBody, 'http://anything.example'), '127.0.0.1')
+    expect(res.status).toBe(200)
+  })
+
+  it('rate-limits room creation past 10 requests/minute from one client IP', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    const statuses: number[] = []
+    for (let i = 0; i < 11; i++) {
+      const res = await handler(createRoomRequest(validBody), '203.0.113.5')
+      statuses.push(res.status)
+    }
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(200))
+    expect(statuses[10]).toBe(429)
+  })
+
+  it('tracks rate-limit buckets independently per client IP', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    for (let i = 0; i < 10; i++) await handler(createRoomRequest(validBody), '203.0.113.10')
+    const res = await handler(createRoomRequest(validBody), '203.0.113.11')
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects room creation once MAX_CONCURRENT_ROOMS is reached', async () => {
+    const store = createRoomStore()
+    for (let i = 0; i < MAX_CONCURRENT_ROOMS; i++) store.create({ kind: 'all' }, 'plex', {})
+    const handler = createRoomsHandler(store, {} as never, 'key', config)
+    const res = await handler(createRoomRequest(validBody), '198.51.100.1')
+    expect(res.status).toBe(503)
+    const body = await res.json()
+    expect(body.error.code).toBe('room_cap_reached')
+  })
+})
+```
+
+- [ ] **Step 10: Run tests to verify they fail**
+
+Run: `npx vitest run server/http/rooms.test.ts`
+Expected: FAIL — `createRoomsHandler` doesn't take a 4th `config` arg or a `remoteAddress` 2nd arg to its returned function yet.
+
+- [ ] **Step 11: Add the new `ErrorCode`s (append after Task 26's `'internal_error'`, do not revert it) and implement the hardened handler**
+
+In `server/room/actions.ts`, read the real current `ErrorCode` union (it will already include `'internal_error'` from Task 26) and append three more members to it, keeping every existing member:
+```ts
+  | 'rate_limited'
+  | 'room_cap_reached'
+  | 'forbidden_origin'
+```
+
+```ts
+// server/http/rooms.ts
+import type Database from 'better-sqlite3'
+import type { AppConfig } from '../config'
+import { createTokenBucket, getClientIp } from '../rateLimit'
+import { isValidThreshold } from '../room/matchThreshold'
+import { MAX_CONCURRENT_ROOMS, type RoomStore } from '../room/roomStore'
+import type { CandidateSource, MatchThreshold, TmdbFilters } from '../room/types'
+
+interface CreateRoomBody {
+  candidateSource: CandidateSource
+  matchThreshold: MatchThreshold
+  tmdbFilters?: TmdbFilters
+}
+
+function isCreateRoomBody(value: unknown): value is CreateRoomBody {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    (v.candidateSource === 'plex' || v.candidateSource === 'plex+tmdb') &&
+    typeof v.matchThreshold === 'object' &&
+    v.matchThreshold !== null
+  )
+}
+
+export function createRoomsHandler(
+  store: RoomStore,
+  _db: Database.Database,
+  _encryptionKey: string,
+  config: AppConfig,
+): (req: Request, remoteAddress: string | undefined) => Promise<Response> {
+  // Same 10/minute-per-IP shape as the WS upgrade bucket in ws/server.ts —
+  // this is the HTTP half of Network exposure's rate-limiting requirement.
+  // Join attempts are already covered separately by the WS upgrade bucket
+  // and the per-connection failedJoins guard (Task 19); joining doesn't go
+  // through this HTTP route.
+  const rateLimitBucket = createTokenBucket(10, 10 / 60)
+
+  return async (req, remoteAddress) => {
+    // The client currently POSTs without a Content-Type header (app/page.tsx),
+    // making this a CORS-simple request reachable cross-origin without a
+    // preflight — Origin validation is the real defense here, not CORS
+    // headers, so it's checked first and unconditionally.
+    if (config.appOrigin && req.headers.get('origin') !== config.appOrigin) {
+      return Response.json(
+        { error: { code: 'forbidden_origin', message: 'request origin not allowed' } },
+        { status: 403 },
+      )
+    }
+
+    const clientIp = getClientIp(req.headers.get('x-forwarded-for'), remoteAddress, config.trustedProxyHops)
+    if (!rateLimitBucket.tryConsume(clientIp)) {
+      return Response.json(
+        { error: { code: 'rate_limited', message: 'too many requests, please slow down' } },
+        { status: 429 },
+      )
+    }
+
+    let parsed: unknown
+    try {
+      parsed = await req.json()
+    } catch {
+      return Response.json({ error: { code: 'invalid_threshold', message: 'malformed body' } }, { status: 400 })
+    }
+    if (!isCreateRoomBody(parsed)) {
+      return Response.json({ error: { code: 'invalid_threshold', message: 'malformed body' } }, { status: 400 })
+    }
+    // At creation time there's no participant count yet — atLeast is validated
+    // for real once real participants exist, at Start (Task 16). Here we only
+    // reject the structurally-impossible case, n < 1.
+    if (!isValidThreshold(parsed.matchThreshold, Number.MAX_SAFE_INTEGER)) {
+      return Response.json({ error: { code: 'invalid_threshold', message: 'invalid threshold' } }, { status: 400 })
+    }
+
+    // Synchronous with store.create() below, no await between them — per
+    // the Concurrency invariant, that's what keeps this a real cap instead
+    // of a check-then-act race.
+    if (store.all().length >= MAX_CONCURRENT_ROOMS) {
+      return Response.json(
+        {
+          error: {
+            code: 'room_cap_reached',
+            message: 'the server has reached its maximum number of concurrent rooms',
+          },
+        },
+        { status: 503 },
+      )
+    }
+
+    const { code, hostClaimToken } = store.create(
+      parsed.matchThreshold,
+      parsed.candidateSource,
+      parsed.tmdbFilters ?? {},
+    )
+    return Response.json({ roomCode: code, hostClaimToken })
+  }
+}
+```
+
+**Note: read the real current `server/http/rooms.ts` first — this may already validate `matchThreshold`/parse the body differently than assumed here; merge this task's additions (Origin check, rate limit, cap check, the `config`/`remoteAddress` parameters) onto the real existing structure and existing validation logic rather than replacing working code wholesale.**
+
+- [ ] **Step 12: Run tests to verify they pass**
+
+Run: `npx vitest run server/http/rooms.test.ts`
+Expected: PASS (7 tests)
+
+- [ ] **Step 13: Wire `AppConfig` and the raw socket address into `server/index.ts`**
+
+Read the real current call site and dispatch line for `roomsHandler` in `server/index.ts` and update them to pass `config` as a 4th argument to `createRoomsHandler(...)`, and `req.socket.remoteAddress` as the 2nd argument when calling the returned handler.
+
+- [ ] **Step 14: Run the full Vitest suite to confirm nothing upstream broke**
+
+Run: `npx vitest run`
+Expected: PASS — every test file from Tasks 1-29, including `server/index.test.ts`'s existing `serves POST /api/rooms` case (it uses `appOrigin: ''` and a single request, so it clears both the Origin check and the rate limit unchanged).
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+- [ ] **Step 15: Add Playwright e2e coverage for Origin validation and the rate limit**
+
+```ts
+// e2e/rateLimit.spec.ts
+import { test, expect, request } from '@playwright/test'
+
+test('rejects a room-creation request with a mismatched Origin header', async ({ baseURL }) => {
+  const ctx = await request.newContext({ baseURL, extraHTTPHeaders: { Origin: 'http://evil.example' } })
+  const res = await ctx.post('/api/rooms', {
+    data: { candidateSource: 'plex', matchThreshold: { kind: 'all' } },
+  })
+  expect(res.status()).toBe(403)
+  const body = await res.json()
+  expect(body.error.code).toBe('forbidden_origin')
+  await ctx.dispose()
+})
+
+test('rate-limits a burst of room-creation requests from one client', async ({ baseURL }) => {
+  // The dev server backing this whole Playwright run is shared across every
+  // spec file, and POST /api/rooms is rate-limited per resolved client IP —
+  // every request in the suite comes from the test runner's own loopback
+  // address, so the bucket's exact remaining balance here depends on how
+  // many rooms earlier spec files already created via the UI. Asserting an
+  // exact "the Nth request fails" boundary would be order-dependent and
+  // flaky. What's guaranteed regardless of history is the bucket's
+  // *capacity*: it never holds more than 10 tokens and refills at ~1 token
+  // per 6 seconds, so a burst of 15 near-simultaneous requests — far more
+  // than can be refilled in the time it takes to fire them — must contain
+  // at least one rejection.
+  const origin = new URL(baseURL!).origin
+  const ctx = await request.newContext({ baseURL, extraHTTPHeaders: { Origin: origin } })
+  const results = await Promise.all(
+    Array.from({ length: 15 }, () =>
+      ctx.post('/api/rooms', { data: { candidateSource: 'plex', matchThreshold: { kind: 'all' } } }),
+    ),
+  )
+  const statuses = results.map((r) => r.status())
+  expect(statuses).toContain(429)
+  await ctx.dispose()
+})
+```
+
+- [ ] **Step 16: Run the e2e test**
+
+Run: `npx playwright test e2e/rateLimit.spec.ts`
+Expected: PASS (2 tests, both projects)
+
+- [ ] **Step 17: Commit**
+
+```bash
+git add server/auth/tokens.ts server/auth/tokens.test.ts server/room/roomStore.ts server/room/roomStore.test.ts server/rateLimit.ts server/rateLimit.test.ts server/ws/server.ts server/room/actions.ts server/http/rooms.ts server/http/rooms.test.ts server/index.ts e2e/rateLimit.spec.ts
+git commit -m 'fix: Origin/rate-limit/cap guards on room creation, case-insensitive room codes, word-list dedup'
+```
+
+---
+
+## Task 30: `/setup` UI — Plex PIN-auth flow, gated backend routes, deployment cleanup
+
+**Files:**
+- Modify: `server/http/setup.ts` — extend `createSetupHandlers` with a `clientIdentifier` parameter, three new handlers (`pinStatus`, `resources`, `librarySections`), and `pin` now echoes `clientIdentifier` in its response
+- Modify: `server/http/setup.test.ts` — cover the new handlers and the extended `pin` response shape
+- Modify: `server/index.ts` — pass `clientIdentifier` into `createSetupHandlers`, dispatch the three new routes
+- Create: `app/setup/page.tsx`
+- Modify: `messages/pt-br.json`, `messages/en-us.json` — add a `setup` namespace
+- Modify: `README.md` — correct the `/setup` flow description and the TMDB bullet
+- Modify: `.dockerignore` — exclude `.env`
+- Modify: `Dockerfile` — prune dev dependencies from the runtime image
+
+**Interfaces:**
+- Consumes: `PlexClient.checkPin/getResources/getLibrarySections` (`server/plex/client.ts`), `savePlexLink`/`getPlexLink` (`server/plex/link.ts`), `useTranslations` (next-intl, wired in `app/layout.tsx`), shadcn `Card`/`CardHeader`/`CardContent`/`Button`/`Input`/`Label`/`Badge`/`Separator`/`Skeleton` (`components/ui/*`)
+- Produces:
+  ```ts
+  function createSetupHandlers(
+    db: Database.Database,
+    encryptionKey: string,
+    adminSetupToken: string,
+    plex: PlexClient,
+    clientIdentifier: string,
+  ): {
+    pin: (req: Request) => Promise<Response>
+    pinStatus: (req: Request) => Promise<Response>
+    resources: (req: Request) => Promise<Response>
+    librarySections: (req: Request) => Promise<Response>
+    callback: (req: Request) => Promise<Response>
+    resync: (req: Request) => Promise<Response>
+  }
+  ```
+  New routes: `GET /api/setup/plex/pin-status?pinId=...`, `GET /api/setup/plex/resources?authToken=...`, `GET /api/setup/plex/library-sections?serverUrl=...&authToken=...` — all `Authorization: Bearer <ADMIN_SETUP_TOKEN>`-gated. `app/setup/page.tsx` — a client page served automatically by `server/index.ts`'s existing Next.js fallback (any non-`/api/` path already routes to `handleNextRequest`; no new dispatch entry needed for the page itself).
+
+**Design decision — why `pinStatus` doesn't take a `clientIdentifier` param from the browser:** `checkPin` must be called with the exact identifier `createPin` used, and this app already has exactly one such identifier per running instance (`server/index.ts`'s `clientIdentifier` local, currently `getPlexLink(...)?.clientIdentifier ?? 'popcornpoll-instance'`). Rather than have the browser echo a value back that the server already knows and that could theoretically be spoofed to probe a different PIN, `pinStatus` closes over the same `clientIdentifier` the running `pin` handler used. The browser still needs to *display* it (to build the `app.plex.tv/auth` URL), so `pin`'s response is extended to include it — that's the one wire fact the client actually needs.
+
+- [ ] **Step 1: Extend the setup test file to cover the new handlers (write first, expect it to fail)**
+
+Replace `server/http/setup.test.ts` in full:
+
+```ts
+// server/http/setup.test.ts
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { openDb } from '../db'
+import { createSetupHandlers } from './setup'
+import type Database from 'better-sqlite3'
+import type { PlexClient } from '../plex/client'
+
+let dir: string
+let db: Database.Database
+const KEY = 'a'.repeat(32)
+const CLIENT_ID = 'popcornpoll-test-client'
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'popcornpoll-setup-'))
+  db = openDb(dir)
+})
+
+afterEach(() => {
+  db.close()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+const fakePlex: Partial<PlexClient> = {
+  createPin: vi.fn().mockResolvedValue({ id: 1, code: 'ABCD' }),
+  checkPin: vi.fn().mockResolvedValue({ authToken: 'tok-123' }),
+  getResources: vi.fn().mockResolvedValue([
+    { name: 'Living Room', clientIdentifier: 'srv-1', connections: [{ uri: 'http://10.0.0.5:32400' }] },
+  ]),
+  getLibrarySections: vi.fn().mockResolvedValue([{ id: '1', title: 'Movies', type: 'movie' }]),
+}
+
+function handlers() {
+  return createSetupHandlers(db, KEY, 'correct-token', fakePlex as PlexClient, CLIENT_ID)
+}
+
+describe('createSetupHandlers', () => {
+  it('rejects a pin request without the correct ADMIN_SETUP_TOKEN', async () => {
+    const req = new Request('http://localhost/api/setup/plex/pin', {
+      headers: { Authorization: 'Bearer wrong-token' },
+    })
+    const res = await handlers().pin(req)
+    expect(res.status).toBe(401)
+  })
+
+  it('accepts a pin request with the correct token and returns id/code/clientIdentifier', async () => {
+    const req = new Request('http://localhost/api/setup/plex/pin', {
+      headers: { Authorization: 'Bearer correct-token' },
+    })
+    const res = await handlers().pin(req)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ id: 1, code: 'ABCD', clientIdentifier: CLIENT_ID })
+  })
+
+  it('rejects a pin-status request without the admin token', async () => {
+    const res = await handlers().pinStatus(new Request('http://localhost/api/setup/plex/pin-status?pinId=1'))
+    expect(res.status).toBe(401)
+  })
+
+  it("polls checkPin with this instance's own clientIdentifier and returns authToken", async () => {
+    const res = await handlers().pinStatus(
+      new Request('http://localhost/api/setup/plex/pin-status?pinId=1', {
+        headers: { Authorization: 'Bearer correct-token' },
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ authToken: 'tok-123' })
+    expect(fakePlex.checkPin).toHaveBeenCalledWith(1, CLIENT_ID)
+  })
+
+  it('rejects a pin-status request with a non-numeric pinId', async () => {
+    const res = await handlers().pinStatus(
+      new Request('http://localhost/api/setup/plex/pin-status?pinId=nope', {
+        headers: { Authorization: 'Bearer correct-token' },
+      }),
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('lists servers for an authenticated token', async () => {
+    const res = await handlers().resources(
+      new Request('http://localhost/api/setup/plex/resources?authToken=tok-123', {
+        headers: { Authorization: 'Bearer correct-token' },
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([
+      { name: 'Living Room', clientIdentifier: 'srv-1', connections: [{ uri: 'http://10.0.0.5:32400' }] },
+    ])
+  })
+
+  it('rejects a resources request without an authToken', async () => {
+    const res = await handlers().resources(
+      new Request('http://localhost/api/setup/plex/resources', {
+        headers: { Authorization: 'Bearer correct-token' },
+      }),
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('lists movie library sections for a chosen server', async () => {
+    const res = await handlers().librarySections(
+      new Request(
+        'http://localhost/api/setup/plex/library-sections?serverUrl=http%3A%2F%2F10.0.0.5%3A32400&authToken=tok-123',
+        { headers: { Authorization: 'Bearer correct-token' } },
+      ),
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([{ id: '1', title: 'Movies', type: 'movie' }])
+  })
+
+  it('rejects a library-sections request missing serverUrl or authToken', async () => {
+    const res = await handlers().librarySections(
+      new Request('http://localhost/api/setup/plex/library-sections?authToken=tok-123', {
+        headers: { Authorization: 'Bearer correct-token' },
+      }),
+    )
+    expect(res.status).toBe(400)
+  })
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run server/http/setup.test.ts`
+Expected: FAIL — `createSetupHandlers` doesn't accept a 5th argument yet, and `pinStatus`/`resources`/`librarySections` don't exist.
+
+- [ ] **Step 3: Implement the extended `server/http/setup.ts`**
+
+```ts
+// server/http/setup.ts
+import type Database from 'better-sqlite3'
+import { savePlexLink } from '../plex/link'
+import type { PlexClient } from '../plex/client'
+
+function requireAdmin(req: Request, adminSetupToken: string): boolean {
+  const header = req.headers.get('authorization') ?? ''
+  return header === `Bearer ${adminSetupToken}`
+}
+
+function badRequest(code: string, message: string): Response {
+  return Response.json({ error: { code, message } }, { status: 400 })
+}
+
+export function createSetupHandlers(
+  db: Database.Database,
+  encryptionKey: string,
+  adminSetupToken: string,
+  plex: PlexClient,
+  clientIdentifier: string,
+) {
+  return {
+    async pin(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      const pin = await plex.createPin()
+      // The browser needs this instance's own X-Plex-Client-Identifier to build
+      // the app.plex.tv/auth URL and to echo back in the callback body. It's
+      // the same identifier `pinStatus` below closes over server-side, so the
+      // PIN can never desync from the identifier polling it.
+      return Response.json({ ...pin, clientIdentifier })
+    },
+
+    async pinStatus(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      const url = new URL(req.url)
+      const pinIdParam = url.searchParams.get('pinId')
+      const pinId = pinIdParam ? Number.parseInt(pinIdParam, 10) : NaN
+      if (Number.isNaN(pinId)) return badRequest('invalid_pin', 'pinId is required')
+      const result = await plex.checkPin(pinId, clientIdentifier)
+      return Response.json(result)
+    },
+
+    async resources(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      const url = new URL(req.url)
+      const authToken = url.searchParams.get('authToken')
+      if (!authToken) return badRequest('missing_auth_token', 'authToken is required')
+      const resources = await plex.getResources(authToken)
+      return Response.json(resources)
+    },
+
+    async librarySections(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      const url = new URL(req.url)
+      const serverUrl = url.searchParams.get('serverUrl')
+      const authToken = url.searchParams.get('authToken')
+      if (!serverUrl || !authToken) return badRequest('missing_params', 'serverUrl and authToken are required')
+      const sections = await plex.getLibrarySections(serverUrl, authToken)
+      return Response.json(sections)
+    },
+
+    async callback(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      const {
+        authToken,
+        serverUrl,
+        librarySectionIds,
+        clientIdentifier: linkedClientIdentifier,
+      } = (await req.json()) as {
+        authToken: string
+        serverUrl: string
+        librarySectionIds: string[]
+        clientIdentifier: string
+      }
+      savePlexLink(db, encryptionKey, {
+        clientIdentifier: linkedClientIdentifier,
+        serverUrl,
+        authToken,
+        librarySectionIds,
+        linkedAt: new Date().toISOString(),
+      })
+      return Response.json({ ok: true })
+    },
+
+    async resync(req: Request): Promise<Response> {
+      if (!requireAdmin(req, adminSetupToken)) return new Response(null, { status: 401 })
+      // Actual sync invocation is wired in server/index.ts, which holds the
+      // shared `createLibrarySync` instance — this handler just needs the
+      // admin gate demonstrated and tested here.
+      return Response.json({ triggered: true })
+    },
+  }
+}
+```
+
+(Note: the outer function parameter and the request-body field were both named `clientIdentifier` before this change collided them; the body field is now destructured as `linkedClientIdentifier` to keep "this instance's identifier" and "the identifier the frontend echoed back" visibly distinct — they're expected to be equal in practice, but the code no longer relies on JS shadowing to make that true.)
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run server/http/setup.test.ts`
+Expected: PASS (10 tests)
+
+- [ ] **Step 5: Wire the new routes and the `clientIdentifier` argument into `server/index.ts`**
+
+Two edits to the existing file:
+
+```ts
+// server/index.ts — change:
+  const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex)
+// to:
+  const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex, clientIdentifier)
+```
+
+```ts
+// server/index.ts — change:
+        else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
+        else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
+// to:
+        else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
+        else if (url.pathname === '/api/setup/plex/pin-status') webRes = await setupHandlers.pinStatus(webReq)
+        else if (url.pathname === '/api/setup/plex/resources') webRes = await setupHandlers.resources(webReq)
+        else if (url.pathname === '/api/setup/plex/library-sections') webRes = await setupHandlers.librarySections(webReq)
+        else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
+```
+
+- [ ] **Step 6: Run the full server test suite to confirm nothing broke**
+
+Run: `npx vitest run`
+Expected: PASS — every existing test file plus the extended `server/http/setup.test.ts`.
+
+- [ ] **Step 7: Add the `setup` namespace to both message dictionaries**
+
+Add to `messages/pt-br.json`, as a new top-level key alongside `common`/`createRoom`/etc (keep every existing key untouched):
+
+```json
+  "setup": {
+    "title": "Configuração inicial",
+    "boxOffice": "Bilheteria",
+    "tokenExplainer": "Informe o token de administrador (ADMIN_SETUP_TOKEN) definido nas variáveis de ambiente do servidor.",
+    "tokenLabel": "Token de administrador",
+    "tokenPlaceholder": "Cole o token aqui",
+    "startButton": "Gerar código do Plex",
+    "linkPlexTitle": "Vincular ao Plex",
+    "openPlexButton": "Abrir Plex para autorizar",
+    "waitingForApproval": "Aguardando aprovação…",
+    "cancelButton": "Cancelar",
+    "chooseServerTitle": "Escolha o servidor",
+    "noServersFound": "Nenhum servidor encontrado nesta conta do Plex.",
+    "chooseLibrariesTitle": "Escolha as bibliotecas de filmes",
+    "noMovieLibraries": "Nenhuma biblioteca de filmes encontrada neste servidor.",
+    "finishButton": "Concluir vínculo",
+    "successTitle": "Plex vinculado",
+    "successMessage": "Seu servidor Plex está vinculado. Você já pode criar salas.",
+    "syncNowButton": "Sincronizar agora",
+    "syncingButton": "Sincronizando…",
+    "syncTriggeredToast": "Sincronização iniciada",
+    "genericError": "Algo deu errado. Tente novamente.",
+    "unauthorizedError": "Token de administrador inválido.",
+    "pollTimeoutError": "Tempo esgotado aguardando a autorização. Gere um novo código."
+  }
+```
+
+Add to `messages/en-us.json`, same key set:
+
+```json
+  "setup": {
+    "title": "First-time setup",
+    "boxOffice": "Box office",
+    "tokenExplainer": "Enter the admin token (ADMIN_SETUP_TOKEN) set in the server's environment variables.",
+    "tokenLabel": "Admin token",
+    "tokenPlaceholder": "Paste your token here",
+    "startButton": "Generate Plex code",
+    "linkPlexTitle": "Link your Plex server",
+    "openPlexButton": "Open Plex to authorize",
+    "waitingForApproval": "Waiting for approval…",
+    "cancelButton": "Cancel",
+    "chooseServerTitle": "Choose your server",
+    "noServersFound": "No servers found on this Plex account.",
+    "chooseLibrariesTitle": "Choose your movie libraries",
+    "noMovieLibraries": "No movie libraries found on this server.",
+    "finishButton": "Finish linking",
+    "successTitle": "Plex linked",
+    "successMessage": "Your Plex server is linked. You can create rooms now.",
+    "syncNowButton": "Sync now",
+    "syncingButton": "Syncing…",
+    "syncTriggeredToast": "Sync started",
+    "genericError": "Something went wrong. Try again.",
+    "unauthorizedError": "Invalid admin token.",
+    "pollTimeoutError": "Timed out waiting for authorization. Generate a new code."
+  }
+```
+
+- [ ] **Step 8: Run the dictionary-parity test**
+
+Run: `npx vitest run messages/messages.test.ts`
+Expected: PASS — the generic key-path diff in that test needs no changes to cover the new namespace; it already fails on any future drift between the two files.
+
+- [ ] **Step 9: Write `app/setup/page.tsx`**
+
+```tsx
+// app/setup/page.tsx
+'use client'
+
+import { useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Card, CardContent, CardHeader } from '../../components/ui/card'
+import { Input } from '../../components/ui/input'
+import { Label } from '../../components/ui/label'
+import { Separator } from '../../components/ui/separator'
+import { Skeleton } from '../../components/ui/skeleton'
+
+interface PinResponse {
+  id: number
+  code: string
+  clientIdentifier: string
+}
+
+interface PlexResource {
+  name: string
+  clientIdentifier: string
+  connections: { uri: string }[]
+}
+
+interface LibrarySection {
+  id: string
+  title: string
+  type: string
+}
+
+type Step = 'token' | 'pin' | 'polling' | 'servers' | 'sections' | 'done'
+
+const POLL_INTERVAL_MS = 2000
+// Plex PINs are valid for roughly 15 minutes server-side; 5 minutes of
+// silent client polling is a generous window before asking the owner to
+// just generate a fresh code, rather than polling forever on a PIN that
+// has quietly expired.
+const POLL_TIMEOUT_MS = 5 * 60 * 1000
+
+export default function SetupPage() {
+  return (
+    <Suspense fallback={<main className="p-8 font-mono text-brass">Loading…</main>}>
+      <SetupFlow />
+    </Suspense>
+  )
+}
+
+function SetupFlow() {
+  const t = useTranslations('setup')
+  const searchParams = useSearchParams()
+
+  const [adminToken, setAdminToken] = useState(searchParams.get('token') ?? '')
+  const [step, setStep] = useState<Step>('token')
+  const [pin, setPin] = useState<PinResponse | null>(null)
+  const [authToken, setAuthToken] = useState<string | null>(null)
+  const [resources, setResources] = useState<PlexResource[]>([])
+  const [serverUrl, setServerUrl] = useState<string | null>(null)
+  const [sections, setSections] = useState<LibrarySection[]>([])
+  const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollDeadline = useRef(0)
+
+  function authHeaders(extra?: Record<string, string>): Record<string, string> {
+    return { Authorization: `Bearer ${adminToken}`, ...extra }
+  }
+
+  function stopPolling() {
+    if (pollTimer.current) clearInterval(pollTimer.current)
+    pollTimer.current = null
+  }
+
+  // Belt-and-suspenders: also stop polling if the user navigates away
+  // mid-flow, not just when the flow's own logic calls stopPolling().
+  useEffect(() => () => stopPolling(), [])
+
+  async function requestPin() {
+    setBusy(true)
+    try {
+      const res = await fetch('/api/setup/plex/pin', { headers: authHeaders() })
+      if (res.status === 401) {
+        toast(t('unauthorizedError'))
+        return
+      }
+      if (!res.ok) {
+        toast(t('genericError'))
+        return
+      }
+      const body = (await res.json()) as PinResponse
+      setPin(body)
+      startPolling(body)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function startPolling(activePin: PinResponse) {
+    stopPolling()
+    setStep('polling')
+    pollDeadline.current = Date.now() + POLL_TIMEOUT_MS
+    pollTimer.current = setInterval(async () => {
+      if (Date.now() > pollDeadline.current) {
+        stopPolling()
+        toast(t('pollTimeoutError'))
+        setStep('pin')
+        return
+      }
+      const res = await fetch(`/api/setup/plex/pin-status?pinId=${activePin.id}`, { headers: authHeaders() })
+      if (!res.ok) return // transient failure — keep polling until the deadline
+      const body = (await res.json()) as { authToken: string | null }
+      if (body.authToken) {
+        stopPolling()
+        setAuthToken(body.authToken)
+        await loadResources(body.authToken)
+      }
+    }, POLL_INTERVAL_MS)
+  }
+
+  function cancelPolling() {
+    stopPolling()
+    setStep('pin')
+  }
+
+  async function loadResources(token: string) {
+    const res = await fetch(`/api/setup/plex/resources?authToken=${encodeURIComponent(token)}`, {
+      headers: authHeaders(),
+    })
+    if (!res.ok) {
+      toast(t('genericError'))
+      setStep('pin')
+      return
+    }
+    const body = (await res.json()) as PlexResource[]
+    setResources(body)
+    setStep('servers')
+  }
+
+  async function pickServer(uri: string) {
+    if (!authToken) return
+    setBusy(true)
+    try {
+      const res = await fetch(
+        `/api/setup/plex/library-sections?serverUrl=${encodeURIComponent(uri)}&authToken=${encodeURIComponent(authToken)}`,
+        { headers: authHeaders() },
+      )
+      if (!res.ok) {
+        toast(t('genericError'))
+        return
+      }
+      const body = (await res.json()) as LibrarySection[]
+      setServerUrl(uri)
+      setSections(body)
+      setSelectedSectionIds([])
+      setStep('sections')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function toggleSection(id: string) {
+    setSelectedSectionIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]))
+  }
+
+  async function submitLink() {
+    if (!authToken || !serverUrl || !pin || selectedSectionIds.length === 0) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/setup/plex/callback', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          authToken,
+          serverUrl,
+          librarySectionIds: selectedSectionIds,
+          clientIdentifier: pin.clientIdentifier,
+        }),
+      })
+      if (!res.ok) {
+        toast(t('genericError'))
+        return
+      }
+      setStep('done')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function syncNow() {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/setup/plex/resync', { method: 'POST', headers: authHeaders() })
+      toast(res.ok ? t('syncTriggeredToast') : t('genericError'))
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
+      <h1 className="font-display text-4xl text-marquee">{t('title')}</h1>
+
+      {step === 'token' && (
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+            {t('boxOffice')}
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">{t('tokenExplainer')}</p>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="adminToken">{t('tokenLabel')}</Label>
+              <Input
+                id="adminToken"
+                type="password"
+                value={adminToken}
+                onChange={(e) => setAdminToken(e.target.value)}
+                placeholder={t('tokenPlaceholder')}
+                autoComplete="off"
+              />
+            </div>
+            <Button
+              className="bg-marquee text-ink hover:bg-marquee/90"
+              disabled={adminToken.length === 0 || busy}
+              onClick={() => {
+                setStep('pin')
+                void requestPin()
+              }}
+            >
+              {t('startButton')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {(step === 'pin' || step === 'polling') && pin && (
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+            {t('linkPlexTitle')}
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-4">
+            <p className="font-mono text-3xl tracking-widest text-marquee">{pin.code}</p>
+            <a
+              href={`https://app.plex.tv/auth#?clientID=${encodeURIComponent(pin.clientIdentifier)}&code=${encodeURIComponent(pin.code)}&context%5Bdevice%5D%5Bproduct%5D=PopcornPoll`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full"
+            >
+              <Button className="w-full bg-marquee text-ink hover:bg-marquee/90">{t('openPlexButton')}</Button>
+            </a>
+            {step === 'polling' && (
+              <Badge variant="outline" className="animate-pulse border-brass text-brass">
+                {t('waitingForApproval')}
+              </Badge>
+            )}
+            <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
+              {t('cancelButton')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'servers' && (
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+            {t('chooseServerTitle')}
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {busy && <Skeleton className="h-10 w-full" />}
+            {!busy && resources.length === 0 && (
+              <p className="text-sm text-muted-foreground">{t('noServersFound')}</p>
+            )}
+            {resources.flatMap((resource) =>
+              resource.connections.map((connection) => (
+                <Button
+                  key={connection.uri}
+                  variant="outline"
+                  className="justify-between border-brass text-ticket"
+                  disabled={busy}
+                  onClick={() => pickServer(connection.uri)}
+                >
+                  <span>{resource.name}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{connection.uri}</span>
+                </Button>
+              )),
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'sections' && (
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+            {t('chooseLibrariesTitle')}
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {sections.length === 0 && <p className="text-sm text-muted-foreground">{t('noMovieLibraries')}</p>}
+            {sections.map((section) => (
+              <label key={section.id} className="flex items-center gap-2 text-ticket">
+                <input
+                  type="checkbox"
+                  checked={selectedSectionIds.includes(section.id)}
+                  onChange={() => toggleSection(section.id)}
+                  className="h-4 w-4 accent-marquee"
+                />
+                {section.title}
+              </label>
+            ))}
+            <Separator className="bg-brass/40" />
+            <Button
+              className="bg-marquee text-ink hover:bg-marquee/90"
+              disabled={selectedSectionIds.length === 0 || busy}
+              onClick={submitLink}
+            >
+              {t('finishButton')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'done' && (
+        <Card className="w-full border-2 border-brass bg-velvet">
+          <CardHeader className="font-display text-2xl text-marquee">{t('successTitle')}</CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="text-sm text-ticket">{t('successMessage')}</p>
+            <Button className="bg-marquee text-ink hover:bg-marquee/90" disabled={syncing} onClick={syncNow}>
+              {syncing ? t('syncingButton') : t('syncNowButton')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+    </main>
+  )
+}
+```
+
+Notes on the flow, matched against the real `server/plex/client.ts`:
+- `createPin()` returns only `{ id, code }` — the auth token is never present at creation, so the page always transitions through `polling`, never assumes an immediate token.
+- `checkPin(pinId, clientIdentifier)` returns `{ authToken: string | null }` — the page polls until non-null, exactly the shape `pinStatus` forwards.
+- `getResources` already filters to `provides === 'server' && connections.length > 0` server-side (see `client.ts`), so every `resources` entry rendered here is guaranteed to have at least one connection.
+- `getLibrarySections` already filters to `type === 'movie'`, so every checkbox here is a real movie library, matching the spec's `library_section_ids` selection step.
+- The `app.plex.tv/auth` URL's `clientID`/`code` params are exactly what `createPin`/`checkPin` require (`X-Plex-Client-Identifier` header, matched against the PIN's `id`); `context[device][product]=PopcornPoll` is cosmetic (shown to the user during Plex's own approval screen) and matches the `X-Plex-Product` header `client.ts` already sends on every request.
+- The `<html lang>`/`NextIntlClientProvider` wiring from `app/layout.tsx` already wraps this route (it's not excluded from the root layout), so `useTranslations('setup')` works with no extra provider setup.
+
+- [ ] **Step 10: Fix `README.md`'s setup instructions and the TMDB bullet**
+
+Replace the TMDB bullet in the Requirements list:
+
+```diff
+- - Optionally, a [TMDB API key](https://www.themoviedb.org/settings/api) —
+-   **required**, not optional: besides the opt-in TMDB-extended candidate
+-   source, it's also what lets the app rank your own Plex library by how
+-   well-regarded each title is, rather than picking randomly.
++ - A [TMDB API key](https://www.themoviedb.org/settings/api) — **required**:
++   it's not just for the opt-in TMDB-extended candidate source, it's also
++   what lets the app rank your own Plex library by how well-regarded each
++   title is, rather than picking randomly.
+```
+
+Replace the setup-flow paragraph after the `docker run` block:
+
+```diff
+- Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>` once
+- to link your Plex server.
++ Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>`
++ once to link your Plex server — the token pre-fills the admin-token field
++ (you can also paste it in by hand instead of using the URL). The page
++ walks you through Plex's own PIN-auth flow: it shows a one-time code and
++ a link to `app.plex.tv/auth` to approve it from your Plex account, then
++ lets you pick which of your Plex servers and which of that server's
++ movie libraries to use. Once linked, use the page's "Sync now" button (or
++ wait for the periodic library sync) to pull your library in.
+```
+
+- [ ] **Step 11: Fix `.dockerignore`**
+
+```diff
+  node_modules
+  .next
+  data
+  *.db
+  .git
+  e2e
+  **/*.test.ts
++ .env
+```
+
+- [ ] **Step 12: Prune dev dependencies from the runtime image in `Dockerfile`**
+
+`tsx` (needed at runtime — `CMD ["npx", "tsx", "server/index.ts"]`) is confirmed in `package.json`'s `dependencies`, not `devDependencies`, so pruning is safe.
+
+```diff
+  FROM node:22-slim AS builder
+  WORKDIR /app
+  COPY package.json package-lock.json* ./
+  RUN npm ci
+  COPY . .
+  RUN npm run build
++ RUN npm prune --omit=dev
+```
+
+(Runtime stage's `COPY --from=builder /app/node_modules ./node_modules` is unchanged — it now copies the already-pruned directory. The prune runs *after* `npm run build`, so the build itself still has `tailwindcss`/`postcss`/`typescript`/etc. available.)
+
+- [ ] **Step 13: Run the full suite and typecheck**
+
+Run: `npx vitest run`
+Expected: PASS — every test file, including the extended `server/http/setup.test.ts` and unchanged `messages/messages.test.ts`.
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+- [ ] **Step 14: Commit**
+
+```bash
+git add server/http/setup.ts server/http/setup.test.ts server/index.ts app/setup messages README.md .dockerignore Dockerfile
+git commit -m "feat: /setup UI for the Plex PIN-auth flow, gated pin-status/resources/library-sections routes, deployment cleanup"
+```
+
+---
+
+## Task 31: Pool split-share/genre/validation fixes, sync staleness wiring, and TMDB-only pruning sweep
+
+**Files:**
+- Edit: `server/pool/buildPool.ts`, `server/pool/buildPool.test.ts`
+- Create: `server/tmdb/genres.ts`, `server/tmdb/genres.test.ts`
+- Edit: `server/tmdb/client.ts`, `server/tmdb/client.test.ts`
+- Create: `server/tmdb/fakeClient.ts`, `server/tmdb/fakeClient.test.ts`
+- Edit: `server/ranking/reputation.ts`, `server/ranking/reputation.test.ts`
+- Edit: `server/sync/librarySync.ts`, `server/sync/librarySync.test.ts`
+- Create: `server/sync/tmdbPrune.ts`, `server/sync/tmdbPrune.test.ts`
+- Edit: `server/room/activeActions.ts`, `server/room/activeActions.test.ts`
+- Edit: `server/ws/router.ts`, `server/ws/router.test.ts`
+- Edit: `server/ws/server.ts`, `server/ws/server.test.ts`
+- Edit: `server/http/rooms.ts`, `server/http/rooms.test.ts`
+- Edit: `server/index.ts`
+
+**Interfaces:**
+- Consumes: `pruneStaleTmdbOnlyRows` (`server/db/movies.ts`, Task 3); `RoomStore.all` (Task 15); `createLibrarySync` (Task 8); `TmdbClient`, `TmdbMovie` (Task 7); `computeCAndM`, `reputationScore` (Task 10)
+- Produces:
+  ```ts
+  // server/tmdb/genres.ts
+  function resolveGenreId(genre: string | undefined): number | undefined
+
+  // server/tmdb/fakeClient.ts
+  function createFakeTmdbClient(): TmdbClient
+
+  // server/sync/tmdbPrune.ts
+  interface TmdbPruneWorker { start(): void; stop(): void; runOnce(): number }
+  function createTmdbPruneWorker(db: Database.Database, store: RoomStore): TmdbPruneWorker
+  const TMDB_ONLY_STALE_DAYS = 30
+
+  // server/sync/librarySync.ts (added to the existing return shape)
+  function lastSyncAt(): number | null
+
+  // server/room/activeActions.ts
+  interface SyncWaiter { waitForCurrent(): Promise<void> }
+  function startRoom(store, code, callerIsHost, db, tmdb, librarySync: SyncWaiter): Promise<ActionResult<...>>
+
+  // server/ws/router.ts
+  function handleMessage(store, db, tmdb, librarySync: SyncWaiter, state, message): Promise<RouterOutput>
+
+  // server/ws/server.ts
+  function attachWebSocketServer(httpServer, store, db, tmdb, librarySync: SyncWaiter, config): WebSocketServer
+
+  // server/http/rooms.ts
+  function createRoomsHandler(store, db, encryptionKey, librarySync: ReturnType<typeof createLibrarySync>): (req: Request) => Promise<Response>
+  ```
+
+**⚠️ CROSS-TASK CONFLICT NOTES — read this before touching any file below.** This task runs sixth of seven in this batch (after 26, 27, 28, 29, 30), and every file it lists has already been modified by at least one earlier task. **Every code listing in this task's steps is illustrative of the shape the file needs to end up in — never apply it as a literal find-and-replace or wholesale file rewrite without first reading the actual current file and hand-merging.** Four specific, high-severity conflicts to watch for:
+
+1. **`server/http/rooms.ts` (Step 6) — Task 29 already added Origin validation, a per-IP rate limiter, and the `MAX_CONCURRENT_ROOMS` cap check, with `createRoomsHandler`'s signature already extended to `(store, db, encryptionKey, config: AppConfig)`.** This task's own draft below shows `createRoomsHandler(store, db, encryptionKey, librarySync)` — a 4-parameter signature that OMITS `config`. Applying that literally would delete Task 29's entire security-hardening work. The real merged signature must be `createRoomsHandler(store, db, encryptionKey, config: AppConfig, librarySync: ReturnType<typeof createLibrarySync>)` (or an equivalent options-object form if that reads cleaner), with the Origin check, rate limit, and room cap (Task 29) AND the TMDB-filter validation and sync-staleness logic (this task) all present in the same function, in a sensible order (Origin/rate-limit/cap checks first, since they're cheap and should short-circuit before any DB/filter work). Update `server/http/rooms.test.ts` to cover both sets of behavior in one file — merge this task's test additions into whatever Task 29 already left there, don't replace it.
+2. **`server/room/activeActions.ts`'s `startRoom` (Step 8) — Task 26 already added a `degraded: boolean` field to its return object.** This task's `librarySync`/`waitForCurrent()` addition must preserve that field.
+3. **`server/ws/router.ts`'s `case 'start':` (Step 9) and `server/ws/server.ts` (Step 9) — Task 26 already added `degraded_to_plex_only` notice-push logic to the `'start'` case, and Task 27 already added broadcast/shutdown/socket-tracking logic to `server/ws/server.ts`.** Thread the new `librarySync` parameter through without touching either of those additions.
+4. **`server/index.ts` (Step 17) — by execution time this file already has real, load-bearing changes from Task 26 (`safeGetPlexLink`/`DecryptionError` guard), Task 27 (broadcast/shutdown socket-tracking), Task 29 (`config`/`remoteAddress` wiring into `roomsHandler`), and Task 30 (`clientIdentifier` argument to `setupHandlers`, three new setup routes).** The full-file listing in Step 17 below is illustrative of what needs to exist ONCE ALL SEVEN TASKS ARE DONE — it is emphatically NOT something to paste over the real file at this point in execution, or it would silently revert four other tasks' work. Treat it as a checklist of specific additions to make (fake-TMDB-client selection, `tmdbPrune` worker start/stop wired into `shutdown()`, `librarySync` threaded into `createRoomsHandler` and `attachWebSocketServer`) and apply each one, individually, to the real current file.
+
+If anything in a step below conflicts with what you actually find in a file, the real file wins — adapt the step's intent (what behavior needs to exist) to the file's actual current shape, and note the deviation in your report.
+
+**Signature Ledger (established by Task 27, which ran before this task):** `startRoom`, `handleMessage`, and `attachWebSocketServer` were already extended once by Task 27 with an optional trailing callback (`notifyStarting?`/`onBroadcast?` — both LAST parameter) and `attachWebSocketServer`'s return type already changed from `WebSocketServer` to `WsServerHandle`. This task's own `librarySync: SyncWaiter` parameter for all three functions goes RIGHT AFTER `tmdb`, BEFORE that trailing optional callback — i.e. `startRoom(store, code, callerIsHost, db, tmdb, librarySync, notifyStarting?)`, `handleMessage(store, db, tmdb, librarySync, state, message, onBroadcast?)`, `attachWebSocketServer(httpServer, store, db, tmdb, librarySync, config): WsServerHandle`. Every "Produces" listing and code snippet in this task's own steps below that shows a different order (written before this ledger existed) is superseded by this note — insert `librarySync` in the position given here, not wherever an individual step's illustrative code happens to put it. `createRoomsHandler`'s merged signature (config from Task 29, librarySync from this task) is `createRoomsHandler(store, db, encryptionKey, config, librarySync): (req: Request, remoteAddress: string | undefined) => Promise<Response>` — `remoteAddress` on the returned function is Task 29's, keep it even though this task's own Step 6 draft shows a single-argument `(req: Request)` return type.
+
+This task fixes findings I7, I8, and I10 (plus the minor cleanup items) from the whole-branch code review. Each fix below states the design decision made and why, per the review's open questions.
+
+---
+
+- [ ] **Step 1: Fix the inverted Plex/TMDB pool share (I7) — write the regression test first**
+
+Spec, quoted exactly: *"For a TMDB-extended session, up to 70% of the cap is targeted from the Plex sample and the remainder from TMDB discover results"* (design spec, Candidate pool & deck ordering section). The current code computes `targetPlexCount = Math.round(poolCap * (1 - TMDB_SHARE))` with `TMDB_SHARE = 0.7`, which gives Plex 30% and TMDB 70% — backwards.
+
+Add to `server/pool/buildPool.test.ts` (append inside the existing `describe('buildPool', ...)` block, after the `'backfills from the other source...'` test):
+
+```ts
+  it('targets ~70% of the cap from Plex and the remainder from TMDB, not the other way around — regression for an inverted split', async () => {
+    seedPlexRows(200) // plenty of Plex supply so Plex is never the shortfall source
+    const tmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockResolvedValue(
+        Array.from({ length: 100 }, (_, i) => ({
+          tmdbId: 5000 + i,
+          title: `TMDB ${i}`,
+          overview: '',
+          posterPath: null,
+          year: 2010,
+          genreIds: [],
+          rating: 7,
+          voteCount: 1000,
+        })),
+      ),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
+    const plexCount = result.pool.filter((e) => e.posterSource === 'plex').length
+    const tmdbCount = result.pool.filter((e) => e.posterSource === 'tmdb').length
+    expect(plexCount).toBeGreaterThan(tmdbCount) // ~70 vs ~30, not ~30 vs ~70
+    expect(plexCount).toBeGreaterThanOrEqual(65)
+    expect(plexCount).toBeLessThanOrEqual(75)
+  })
+```
+
+Run: `npx vitest run server/pool/buildPool.test.ts` — expect this new test to FAIL against current code (it'll assert `plexCount > tmdbCount` but get roughly the reverse).
+
+- [ ] **Step 2: Fix the constant and rename it for clarity**
+
+In `server/pool/buildPool.ts`, replace the confusingly-named `TMDB_SHARE` (whose 0.7 value the surrounding formula then inverted — the exact bug) with a directly-applied `PLEX_SHARE`:
+
+```ts
+const PLEX_SHARE = 0.7 // spec: "up to 70% of the cap is targeted from the Plex sample and the remainder from TMDB discover results"
+```
+
+Replace:
+```ts
+  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(poolCap * (1 - TMDB_SHARE)) : poolCap
+  let targetTmdbCount = candidateSource === 'plex+tmdb' ? poolCap - targetPlexCount : 0
+```
+with:
+```ts
+  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(poolCap * PLEX_SHARE) : poolCap
+  let targetTmdbCount = candidateSource === 'plex+tmdb' ? poolCap - targetPlexCount : 0
+```
+
+Run: `npx vitest run server/pool/buildPool.test.ts` — expect PASS (6 tests, including the Step 1 regression test).
+
+---
+
+- [ ] **Step 3: TMDB genre resolution — create `server/tmdb/genres.ts` and its test**
+
+Decision: hardcode TMDB's fixed genre-name→id mapping as a constant — it's a small (19-entry), essentially-never-changing reference list, and hardcoding avoids a network dependency and cache-invalidation logic for something that doesn't need it. Verified against TMDB's published `/genre/movie/list` id set.
+
+`server/tmdb/genres.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { resolveGenreId } from './genres'
+
+describe('resolveGenreId', () => {
+  it('resolves a canonical TMDB genre name case-insensitively, trimmed', () => {
+    expect(resolveGenreId('Comedy')).toBe(35)
+    expect(resolveGenreId('  drama ')).toBe(18)
+  })
+
+  it('resolves common alternate spellings to their canonical TMDB id', () => {
+    expect(resolveGenreId('Sci-Fi')).toBe(878)
+    expect(resolveGenreId('sci fi')).toBe(878)
+  })
+
+  it('returns undefined for an unrecognized or empty genre', () => {
+    expect(resolveGenreId('Not A Genre')).toBeUndefined()
+    expect(resolveGenreId('')).toBeUndefined()
+    expect(resolveGenreId(undefined)).toBeUndefined()
+  })
+})
+```
+
+Run: `npx vitest run server/tmdb/genres.test.ts` — expect FAIL (`server/tmdb/genres.ts` doesn't exist).
+
+`server/tmdb/genres.ts`:
+```ts
+// TMDB's fixed movie genre list (GET /genre/movie/list) — small and stable
+// enough to hardcode rather than add a network round-trip/cache for a
+// reference list that essentially never changes.
+const TMDB_GENRE_IDS: Record<string, number> = {
+  action: 28,
+  adventure: 12,
+  animation: 16,
+  comedy: 35,
+  crime: 80,
+  documentary: 99,
+  drama: 18,
+  family: 10751,
+  fantasy: 14,
+  history: 36,
+  horror: 27,
+  music: 10402,
+  mystery: 9648,
+  romance: 10749,
+  'science fiction': 878,
+  'tv movie': 10770,
+  thriller: 53,
+  war: 10752,
+  western: 37,
+}
+
+// Common alternate spellings that don't exactly match TMDB's own genre name
+// (e.g. the fake Plex fixture library and many real Plex agents use "Sci-Fi")
+// but unambiguously mean the same genre.
+const ALIASES: Record<string, string> = {
+  'sci-fi': 'science fiction',
+  scifi: 'science fiction',
+  'sci fi': 'science fiction',
+}
+
+export function resolveGenreId(genre: string | undefined): number | undefined {
+  if (!genre) return undefined
+  const key = genre.trim().toLowerCase()
+  if (!key) return undefined
+  const canonical = ALIASES[key] ?? key
+  return TMDB_GENRE_IDS[canonical]
+}
+```
+
+Run: `npx vitest run server/tmdb/genres.test.ts` — expect PASS (3 tests).
+
+- [ ] **Step 4: Wire genre resolution into `buildPool`, and dedupe TMDB discover results**
+
+`discoverMovies`'s real signature (`server/tmdb/client.ts`) wants `genreId?: number`; `buildPool` currently calls it with only `{yearMin, yearMax, ratingMin}`, dropping `filters.genre` (a free-text string from `PoolFilters`/`TmdbFilters`) entirely — a real type/behavior mismatch. The Plex-side genre filter (`findEligiblePlexRows` in `server/db/movies.ts`, a SQL `LIKE` against Plex's own free-text genre strings) is unaffected and stays free text — Plex has no fixed genre enum, so there's nothing to resolve there.
+
+Add three more tests to `server/pool/buildPool.test.ts`:
+
+```ts
+  it('resolves the free-text genre filter into a numeric TMDB genre id before calling discoverMovies', async () => {
+    seedPlexRows(10)
+    const discoverMovies = vi.fn().mockResolvedValue([])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Sci-Fi' }, 1)
+    expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: 878 }), expect.any(Number))
+  })
+
+  it('omits genreId (rather than failing) when the free-text genre has no TMDB mapping', async () => {
+    seedPlexRows(10)
+    const discoverMovies = vi.fn().mockResolvedValue([])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Not A Real Genre' }, 1)
+    expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: undefined }), expect.any(Number))
+  })
+
+  it('dedupes duplicate tmdbIds within a single discover call before resolving rows', async () => {
+    seedPlexRows(2)
+    const dup = {
+      tmdbId: 42, title: 'Dup', overview: '', posterPath: null, year: 2000, genreIds: [], rating: 7, voteCount: 1000,
+    }
+    const discoverMovies = vi.fn().mockResolvedValue([dup, dup])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
+    expect(result.pool.filter((e) => e.title === 'Dup')).toHaveLength(1)
+  })
+```
+
+Run: `npx vitest run server/pool/buildPool.test.ts` — expect these 3 new tests to FAIL.
+
+In `server/pool/buildPool.ts`, add imports:
+```ts
+import { resolveGenreId } from '../tmdb/genres'
+import type { TmdbMovie } from '../tmdb/client'
+```
+
+Add a small dedupe helper (near `resolveTmdbCandidatesIntoRows`):
+```ts
+function dedupeByTmdbId(movies: TmdbMovie[]): TmdbMovie[] {
+  const seen = new Set<number>()
+  const deduped: TmdbMovie[] = []
+  for (const m of movies) {
+    if (seen.has(m.tmdbId)) continue
+    seen.add(m.tmdbId)
+    deduped.push(m)
+  }
+  return deduped
+}
+```
+
+**Note: if Task 26 (crash-hardening) already wrapped the TMDB discover call in a try/catch (it does — see that task's `degraded` fallback), apply the `resolveGenreId`/`dedupeByTmdbId` changes inside that same try block, on the real current discover call, not as a separate unguarded call.**
+
+Replace the discover call inside `buildPool` (merge onto whatever Task 26 left there):
+```ts
+  let tmdbRows: MovieRow[] = []
+  if (candidateSource === 'plex+tmdb') {
+    const discovered = await tmdb.discoverMovies(
+      {
+        genreId: resolveGenreId(filters.genre),
+        yearMin: filters.yearMin,
+        yearMax: filters.yearMax,
+        ratingMin: filters.ratingMin,
+      },
+      TMDB_DISCOVER_PAGE_CAP,
+    )
+    tmdbRows = await resolveTmdbCandidatesIntoRows(db, dedupeByTmdbId(discovered))
+  }
+```
+
+Run: `npx vitest run server/pool/buildPool.test.ts` — expect PASS (9 tests total, plus whatever Task 26 already added).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add server/pool/buildPool.ts server/pool/buildPool.test.ts server/tmdb/genres.ts server/tmdb/genres.test.ts
+git commit -m "fix: correct inverted Plex/TMDB pool split, resolve genre filter into TMDB id"
+```
+
+---
+
+- [ ] **Step 6: TMDB filter input validation — `server/http/rooms.ts` — MERGE onto Task 29's Origin/rate-limit/cap work, do not replace it**
+
+Spec, Input validation section, quoted exactly: *"TMDB filters: genre ids validated against TMDB's known list; year and rating (0-10, TMDB's scale) clamped to sane bounds."*
+
+Decision on genre: **ignore an unrecognized genre, don't reject the whole request.** `filters.genre` is also used verbatim as the Plex-side `LIKE` filter (`findEligiblePlexRows`), which has no fixed enum — a Plex library's own genre string can be a perfectly valid Plex-only filter while having no TMDB match. `resolveGenreId` (Step 3/4) already silently omits the TMDB-side `genreId` when there's no match, which is exactly the "ignore" behavior for the TMDB-facing half of the spec sentence.
+
+Decision on year range: individual bounds are clamped silently (no error), but `yearMin > yearMax` after clamping is rejected outright.
+
+**Read the real current `server/http/rooms.ts` first — it already has Task 29's Origin check, rate-limit bucket, and `MAX_CONCURRENT_ROOMS` cap check, with a `config: AppConfig` 4th parameter. This task ADDS a `librarySync` parameter and the filter-validation/staleness-sync logic below to that same function — it does not replace Task 29's checks.** The illustrative rewrite below shows only the filter-validation and staleness-sync pieces layered onto a plain, pre-Task-29 handler shape; when you actually apply it, keep every one of Task 29's existing checks (Origin, rate limit, cap) in place, in their existing order, before this task's new checks run.
+
+Extend `server/http/rooms.test.ts` — do not replace the whole file; add a real `db` fixture (validation now needs to query it) and a `fakeLibrarySync` helper to whatever Task 29 already put there:
+
+```ts
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { openDb } from '../db'
+// ...(keep every import Task 29's version of this file already has)
+import type { createLibrarySync } from '../sync/librarySync'
+
+let db: Database.Database
+let dir: string
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'popcornpoll-rooms-'))
+  db = openDb(dir)
+})
+
+afterEach(() => {
+  db.close()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+function fakeLibrarySync(
+  overrides: Partial<ReturnType<typeof createLibrarySync>> = {},
+): ReturnType<typeof createLibrarySync> {
+  return {
+    run: vi.fn().mockResolvedValue({ runId: 1, itemCount: 0 }),
+    isRunning: vi.fn().mockReturnValue(false),
+    waitForCurrent: vi.fn().mockResolvedValue(undefined),
+    lastSyncAt: vi.fn().mockReturnValue(Date.now()),
+    ...overrides,
+  } as ReturnType<typeof createLibrarySync>
+}
+```
+
+Then add these cases (adapting each `createRoomsHandler(...)` call to whatever parameter order the real, Task-29-merged signature actually ends up as — `db` and `fakeLibrarySync()` both need to be passed alongside `config`):
+
+```ts
+  it('rejects tmdbFilters with yearMin > yearMax', async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, db, 'key', config, fakeLibrarySync())
+    const res = await handler(
+      createRoomRequest({
+        candidateSource: 'plex+tmdb',
+        matchThreshold: { kind: 'all' },
+        tmdbFilters: { yearMin: 2020, yearMax: 2000 },
+      }),
+      '127.0.0.1',
+    )
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error.code).toBe('invalid_filters')
+  })
+
+  it("clamps an out-of-range ratingMin to TMDB's 0-10 scale instead of rejecting", async () => {
+    const store = createRoomStore()
+    const handler = createRoomsHandler(store, db, 'key', config, fakeLibrarySync())
+    const res = await handler(
+      createRoomRequest({ candidateSource: 'plex+tmdb', matchThreshold: { kind: 'all' }, tmdbFilters: { ratingMin: 99 } }),
+      '127.0.0.1',
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('blocks room creation on a cold cache until the first sync completes', async () => {
+    const store = createRoomStore()
+    let responseResolved = false
+    let resolveRun: (v: { runId: number; itemCount: number }) => void = () => {}
+    const gate = new Promise<{ runId: number; itemCount: number }>((resolve) => {
+      resolveRun = resolve
+    })
+    const run = vi.fn().mockReturnValue(gate)
+    const librarySync = fakeLibrarySync({ run })
+    const handler = createRoomsHandler(store, db, 'key', config, librarySync)
+
+    const pending = handler(createRoomRequest(validBody), '127.0.0.1').then((res) => {
+      responseResolved = true
+      return res
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(responseResolved).toBe(false)
+    expect(run).toHaveBeenCalledTimes(1)
+
+    resolveRun({ runId: 1, itemCount: 0 })
+    const res = await pending
+    expect(responseResolved).toBe(true)
+    expect(res.status).toBe(200)
+  })
+
+  it('does not await a sync when the library is already populated and fresh', async () => {
+    db.prepare(
+      `INSERT INTO movies (plex_rating_key, title, poster_source, in_library, cached_at) VALUES ('pk-1', 'X', 'plex', 1, '2026-01-01')`,
+    ).run()
+    const store = createRoomStore()
+    const run = vi.fn().mockResolvedValue({ runId: 1, itemCount: 1 })
+    const librarySync = fakeLibrarySync({ run, lastSyncAt: vi.fn().mockReturnValue(Date.now()) })
+    const handler = createRoomsHandler(store, db, 'key', config, librarySync)
+    const res = await handler(createRoomRequest(validBody), '127.0.0.1')
+    expect(res.status).toBe(200)
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('fire-and-forget triggers a sync when the library is populated but stale (>6h)', async () => {
+    db.prepare(
+      `INSERT INTO movies (plex_rating_key, title, poster_source, in_library, cached_at) VALUES ('pk-1', 'X', 'plex', 1, '2026-01-01')`,
+    ).run()
+    const store = createRoomStore()
+    const run = vi.fn().mockResolvedValue({ runId: 2, itemCount: 1 })
+    const staleTimestamp = Date.now() - 7 * 60 * 60 * 1000
+    const librarySync = fakeLibrarySync({ run, lastSyncAt: vi.fn().mockReturnValue(staleTimestamp) })
+    const handler = createRoomsHandler(store, db, 'key', config, librarySync)
+    const res = await handler(createRoomRequest(validBody), '127.0.0.1')
+    expect(res.status).toBe(200)
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+```
+
+Run: `npx vitest run server/http/rooms.test.ts` — expect these new cases to FAIL (signature mismatch, `invalid_filters` doesn't exist yet, staleness logic doesn't exist yet); Task 29's existing Origin/rate-limit/cap tests should still be READ (not broken) once the merge is applied correctly.
+
+Now merge into `server/http/rooms.ts` (real current file already has Task 29's Origin/rate-limit/cap — add to it, don't replace):
+
+```ts
+import type Database from 'better-sqlite3'
+// ...(keep every import Task 29's version already has: AppConfig, createTokenBucket, getClientIp, isValidThreshold, MAX_CONCURRENT_ROOMS, RoomStore, CandidateSource/MatchThreshold/TmdbFilters)
+import type { createLibrarySync } from '../sync/librarySync'
+
+// Spec: sync procedure is "triggered automatically if stale >6h at room creation".
+const SYNC_STALE_MS = 6 * 60 * 60 * 1000
+// 1888: Roundhay Garden Scene, the earliest surviving motion picture — a sane
+// lower bound. Upper bound allows near-future/announced titles TMDB may list.
+const MIN_YEAR = 1888
+const MAX_RATING = 10 // TMDB's vote_average scale
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
+function numOrUndefined(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+function validateTmdbFilters(raw: TmdbFilters): { ok: true; filters: TmdbFilters } | { ok: false } {
+  const maxYear = new Date().getFullYear() + 1
+  const filters: TmdbFilters = { genre: raw.genre }
+
+  const yearMin = numOrUndefined(raw.yearMin)
+  const yearMax = numOrUndefined(raw.yearMax)
+  if (yearMin !== undefined) filters.yearMin = clamp(Math.trunc(yearMin), MIN_YEAR, maxYear)
+  if (yearMax !== undefined) filters.yearMax = clamp(Math.trunc(yearMax), MIN_YEAR, maxYear)
+  if (filters.yearMin !== undefined && filters.yearMax !== undefined && filters.yearMin > filters.yearMax) {
+    return { ok: false }
+  }
+
+  const ratingMin = numOrUndefined(raw.ratingMin)
+  if (ratingMin !== undefined) filters.ratingMin = clamp(ratingMin, 0, MAX_RATING)
+
+  // Genre stays free text here on purpose — see the design-decision note above.
+  return { ok: true, filters }
+}
+
+// createRoomsHandler's real signature now carries BOTH Task 29's config
+// (Origin/rate-limit) AND this task's librarySync (staleness sync) —
+// merge this function's body onto Task 29's existing implementation,
+// keeping its Origin/rate-limit/cap checks first, then add:
+export function createRoomsHandler(
+  store: RoomStore,
+  db: Database.Database,
+  _encryptionKey: string,
+  config: AppConfig,
+  librarySync: ReturnType<typeof createLibrarySync>,
+): (req: Request, remoteAddress: string | undefined) => Promise<Response> {
+  // ...(keep Task 29's rateLimitBucket declaration and every existing check
+  // it added — Origin, rate limit, cap — unchanged, before the additions below)
+
+  return async (req, remoteAddress) => {
+    // ...(Task 29's Origin check, rate-limit check, body-parsing, and
+    // matchThreshold validation all run first, unchanged)
+
+    const filterResult = validateTmdbFilters(parsed.tmdbFilters ?? {})
+    if (!filterResult.ok) {
+      return Response.json(
+        { error: { code: 'invalid_filters', message: 'yearMin must be <= yearMax' } },
+        { status: 400 },
+      )
+    }
+
+    // Spec (Library metadata cache, Sync procedure): a cold cache blocks room
+    // creation on the first sync so a client never creates a room against an
+    // empty library; a merely-stale (>6h) cache instead fires the sync in the
+    // background without blocking creation.
+    const movieCount = (db.prepare('SELECT COUNT(*) AS n FROM movies').get() as { n: number }).n
+    if (movieCount === 0) {
+      try {
+        await librarySync.run()
+      } catch {
+        // Swallowed: a Plex outage shouldn't 500 room creation. The room is
+        // still created against a (still-empty) cache, and Start's existing
+        // pool_too_small failure is what surfaces the real problem to the
+        // host.
+      }
+    } else if (!librarySync.isRunning()) {
+      const lastSync = librarySync.lastSyncAt()
+      if (lastSync === null || Date.now() - lastSync > SYNC_STALE_MS) {
+        void librarySync.run() // fire-and-forget — creation does NOT await a staleness-triggered sync
+      }
+    }
+
+    // ...(Task 29's MAX_CONCURRENT_ROOMS cap check runs here — before or
+    // after the sync trigger above, your call, but it must still run)
+
+    const { code, hostClaimToken } = store.create(
+      parsed.matchThreshold,
+      parsed.candidateSource,
+      filterResult.filters, // was parsed.tmdbFilters ?? {} — now the validated/clamped version
+    )
+    return Response.json({ roomCode: code, hostClaimToken })
+  }
+}
+```
+
+Add `'invalid_filters'` to the `ErrorCode` union in `server/room/actions.ts` (append after whatever Task 26/29 already added — `internal_error`, `rate_limited`, `room_cap_reached`, `forbidden_origin`).
+
+Run: `npx vitest run server/http/rooms.test.ts` — expect PASS (all of Task 29's tests plus this task's new ones).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add server/http/rooms.ts server/http/rooms.test.ts server/room/actions.ts
+git commit -m "feat: validate TMDB filters at room creation, trigger cold-cache/stale library sync"
+```
+
+---
+
+- [ ] **Step 8: `librarySync.waitForCurrent()` — thread it into pool construction**
+
+`waitForCurrent` (Task 8) already exists but has no caller. Per spec: *"Pool construction (at `lobby -> starting`), however, **does** await an in-flight sync if one is running... otherwise a pool could be built from a half-synced library."* Trace: `ws/server.ts`'s `'message'` handler calls `handleMessage(...)` → `ws/router.ts`'s `'start'` case calls `startRoom(...)` → `server/room/activeActions.ts`. None of these currently carry `librarySync`, so it must be threaded through all three call sites down from `server/index.ts`.
+
+First, add `lastSyncAt()` to `createLibrarySync`'s return value (needed by Step 6 too). In `server/sync/librarySync.ts`, add a module-scoped var and set it on successful completion — read the real current `doRun`/return-object shape first and add `lastCompletedAt`/`lastSyncAt()` to it without disturbing anything else:
+
+```ts
+let lastCompletedAt: number | null = null
+// ...inside doRun(), right before its final return:
+lastCompletedAt = Date.now()
+// ...in the returned object, alongside run/isRunning/waitForCurrent:
+lastSyncAt() {
+  return lastCompletedAt
+},
+```
+
+Add a test to `server/sync/librarySync.test.ts` (append to `describe('createLibrarySync', ...)`):
+
+```ts
+  it('lastSyncAt reflects the completion time of the most recent successful run, null before any run', async () => {
+    const plex: Partial<PlexClient> = {
+      getLibrarySections: vi.fn().mockResolvedValue([{ id: '1', title: 'Movies', type: 'movie' }]),
+      getLibraryItems: vi.fn().mockResolvedValue([]),
+    }
+    const tmdb: Partial<TmdbClient> = { findByImdbId: vi.fn(), getMovieDetails: vi.fn() }
+    const sync = createLibrarySync({ db, plex: plex as PlexClient, tmdb: tmdb as TmdbClient, encryptionKey: KEY })
+    expect(sync.lastSyncAt()).toBeNull()
+    const before = Date.now()
+    await sync.run()
+    expect(sync.lastSyncAt()).toBeGreaterThanOrEqual(before)
+  })
+```
+
+Run: `npx vitest run server/sync/librarySync.test.ts` — expect PASS (new test included).
+
+**Read the real current `server/room/activeActions.ts` — it already has Task 26's `degraded` field. Add `librarySync: SyncWaiter` as a new parameter and `await librarySync.waitForCurrent()` right after the synchronous `'starting'` flip and before `buildPool` is called, preserving everything else (including Task 26's `degraded` field and, if Task 32 has somehow already left its mark — it hasn't, Task 32 runs last — any exclusion-timing changes) exactly as-is:**
+
+```ts
+export interface SyncWaiter {
+  waitForCurrent(): Promise<void>
+}
+```
+
+Add the `librarySync: SyncWaiter` parameter to `startRoom`'s signature, and insert:
+
+```ts
+  // Spec: pool construction awaits an in-flight sync if one is running, using
+  // the same single-flight promise the sync module already holds — otherwise
+  // a pool could be built from a half-synced library, mixing already-removed
+  // and not-yet-added titles. Room *creation* deliberately does NOT await a
+  // staleness-triggered sync (see server/http/rooms.ts) — only Start does.
+  await librarySync.waitForCurrent()
+```
+
+right after `room.status = 'starting'` and before `const result = await buildPool(...)`.
+
+Update `server/room/activeActions.test.ts`:
+1. Add the import and a no-op stub near the existing `noOpTmdb`:
+```ts
+import { startRoom, swipeAction, type SyncWaiter } from './activeActions'
+```
+```ts
+const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
+```
+2. Update every `startRoom(...)` call site to pass `noOpLibrarySync` as the new final argument.
+
+Run: `npx vitest run server/room/activeActions.test.ts` — expect PASS (all existing tests, now passing the stub, plus Task 26's `degraded`-related tests still passing unchanged).
+
+- [ ] **Step 9: Thread `SyncWaiter` through the WS router and server — merge onto Task 26's notice-push logic and Task 27's broadcast/shutdown logic**
+
+`server/ws/router.ts` — **read the real current `case 'start':` block first; it already has Task 26's `degraded_to_plex_only` notice-push and the `toParticipant` next_card delivery.** Add the `librarySync: SyncWaiter` parameter to `handleMessage`'s signature (import `type SyncWaiter` from `../room/activeActions`), and pass it through to the existing `startRoom(...)` call inside `case 'start':` — do not otherwise change that case block's structure.
+
+`server/ws/server.ts` — **read the real current file first; it already has Task 27's broadcast helper, disconnect/heartbeat-timeout broadcasting, and shutdown socket-tracking, plus (from Task 29) `getClientIp` imported from `../rateLimit` instead of defined locally.** Add a `librarySync: SyncWaiter` parameter to `attachWebSocketServer`'s signature (import `type SyncWaiter` from `../room/activeActions`), and pass it through to the existing `handleMessage(...)` call inside the `ws.on('message', ...)` handler — do not otherwise change that handler's structure (including whatever try/catch Task 26 already wrapped it in).
+
+Update the test files' call sites — add a `noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }` stub to `server/ws/router.test.ts` and `server/ws/server.test.ts` (near their existing `noOpTmdb`), and thread it into every `handleMessage(...)` / `attachWebSocketServer(...)` call site in each file, matching whatever parameter order the real, already-merged signatures end up having after Tasks 26/27/29 (read the actual current call sites before editing — a blind sed substitution risks silently missing a site those tasks already changed the shape of).
+
+Run: `npx vitest run server/ws/router.test.ts server/ws/server.test.ts` — expect PASS (all existing tests, including everything Tasks 26/27/29 already added to these two files).
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add server/sync/librarySync.ts server/sync/librarySync.test.ts server/room/activeActions.ts server/room/activeActions.test.ts server/ws/router.ts server/ws/router.test.ts server/ws/server.ts server/ws/server.test.ts
+git commit -m "feat: pool construction awaits an in-flight library sync before building the pool"
+```
+
+---
+
+- [ ] **Step 11: TMDB-only row pruning sweep — `server/sync/tmdbPrune.ts`**
+
+`pruneStaleTmdbOnlyRows` (Task 3) has no production caller. It needs `store.all()` to compute the live-pool exclusion set (spec: *"except any row whose `id` is referenced by a currently-live room's pool"*), a dependency the existing `enrichment.ts` worker doesn't have. This gets its own small worker module, mirroring `enrichment.ts`'s `start()`/`stop()`/`runOnce()` shape (which by this point in execution already has Task 26's try/catch-per-tick hardening — mirror that pattern here too, don't skip it), wired independently in `server/index.ts`.
+
+`server/sync/tmdbPrune.test.ts`:
+```ts
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { openDb } from '../db'
+import { findByTmdbId, upsertTmdbOnlyRow } from '../db/movies'
+import { createRoomStore } from '../room/roomStore'
+import { createTmdbPruneWorker, TMDB_ONLY_STALE_DAYS } from './tmdbPrune'
+import type Database from 'better-sqlite3'
+
+let dir: string
+let db: Database.Database
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'popcornpoll-prune-'))
+  db = openDb(dir)
+})
+
+afterEach(() => {
+  db.close()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+describe('createTmdbPruneWorker', () => {
+  it('runOnce deletes tmdb-only rows unused for more than the stale-days cutoff', () => {
+    const stale = upsertTmdbOnlyRow(db, {
+      tmdbId: 1,
+      imdbId: null,
+      title: 'Old',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2000,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: isoDaysAgo(TMDB_ONLY_STALE_DAYS + 1),
+    })
+    const store = createRoomStore()
+    const worker = createTmdbPruneWorker(db, store)
+    expect(worker.runOnce()).toBe(1)
+    expect(findByTmdbId(db, stale.tmdbId!)).toBeNull()
+  })
+
+  it('runOnce keeps a stale row if its id is referenced by a currently-live room pool', () => {
+    const stale = upsertTmdbOnlyRow(db, {
+      tmdbId: 2,
+      imdbId: null,
+      title: 'Old but live',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2000,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: isoDaysAgo(TMDB_ONLY_STALE_DAYS + 1),
+    })
+    const store = createRoomStore()
+    const { code } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    const room = store.get(code)!
+    room.pool = [
+      {
+        movieId: stale.id,
+        title: stale.title,
+        posterPath: null,
+        posterSource: 'tmdb',
+        overview: null,
+        genres: [],
+        year: null,
+        inLibrary: false,
+        rating: null,
+        voteCount: null,
+      },
+    ]
+    const worker = createTmdbPruneWorker(db, store)
+    expect(worker.runOnce()).toBe(0)
+    expect(findByTmdbId(db, 2)).not.toBeNull()
+  })
+
+  it('runOnce keeps a fresh tmdb-only row (recently dealt into a pool)', () => {
+    upsertTmdbOnlyRow(db, {
+      tmdbId: 3,
+      imdbId: null,
+      title: 'Fresh',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2000,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: isoDaysAgo(1),
+    })
+    const store = createRoomStore()
+    const worker = createTmdbPruneWorker(db, store)
+    expect(worker.runOnce()).toBe(0)
+    expect(findByTmdbId(db, 3)).not.toBeNull()
+  })
+})
+```
+
+Run: `npx vitest run server/sync/tmdbPrune.test.ts` — expect FAIL (`server/sync/tmdbPrune.ts` doesn't exist).
+
+`server/sync/tmdbPrune.ts`:
+```ts
+import type Database from 'better-sqlite3'
+import { pruneStaleTmdbOnlyRows } from '../db/movies'
+import type { RoomStore } from '../room/roomStore'
+
+export interface TmdbPruneWorker {
+  start(): void
+  stop(): void
+  runOnce(): number
+}
+
+// The cutoff itself is 30 days (spec: "TMDB-only row pruning"), so polling
+// more than roughly once a day buys nothing.
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000
+export const TMDB_ONLY_STALE_DAYS = 30
+
+export function createTmdbPruneWorker(db: Database.Database, store: RoomStore): TmdbPruneWorker {
+  let timer: NodeJS.Timeout | null = null
+
+  function runOnce(): number {
+    const excludeIds = new Set<number>()
+    for (const room of store.all()) {
+      for (const entry of room.pool) excludeIds.add(entry.movieId)
+    }
+    return pruneStaleTmdbOnlyRows(db, TMDB_ONLY_STALE_DAYS, excludeIds)
+  }
+
+  return {
+    start() {
+      if (timer) return
+      const tick = () => {
+        try {
+          runOnce()
+        } catch (err) {
+          console.error('tmdbPrune: sweep failed', err)
+        }
+        timer = setTimeout(tick, PRUNE_INTERVAL_MS)
+      }
+      timer = setTimeout(tick, 0)
+    },
+    stop() {
+      if (timer) clearTimeout(timer)
+      timer = null
+    },
+    runOnce,
+  }
+}
+```
+
+Run: `npx vitest run server/sync/tmdbPrune.test.ts` — expect PASS (3 tests).
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add server/sync/tmdbPrune.ts server/sync/tmdbPrune.test.ts
+git commit -m "feat: periodic TMDB-only row pruning sweep, excluding live room pools"
+```
+
+---
+
+- [ ] **Step 13: Remove the undocumented `MIN_RATED_FOR_STATS` floor in `server/ranking/reputation.ts`**
+
+Spec, quoted exactly: *"If that union is empty (nothing has a non-NULL `rating` yet — e.g. a fresh install before the first enrichment sync has run), `C` defaults to 6.5 and `m` to 50, so the formula never evaluates against an empty set."* This describes an **empty** rated set, not a small one. The current `MIN_RATED_FOR_STATS = 30` discards real computed stats for any pool with 1-29 rated candidates in favor of the defaults, with no spec basis — decision: remove it (fall back only on a genuinely empty set).
+
+Update `server/ranking/reputation.test.ts` — replace the first test in `describe('computeCAndM', ...)`:
+
+```ts
+describe('computeCAndM', () => {
+  it('returns the fixed defaults only when the rated candidate set is empty', () => {
+    const { c, m } = computeCAndM([{ rating: null, voteCount: null }])
+    expect(c).toBe(6.5)
+    expect(m).toBe(50)
+  })
+
+  it('computes real stats from a small rated set rather than falling back to defaults — regression for a spec-undocumented MIN_RATED_FOR_STATS floor', () => {
+    const { c, m } = computeCAndM([{ rating: 8, voteCount: 100 }])
+    expect(c).toBe(8)
+    expect(m).toBe(100)
+  })
+
+  it('computes the mean rating and 60th-percentile vote count over rated candidates', () => {
+    const rated = Array.from({ length: 30 }, (_, i) => ({
+      rating: 5 + (i % 5),
+      voteCount: (i + 1) * 10,
+    }))
+    const { c, m } = computeCAndM(rated)
+    expect(c).toBeCloseTo(7, 0)
+    expect(m).toBeGreaterThan(0)
+  })
+
+  it('ignores candidates with a null rating when computing C and m', () => {
+    const rated = Array.from({ length: 40 }, () => ({ rating: 8, voteCount: 100 }))
+    const unrated = Array.from({ length: 10 }, () => ({ rating: null, voteCount: null }))
+    const { c } = computeCAndM([...rated, ...unrated])
+    expect(c).toBeCloseTo(8, 5)
+  })
+})
+```
+
+(The `describe('reputationScore', ...)` block below is unchanged.)
+
+Run: `npx vitest run server/ranking/reputation.test.ts` — expect FAIL (current code still falls back for the 1-candidate case).
+
+In `server/ranking/reputation.ts`, remove the `MIN_RATED_FOR_STATS` constant and change the guard to fall back only when the rated set is empty (`rated.length === 0`), not when it's below the removed threshold. Keep everything else in the file (the `percentile`/`reputationScore` functions) unchanged.
+
+Run: `npx vitest run server/ranking/reputation.test.ts` — expect PASS (6 tests).
+
+- [ ] **Step 14: Commit**
+
+```bash
+git add server/ranking/reputation.ts server/ranking/reputation.test.ts
+git commit -m "fix: reputation defaults fall back only on an empty rated set, per spec"
+```
+
+---
+
+- [ ] **Step 15: TMDB client cleanup — consistent URL building, `findByImdbId` `res.ok` check**
+
+Note on overlap: Task 26 fixes `discoverMovies`'s missing `res.ok` check directly. Read the real current `server/tmdb/client.ts` before this step — if `findByImdbId` still lacks a `res.ok` check (Task 26's scope was `discoverMovies` and `findByImdbId` both, per its own task text, so this is likely already fixed by the time this step runs — verify rather than assume either way), this step only needs to do the `URLSearchParams` consistency pass, not re-add a check that's already there.
+
+Add a test to `server/tmdb/client.test.ts` (append inside `describe('createTmdbClient', ...)`) only if the behavior isn't already covered by a Task-26-added test:
+
+```ts
+  it('findByImdbId returns null on a non-ok response instead of throwing', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }) as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    expect(await client.findByImdbId('tt9999999')).toBeNull()
+  })
+```
+
+(If Task 26 already added an equivalent test expecting a *thrown* error rather than a `null` return for this exact scenario, treat that as the settled behavior — don't reintroduce a conflicting expectation. Reconcile in favor of whichever Task 26 actually shipped, and skip this test if redundant.)
+
+Standardize all query-param construction across `discoverMovies`/`getMovieDetails`/`findByImdbId` on `URLSearchParams` (the existing convention already used in `discoverMovies`) rather than mixing in template-string interpolation, preserving whatever error-handling Task 26 already added to each method.
+
+Run: `npx vitest run server/tmdb/client.test.ts` — expect PASS.
+
+- [ ] **Step 16: Fake TMDB client for `FAKE_EXTERNAL_APIS` mode**
+
+`server/plex/fakeClient.ts` is faked under `FAKE_EXTERNAL_APIS`, but `server/tmdb/client.ts` isn't. Mirror `plex/fakeClient.ts`'s pattern: a small fixed fixture set, no network calls.
+
+`server/tmdb/fakeClient.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { createFakeTmdbClient } from './fakeClient'
+
+describe('createFakeTmdbClient', () => {
+  it('discoverMovies returns a fixed fixture list without any network access', async () => {
+    const client = createFakeTmdbClient()
+    const movies = await client.discoverMovies({}, 5)
+    expect(movies.length).toBeGreaterThan(0)
+    expect(movies.every((m) => typeof m.tmdbId === 'number')).toBe(true)
+  })
+
+  it('getMovieDetails resolves rating/voteCount for a fixture tmdbId, null otherwise', async () => {
+    const client = createFakeTmdbClient()
+    const known = (await client.discoverMovies({}, 1))[0]!
+    expect(await client.getMovieDetails(known.tmdbId)).toEqual({ rating: known.rating, voteCount: known.voteCount })
+    expect(await client.getMovieDetails(999999)).toBeNull()
+  })
+
+  it('findByImdbId always returns null (fixture library has no imdb-prefixed guids)', async () => {
+    const client = createFakeTmdbClient()
+    expect(await client.findByImdbId('tt0000000')).toBeNull()
+  })
+})
+```
+
+Run: `npx vitest run server/tmdb/fakeClient.test.ts` — expect FAIL (`server/tmdb/fakeClient.ts` doesn't exist).
+
+`server/tmdb/fakeClient.ts`:
+```ts
+import type { TmdbClient, TmdbMovie } from './client'
+
+// A small fixed fixture set, keeping FAKE_EXTERNAL_APIS mode fully
+// network-free even for a plex+tmdb room (mirrors server/plex/fakeClient.ts's
+// pattern/rationale).
+const FAKE_DISCOVER_RESULTS: TmdbMovie[] = [
+  {
+    tmdbId: 90001,
+    title: 'Static on the Marquee',
+    overview: 'A fake TMDB discover fixture.',
+    posterPath: '/fake-90001.jpg',
+    year: 2017,
+    genreIds: [878],
+    rating: 7.4,
+    voteCount: 3500,
+  },
+  {
+    tmdbId: 90002,
+    title: 'Understudy',
+    overview: 'A fake TMDB discover fixture.',
+    posterPath: '/fake-90002.jpg',
+    year: 2012,
+    genreIds: [18],
+    rating: 6.8,
+    voteCount: 1200,
+  },
+  {
+    tmdbId: 90003,
+    title: 'Second Feature',
+    overview: 'A fake TMDB discover fixture.',
+    posterPath: '/fake-90003.jpg',
+    year: 2020,
+    genreIds: [35],
+    rating: 8.1,
+    voteCount: 900,
+  },
+]
+
+export function createFakeTmdbClient(): TmdbClient {
+  return {
+    async discoverMovies() {
+      return FAKE_DISCOVER_RESULTS
+    },
+    async getMovieDetails(tmdbId) {
+      const match = FAKE_DISCOVER_RESULTS.find((m) => m.tmdbId === tmdbId)
+      return match ? { rating: match.rating, voteCount: match.voteCount } : null
+    },
+    async findByImdbId() {
+      // The fake Plex fixture library's guids never carry an imdb:// prefix
+      // (see server/plex/fakeClient.ts), so this path is never exercised in
+      // fixture mode.
+      return null
+    },
+  }
+}
+```
+
+Run: `npx vitest run server/tmdb/fakeClient.test.ts` — expect PASS (3 tests).
+
+- [ ] **Step 17: Wire the fake TMDB client and the pruning worker into `server/index.ts` — ADD to the real current file, do not rewrite it**
+
+**By this point in execution, `server/index.ts` already has real, load-bearing changes from Task 26 (`safeGetPlexLink`/`DecryptionError` guard, `.catch()`-wrapped `librarySync.run()` calls), Task 27 (a `broadcast` helper wired through `attachWebSocketServer`, socket tracking for `shutdown()`, SIGTERM broadcasting `room_ended`), Task 29 (`config`/`remoteAddress` threaded into `roomsHandler`), and Task 30 (`clientIdentifier` argument to `setupHandlers`, three new `/api/setup/plex/*` routes dispatched). Read the real file. Do not paste a full-file rewrite over it — every one of those changes must survive. Make exactly these additions, each independently, to whatever the real file currently looks like:**
+
+1. Import `createFakeTmdbClient` from `./tmdb/fakeClient` and `createTmdbPruneWorker` from `./sync/tmdbPrune`.
+2. Change the `tmdb` construction from always-real to fake-under-flag, mirroring the existing `plex` selection pattern already in the file:
+   ```ts
+   const tmdb =
+     process.env.FAKE_EXTERNAL_APIS === 'true' ? createFakeTmdbClient() : createTmdbClient(config.tmdbApiKey)
+   ```
+3. Construct and `.start()` a `tmdbPrune` worker right after the existing `enrichment.start()` call:
+   ```ts
+   const tmdbPrune = createTmdbPruneWorker(db, store)
+   tmdbPrune.start()
+   ```
+4. Add `librarySync` as an argument to the `createRoomsHandler(...)` call (alongside whatever Task 29 already passes — `store, db, config.authEncryptionKey, config, librarySync` or equivalent, matching the real merged Step-6 signature) and to the `attachWebSocketServer(...)` call (alongside whatever Task 27 already passes).
+5. Add `tmdbPrune.stop()` to `shutdown()`, alongside the existing `enrichment.stop()` call (and whatever socket-closing/broadcast logic Task 27 added there — keep it, just add this one line near it).
+
+- [ ] **Step 18: Full suite + typecheck, then commit**
+
+```bash
+npx vitest run
+npx tsc --noEmit
+git add server/tmdb/client.ts server/tmdb/client.test.ts server/tmdb/fakeClient.ts server/tmdb/fakeClient.test.ts server/index.ts
+git commit -m "feat: fake TMDB client under FAKE_EXTERNAL_APIS; consistent TMDB client URL building"
+```
+
+---
+
+**Scope note:** this task is server-only, per the review's finding list. `app/page.tsx`'s free-text genre `<Input>` was read only as a reference for why genre validation can't reject unmapped names (Step 6) — no frontend changes are made here. The client-side "indexing your library" loading state for the cold-cache path (Step 6) is satisfied by the create-room HTTP request simply taking longer; no new protocol message was added, consistent with the decision in Step 8 not to introduce a new `error.code`.
+
+**On the `pool_too_small` message question the original review raised:** with Step 6/8's fixes in place, a distinct "still indexing" message isn't needed — a cold cache is blocked at room-*creation* time before any room reaches `lobby`, and a stale-but-populated cache's in-flight sync is fully awaited at Start before `buildPool` runs. By the time `pool_too_small` can fire, the library data is already as fresh as this attempt is going to get.
+
+---
+
+## Task 32: Fix — Start-time exclusion must be deferred until Start is guaranteed to succeed
+
+**Files:**
+- Modify: `server/room/activeActions.ts`
+- Modify: `server/room/activeActions.test.ts`
+
+**Interfaces:**
+- `startRoom`'s core exported shape (`ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[] }>`) is unchanged by THIS task; only its internal control flow changes. No new `ErrorCode` values, no changes to `RoomState`, `roomStore.ts`, or `actions.ts`.
+- **Execution-order note:** this task runs last (32 of 32 in this batch). By the time it executes, `startRoom`'s real signature will already differ from a from-scratch Task-16 read — Task 26 adds a `degraded: boolean` field to its return object, and Task 31 adds a `librarySync: SyncWaiter` parameter and a `await librarySync.waitForCurrent()` call inside the body. **Read the real current file first.** Apply this task's fix (deferring exclusion mutation until Start is guaranteed to succeed) on top of whatever's actually there — keep the `degraded` field and the `librarySync` parameter/call exactly as those tasks left them; only reorder/restructure the exclusion-related lines shown below.
+
+**Problem:** `startRoom` (Task 16) currently revokes and deletes disconnected participants — `room.revokedSessionTokens.add(...)`, `room.kickReasons.set(..., 'excluded_at_start')`, `room.participants.delete(...)` — *before* checking `MIN_PARTICIPANTS_TO_START` and *before* `buildPool`. Both of Start's failure paths (post-exclusion count too low; `buildPool` reports `tooSmall`) revert `room.status` to `'lobby'` but leave those sessionTokens permanently revoked. Since `app/room/[code]/page.tsx` only ever sends `join` when no `sessionToken` is already stored for that room code, and always sends `reconnect` otherwise, an excluded client has no way back in — ever — even after the host fixes the problem and retries Start. If the exclusion itself was what dropped the count below the minimum, the host is stuck too, since no unrevoked session can ever be supplied for that slot again.
+
+**Fix:** snapshot who *would* be excluded without mutating anything, check `MIN_PARTICIPANTS_TO_START` against the post-exclusion count computed from that snapshot, flip to `'starting'` and run `buildPool` exactly as today (preserving the join-race-closing status flip ahead of the `await`), and only once `buildPool` has confirmed success actually perform the exclusion mutations. Both failure paths now return with the room's participant/session state completely untouched and `status` back at `'lobby'`, fully retriable.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add `reconnectRoom` to the existing import from `./actions` in `server/room/activeActions.test.ts`:
+
+```ts
+import { joinRoom, reconnectRoom } from './actions'
+```
+
+Add these three tests inside the existing `describe('startRoom', ...)` block (after the `'rejects Start with fewer than 2 connected participants'` test is fine; exact position doesn't matter):
+
+```ts
+  it('does not revoke or exclude anyone when Start fails due to not_enough_participants after exclusion', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(10)
+
+    const result = await startRoom(store, code, true, db, noOpTmdb)
+    expect(result).toEqual({ ok: false, code: 'not_enough_participants' })
+
+    const room = store.get(code)!
+    expect(room.status).toBe('lobby')
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
+    expect(room.participants.get(flaky.data.participantId)!.connectionStatus).toBe('disconnected')
+    expect(room.revokedSessionTokens.has(flaky.data.sessionToken)).toBe(false)
+    expect(room.kickReasons.has(flaky.data.sessionToken)).toBe(false)
+  })
+
+  it('does not revoke or exclude the would-be-excluded participant when Start fails due to pool_too_small', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const other = joinRoom(store, code, 'Other')
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !other.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(2) // below POOL_MIN_SIZE (5)
+
+    const result = await startRoom(store, code, true, db, noOpTmdb)
+    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+
+    const room = store.get(code)!
+    expect(room.status).toBe('lobby')
+    expect(room.participants.size).toBe(3)
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
+    expect(room.revokedSessionTokens.has(flaky.data.sessionToken)).toBe(false)
+    expect(room.kickReasons.has(flaky.data.sessionToken)).toBe(false)
+  })
+
+  it('retries and succeeds once the previously-disconnected participant reconnects', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const host = joinRoom(store, code, 'Host', hostClaimToken)
+    const flaky = joinRoom(store, code, 'Flaky')
+    if (!host.ok || !flaky.ok) throw new Error('setup failed')
+    store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
+    seedPlexRows(10)
+
+    const failed = await startRoom(store, code, true, db, noOpTmdb)
+    expect(failed).toEqual({ ok: false, code: 'not_enough_participants' })
+
+    // The flaky client, still carrying its original (never revoked)
+    // sessionToken, reconnects — exactly what its browser does on any page
+    // reload, since the token was never invalidated by the failed attempt.
+    const reconnected = reconnectRoom(store, code, flaky.data.sessionToken)
+    expect(reconnected.ok).toBe(true)
+    expect(store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus).toBe('connected')
+
+    const retried = await startRoom(store, code, true, db, noOpTmdb)
+    expect(retried.ok).toBe(true)
+    if (!retried.ok) return
+    expect(retried.data.excludedParticipantIds).toEqual([])
+    const room = store.get(code)!
+    expect(room.status).toBe('active')
+    expect(room.participants.has(flaky.data.participantId)).toBe(true)
+  })
+```
+
+The existing `'excludes a disconnected participant from the frozen set and revokes their session with excluded_at_start'` test is left as-is — it must still pass unchanged after Step 3's refactor, proving a successful Start still excludes and revokes exactly as before.
+
+- [ ] **Step 2: Run tests to verify the new ones fail**
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: the three new tests FAIL (the first two because `revokedSessionTokens`/`kickReasons`/`participants` are mutated even on failure today; the third because the retried Start still excludes the reconnected participant, since its session was already dead by the time it tried to reconnect). The pre-existing tests still PASS.
+
+- [ ] **Step 3: Restructure `startRoom` in `server/room/activeActions.ts`**
+
+**Read the real current file first — by this point in execution it already has Task 26's `degraded` field and Task 31's `librarySync: SyncWaiter` parameter plus its `await librarySync.waitForCurrent()` call. The listing below shows the pre-26/31 shape to illustrate the exclusion-timing restructuring; hand-merge it against the real current function, keeping the `degraded` field, the `librarySync` parameter, and the `waitForCurrent()` call (placed after the synchronous `'starting'` flip, before `buildPool`) exactly as those tasks left them.** Also update the three new tests below and the pre-existing `startRoom(...)` call sites in `server/room/activeActions.test.ts` to pass a `noOpLibrarySync` stub as the 6th argument (matching whatever stub name/shape Task 31 already introduced in that test file — reuse it, don't invent a second one) and expect `degraded: false` where the test asserts on the full return shape.
+
+Replace the current `startRoom` function body with (illustrative — merge per the note above):
+
+```ts
+export async function startRoom(
+  store: RoomStore,
+  code: string,
+  callerIsHost: boolean,
+  db: Database.Database,
+  tmdb: TmdbClient,
+): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[] }>> {
+  if (!callerIsHost) return err('not_host')
+  const room = store.get(code)
+  if (!room) return err('room_not_found')
+  if (room.status !== 'lobby') return err('already_started')
+
+  // Snapshot who WOULD be excluded (disconnected as of right now) without
+  // mutating anything yet. Both failure paths below (insufficient
+  // post-exclusion count, and a too-small pool) must leave the room fully
+  // retriable — no participant removed, no sessionToken revoked — so a
+  // disconnected participant's browser can still reconnect with its
+  // still-valid session and the host can just try Start again. Actual
+  // mutation is deferred to the very end, once Start is committed to
+  // succeeding.
+  const wouldBeExcluded = [...room.participants.values()].filter(
+    (p) => p.connectionStatus === 'disconnected',
+  )
+  const wouldBeRemainingCount = room.participants.size - wouldBeExcluded.length
+
+  if (wouldBeRemainingCount < MIN_PARTICIPANTS_TO_START) {
+    return err('not_enough_participants')
+  }
+
+  // Synchronous status flip BEFORE the async pool build — closes the join
+  // race described in the spec's Concurrency section.
+  room.status = 'starting'
+
+  const result = await buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
+  if (result.tooSmall) {
+    room.status = 'lobby'
+    return err('pool_too_small')
+  }
+
+  // Start is now guaranteed to succeed — only past this point do we actually
+  // exclude the disconnected participants snapshotted above.
+  const excludedParticipantIds: string[] = []
+  for (const participant of wouldBeExcluded) {
+    room.revokedSessionTokens.add(participant.sessionToken)
+    room.kickReasons.set(participant.sessionToken, 'excluded_at_start')
+    room.participants.delete(participant.id)
+    excludedParticipantIds.push(participant.id)
+  }
+
+  room.pool = result.pool
+  const { c, m } = computeCAndM(result.pool)
+  room.reputationC = c
+  room.reputationM = m
+  room.status = 'active'
+  room.lastActivityAt = Date.now()
+
+  for (const participantId of room.participants.keys()) {
+    assignPendingCard(room, participantId)
+  }
+  recomputeExhaustion(room)
+
+  return ok({ excludedParticipantIds, pool: room.pool })
+}
+```
+
+`MIN_PARTICIPANTS_TO_START` is still checked against the post-exclusion count, and it is still checked before the pool-build step — Task 16's invariant is unchanged. The only thing that moved is *when the mutation happens*, not *what gets counted* or *what gets excluded*.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npx vitest run server/room/activeActions.test.ts`
+Expected: PASS (13 tests — the original 10 plus the 3 added here).
+
+- [ ] **Step 5: Run the full suite and typecheck**
+
+Run: `npx vitest run`
+Expected: PASS — no regressions in `server/room/actions.test.ts`, `server/room/roomStore.test.ts`, or anywhere else that exercises `startRoom`.
+
+Run: `npx tsc --noEmit`
+Expected: clean.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add server/room/activeActions.ts server/room/activeActions.test.ts
+git commit -m "fix: defer Start-time exclusion until MIN_PARTICIPANTS_TO_START and pool-build both succeed, so a failed Start is fully retriable"
+```
