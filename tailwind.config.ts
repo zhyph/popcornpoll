@@ -64,7 +64,21 @@ const config: Config = {
   				border: 'hsl(var(--sidebar-border))',
   				ring: 'hsl(var(--sidebar-ring))'
   			}
-  		}
+  		},
+  		keyframes: {
+  			'star-movement-bottom': {
+  				'0%': { transform: 'translate(0%, 0%)', opacity: '1' },
+  				'100%': { transform: 'translate(-100%, 0%)', opacity: '0' },
+  			},
+  			'star-movement-top': {
+  				'0%': { transform: 'translate(0%, 0%)', opacity: '1' },
+  				'100%': { transform: 'translate(100%, 0%)', opacity: '0' },
+  			},
+  		},
+  		animation: {
+  			'star-movement-bottom': 'star-movement-bottom linear infinite alternate',
+  			'star-movement-top': 'star-movement-top linear infinite alternate',
+  		},
   	}
   },
   plugins: [require("tailwindcss-animate")],

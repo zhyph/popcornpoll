@@ -66,6 +66,31 @@ body {
   100% { transform: translate(0, 0); }
 }
 
+@keyframes bulb {
+  0%, 100% { opacity: .28; box-shadow: 0 0 0 rgba(245,166,35,0); }
+  50% { opacity: 1; box-shadow: 0 0 12px 3px rgba(245,166,35,.55); }
+}
+
+@keyframes chaseGlow {
+  0%, 100% { text-shadow: 0 0 18px rgba(245,166,35,.35), 0 0 60px rgba(245,166,35,.12); }
+  50% { text-shadow: 0 0 26px rgba(245,166,35,.6), 0 0 90px rgba(245,166,35,.2); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes sprocket {
+  from { background-position-x: 0; }
+  to { background-position-x: -32px; }
+}
+
+@keyframes marqueeSlide {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
