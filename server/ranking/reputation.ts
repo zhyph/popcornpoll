@@ -5,7 +5,6 @@ export interface RatedCandidate {
 
 const DEFAULT_C = 6.5
 const DEFAULT_M = 50
-const MIN_RATED_FOR_STATS = 30
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0
@@ -17,7 +16,7 @@ export function computeCAndM(candidates: RatedCandidate[]): { c: number; m: numb
   const rated = candidates.filter(
     (c): c is { rating: number; voteCount: number } => c.rating !== null && c.voteCount !== null,
   )
-  if (rated.length < MIN_RATED_FOR_STATS) {
+  if (rated.length === 0) {
     return { c: DEFAULT_C, m: DEFAULT_M }
   }
   const c = rated.reduce((sum, r) => sum + r.rating, 0) / rated.length

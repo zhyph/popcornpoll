@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { computeCAndM, reputationScore } from './reputation'
 
 describe('computeCAndM', () => {
-  it('returns the fixed defaults when fewer than 30 rated candidates exist', () => {
-    const { c, m } = computeCAndM([{ rating: 8, voteCount: 100 }])
+  it('returns the fixed defaults only when the rated candidate set is empty', () => {
+    const { c, m } = computeCAndM([{ rating: null, voteCount: null }])
     expect(c).toBe(6.5)
     expect(m).toBe(50)
+  })
+
+  it('computes real stats from a small rated set rather than falling back to defaults — regression for a spec-undocumented MIN_RATED_FOR_STATS floor', () => {
+    const { c, m } = computeCAndM([{ rating: 8, voteCount: 100 }])
+    expect(c).toBe(8)
+    expect(m).toBe(100)
   })
 
   it('computes the mean rating and 60th-percentile vote count over rated candidates', () => {
