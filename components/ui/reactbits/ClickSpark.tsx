@@ -31,6 +31,16 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sparksRef = useRef<Spark[]>([]);
   const startTimeRef = useRef<number | null>(null);
+  // Tracks the currently-scheduled requestAnimationFrame id; null means the
+  // draw loop is idle (no active sparks) rather than running. This lets the
+  // loop stop scheduling itself while idle instead of running forever, and
+  // lets handleClick know whether it needs to kick the loop back on.
+  const animationIdRef = useRef<number | null>(null);
+  // Holds the latest `draw` closure (recreated whenever the effect below
+  // re-runs, e.g. on a tuning-prop change) so handleClick can restart the
+  // loop with the current closure without needing draw defined outside the
+  // effect.
+  const drawRef = useRef<((timestamp: number) => void) | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -87,8 +97,6 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationId: number;
-
     const draw = (timestamp: number) => {
       if (!startTimeRef.current) {
         startTimeRef.current = timestamp;
@@ -122,13 +130,31 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
         return true;
       });
 
-      animationId = requestAnimationFrame(draw);
+      // Only keep the loop alive while there's something left to animate —
+      // an idle canvas has nothing to redraw every frame forever.
+      if (sparksRef.current.length > 0) {
+        animationIdRef.current = requestAnimationFrame(draw);
+      } else {
+        animationIdRef.current = null;
+      }
     };
 
-    animationId = requestAnimationFrame(draw);
+    drawRef.current = draw;
+
+    // Only start the loop here if sparks are already pending (e.g. this
+    // effect re-ran mid-animation because a tuning prop changed) — on a
+    // fresh mount sparksRef.current is empty, so the loop stays idle until
+    // the first click schedules it.
+    if (sparksRef.current.length > 0 && animationIdRef.current === null) {
+      animationIdRef.current = requestAnimationFrame(draw);
+    }
 
     return () => {
-      cancelAnimationFrame(animationId);
+      if (animationIdRef.current !== null) {
+        cancelAnimationFrame(animationIdRef.current);
+        animationIdRef.current = null;
+      }
+      drawRef.current = null;
     };
   }, [sparkColor, sparkSize, sparkRadius, sparkCount, duration, easeFunc, extraScale]);
 
@@ -148,6 +174,15 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
     }));
 
     sparksRef.current.push(...newSparks);
+
+    // The draw loop stops scheduling itself once idle (see effect above), so
+    // a click after full idle needs to explicitly kick it back on. A click
+    // while the loop is already running (sparks still animating) just adds
+    // to sparksRef.current — draw() picks the new sparks up on its next
+    // already-scheduled frame, so this must not schedule a second loop.
+    if (animationIdRef.current === null && drawRef.current) {
+      animationIdRef.current = requestAnimationFrame(drawRef.current);
+    }
   };
 
   return (
