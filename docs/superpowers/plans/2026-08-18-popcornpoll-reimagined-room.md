@@ -346,7 +346,7 @@ git commit -m "refactor: flatten RoomPage into 4 real top-level branches, wire c
 **Design notes:** `startButton` and `noUnanimousPick` change value (mockup: "DIM THE LIGHTS", "NO UNANIMOUS PICK" — both uppercase per the uppercase-verbatim convention). Everything else is additive. `matchLabel` already reads "Deu match" in pt-br (not a literal translation of "It's a match") — kept as-is, not touched.
 
 **Interfaces:**
-- Produces the exact key names Tasks 5-9 consume: `room.waitingForHost`, `room.doorCodeLabel`, `room.restartReelLabel`, `room.restartReelDiscardLabel` (takes `{count}`), `room.closestThreeLabel`, `room.runnersUpExplainer`, `room.secondReelLabel`, `room.closeTheHouseLabel`, `room.houseLightsUp`, `room.endOfShowTitle`, `room.reelChangeFooter`, `room.backToBoxOffice`, `marqueeReveal.saidYes` (takes `{name}`), `marqueeReveal.rollItEndSession`, `marqueeReveal.keepSwiping`, `marqueeReveal.backToDeckIn` (takes `{seconds}`).
+- Produces the exact key names Tasks 5-9 consume: `room.waitingForHost`, `room.doorCodeLabel`, `room.restartReelLabel`, `room.restartReelDiscardLabel` (takes `{count}`), `room.closestThreeLabel`, `room.runnersUpExplainer`, `room.secondReelLabel`, `room.closeTheHouseLabel`, `room.houseLightsUp`, `room.endOfShowTitle`, `room.reelChangeFooter`, `room.backToBoxOffice`. `marqueeReveal` gets no new keys — Task 7's own Design Notes rule out the host-buttons/participant-chips UI these would have supported, so adding them here would ship orphaned copy (the pattern this codebase's Box office review already flagged and removed once).
 
 - [ ] **Step 1: Edit `messages/en-us.json`'s `room` namespace (lines 63-71)**
 
@@ -374,25 +374,14 @@ git commit -m "refactor: flatten RoomPage into 4 real top-level branches, wire c
   },
 ```
 
-- [ ] **Step 2: Edit `messages/en-us.json`'s `marqueeReveal` namespace (lines 78-81)**
+**Note:** `marqueeReveal` (lines 78-81 in both files) is untouched by this task — Task 7's Design Notes rule out the host-buttons/participant-chips UI that would have needed new copy there; adding unused keys would ship orphans.
 
-```json
-  "marqueeReveal": {
-    "matchLabel": "It's a match",
-    "readyInLibrary": "Ready to watch in your library",
-    "saidYes": "{name} said yes",
-    "rollItEndSession": "ROLL IT · END SESSION",
-    "keepSwiping": "Keep swiping",
-    "backToDeckIn": "Back to the deck in {seconds}s"
-  },
-```
-
-- [ ] **Step 3: Run the parity test, verify it fails**
+- [ ] **Step 2: Run the parity test, verify it fails**
 
 Run: `npx vitest run messages/messages.test.ts`
-Expected: FAIL — pt-br.json doesn't have the new keys yet.
+Expected: FAIL — pt-br.json doesn't have the new `room` keys yet.
 
-- [ ] **Step 4: Edit `messages/pt-br.json`'s `room` namespace (lines 63-71)**
+- [ ] **Step 3: Edit `messages/pt-br.json`'s `room` namespace (lines 63-71)**
 
 ```json
   "room": {
@@ -418,25 +407,12 @@ Expected: FAIL — pt-br.json doesn't have the new keys yet.
   },
 ```
 
-- [ ] **Step 5: Edit `messages/pt-br.json`'s `marqueeReveal` namespace (lines 78-81)**
-
-```json
-  "marqueeReveal": {
-    "matchLabel": "Deu match",
-    "readyInLibrary": "Pronto para assistir na sua biblioteca",
-    "saidYes": "{name} disse sim",
-    "rollItEndSession": "COMEÇAR · ENCERRAR SESSÃO",
-    "keepSwiping": "Continuar votando",
-    "backToDeckIn": "De volta à sessão em {seconds}s"
-  },
-```
-
-- [ ] **Step 6: Run the parity test, verify it passes**
+- [ ] **Step 4: Run the parity test, verify it passes**
 
 Run: `npx vitest run messages/messages.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add messages/en-us.json messages/pt-br.json
@@ -1144,6 +1120,7 @@ Replace the final (active/Now-showing) `return` block Task 1 created with:
         {isHost && (
           <button
             type="button"
+            data-testid="restart-reel"
             onClick={onRestartReel}
             onBlur={() => {
               if (confirmRestartTimer.current) clearTimeout(confirmRestartTimer.current)
@@ -1195,7 +1172,7 @@ git commit -m "feat: restyle Now-showing deck as 3-column reel row, add restart-
 **Design notes:** Keeps the bordered velvet panel and bulb ring, but the bulb ring switches from framer-motion's per-bulb `animate` prop to `BulbFrame`-style CSS-keyframe bulbs (24 bulbs, not 20, per the mockup's `frameBulbs` — `hint-placeholder-count="24"`) — this also closes a real reduced-motion gap the current file has: CSS's `prefers-reduced-motion` media query doesn't touch framer-motion's `animate` prop, so today's bulb chase and the panel's spring pop-in never respect that preference. The title switches from a plain `motion.h2` to `CodeSlats` in `splitOn="space"` mode (the mockup's own dev-tag: "letterboard slats, SplitText timing" — slats visually, `SplitText`'s stagger *idea* only). Adds the "said yes" participant chips (filtered to yes-voters, per the mockup's updated `yesVoters` — `PEOPLE.filter(p => p.vote === 'yes')`) and the dynamic meta line (year/genres/rating, composed from real `PoolEntry` fields since `year`/`rating` are nullable).
 
 **Interfaces:**
-- Consumes: `CodeSlats` (Task 4) with `splitOn="space"`; `BulbFrame` (`components/BulbFrame.tsx`, already exists, used by Box office); `marqueeReveal.saidYes`, `marqueeReveal.rollItEndSession`, `marqueeReveal.keepSwiping`, `marqueeReveal.backToDeckIn` (Task 2). This task does NOT change `MarqueeReveal`'s own prop signature (`{ movie: PoolEntry }`) — the mockup's "ROLL IT · END SESSION"/"Keep swiping" buttons and participant chips need `isHost`, the room's `participants`, and the dismiss/end handlers, none of which `MarqueeReveal` currently receives. **Ruling:** rather than plumbing `RoomPage`'s host/participants/handlers through a new prop surface for a component that only exists inside one call site, this task keeps `MarqueeReveal` focused on the panel itself (title, bulbs, meta line — everything genuinely about "revealing the match") and does NOT add the host buttons or participant chips; the panel still auto-dismisses via `RoomPage`'s existing `MATCH_REVEAL_MS` timer, matching current behavior. Adding host-interactive controls to the overlay is scoped out — flag this to your human partner if a later screen makes it feel like a real gap, don't add it here as a surprise expansion of this task.
+- Consumes: `CodeSlats` (Task 4) with `splitOn="space"`. The bulb ring keeps its own local `bulbPosition()` helper (unchanged from today, just switched from a framer-motion `animate` prop to a CSS `animation` string) rather than importing `components/BulbFrame.tsx` — the two panels' border geometry differs enough that sharing the helper isn't a clean fit; not worth a shared-component detour for one function. No new `marqueeReveal` i18n keys are consumed — see Task 2's note on why `saidYes`/`rollItEndSession`/`keepSwiping`/`backToDeckIn` were dropped from that task rather than added here unused. This task does NOT change `MarqueeReveal`'s own prop signature (`{ movie: PoolEntry }`) — the mockup's "ROLL IT · END SESSION"/"Keep swiping" buttons and participant chips need `isHost`, the room's `participants`, and the dismiss/end handlers, none of which `MarqueeReveal` currently receives. **Ruling:** rather than plumbing `RoomPage`'s host/participants/handlers through a new prop surface for a component that only exists inside one call site, this task keeps `MarqueeReveal` focused on the panel itself (title, bulbs, meta line — everything genuinely about "revealing the match") and does NOT add the host buttons or participant chips; the panel still auto-dismisses via `RoomPage`'s existing `MATCH_REVEAL_MS` timer, matching current behavior. Adding host-interactive controls to the overlay is scoped out — flag this to your human partner if a later screen makes it feel like a real gap, don't add it here as a surprise expansion of this task.
 
 - [ ] **Step 1: Restyle `components/MarqueeReveal.tsx`**
 
@@ -1297,7 +1274,7 @@ Replace the `if (snapshot.exhausted && snapshot.matches.length === 0)` block Tas
   if (snapshot.exhausted && snapshot.matches.length === 0) {
     return (
       <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10">
-        <div className="w-full border-2 border-brass/60 bg-[#141313] p-6 sm:p-9">
+        <div data-testid="fallback" className="w-full border-2 border-brass/60 bg-[#141313] p-6 sm:p-9">
           <div className="mb-5 flex items-baseline justify-between gap-3 border-b border-brass/40 pb-3.5">
             <p className="font-display text-2xl text-ticket sm:text-3xl">{t('noUnanimousPick')}</p>
             <p className="font-mono text-[10.5px] uppercase tracking-wider text-brass">{t('closestThreeLabel')}</p>
@@ -1315,6 +1292,7 @@ Replace the `if (snapshot.exhausted && snapshot.matches.length === 0)` block Tas
             <div className="mt-5 flex flex-wrap gap-3">
               <button
                 type="button"
+                data-testid="restart-reel"
                 onClick={() => client?.send({ type: 'restart_reel' })}
                 className="bg-marquee px-6 py-3.5 font-display text-base text-ink hover:bg-marquee/90"
               >
@@ -1335,7 +1313,7 @@ Replace the `if (snapshot.exhausted && snapshot.matches.length === 0)` block Tas
   }
 ```
 
-Note this branch drops its `data-testid="fallback"` in favor of putting it on the outer `<div>` — keep it: add `data-testid="fallback"` to the outer `<div className="w-full border-2 border-brass/60 bg-[#141313] p-6 sm:p-9">` above (the spec table requires `data-testid="fallback"` to survive unchanged).
+`data-testid="fallback"` moves from the old `Card` to this outer `<div>` — the spec table requires it survive unchanged, and it does (same wrapping element's role, new markup). `data-testid="restart-reel"` on the "SECOND REEL" button is added directly here rather than retrofitted later — Task 6's Restart-reel button gets the same testid inline, in its own Step 2 below.
 
 - [ ] **Step 2: Typecheck and manually verify**
 
@@ -1438,19 +1416,15 @@ git commit -m "feat: restyle End of show with glitch title and back-to-box-offic
 **Design notes:** Tasks 5-9 changed visible copy on Lobby/Runners-up/End-of-show (`startButton`, `noUnanimousPick`, `endOfShowTitle` etc.) — check every existing e2e spec for text-based selectors against those exact strings (the spec table's testid-discipline column says Lobby/Runners-up/End-of-show testids are "unchanged," but that only covers `data-testid` attributes, not incidental text-matching some spec might do). New coverage: `restart_reel`'s two real behaviors — host-only enforcement, and a full round-trip (vote, restart, confirm the pool/cards actually reset).
 
 **Interfaces:**
-- Consumes: `data-testid="fallback"`, `data-testid="restart-reel"` — **add this testid** to Task 6's Restart-reel button and Task 8's "SECOND REEL" button (both currently lack one; the spec table's row for Runners-up explicitly calls for `data-testid="restart-reel"` — add it to both entry points' buttons since a test needs to reach whichever one is visible without caring which screen it's on).
+- Consumes: `data-testid="fallback"` (Task 8) and `data-testid="restart-reel"` (Tasks 6 and 8 both — the spec table's Runners-up row calls for this testid, and it's on both entry points' buttons so a test can reach whichever one is visible without caring which screen it's on). Both already exist by this task — nothing to retrofit here.
 
-- [ ] **Step 1: Add `data-testid="restart-reel"` to both restart buttons**
-
-In `app/room/[code]/page.tsx`'s Now-showing branch (Task 6), add `data-testid="restart-reel"` to the Restart-reel `<button>`. In the Runners-up branch (Task 8), add `data-testid="restart-reel"` to the "SECOND REEL" `<button>`.
-
-- [ ] **Step 2: Fix the known-stale `text=Start` selector, then grep for any others**
+- [ ] **Step 1: Fix the known-stale `text=Start` selector, then grep for any others**
 
 `e2e/match.spec.ts:33` does `await hostPage.click('text=Start')` — Task 5 changed `room.startButton`'s value to "DIM THE LIGHTS", so this literal text selector now matches nothing. Change it to `await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()`.
 
 Then run: `grep -rn "text=Start\b\|text=No unanimous\|button\[aria-label=" e2e/` to check for any other now-stale text-based selectors this plan's copy changes might have broken (Task 5's `startButton`, Task 8's `noUnanimousPick`, Task 9's `endOfShowTitle`). `button[aria-label="Yes"]`/`button[aria-label="No"]` (used in `e2e/match.spec.ts` and others) are unaffected — Task 6 kept the same `aria-label` wiring on the restyled rail buttons. For every other hit the grep turns up, replace with a `data-testid`- or role-based selector matching the element it targets.
 
-- [ ] **Step 3: Write `e2e/restartReel.spec.ts`**
+- [ ] **Step 2: Write `e2e/restartReel.spec.ts`**
 
 Model this on `e2e/match.spec.ts`'s exact room-creation/join pattern (`seedFakeLibrary`, `pinEnglishLocale`, `chromium.launch()`, two contexts) — this repo's real e2e helper, not a placeholder:
 
@@ -1503,12 +1477,12 @@ test('a non-host cannot trigger restart-reel, and the host round-trip resets the
 })
 ```
 
-- [ ] **Step 4: Run the full e2e suite**
+- [ ] **Step 3: Run the full e2e suite**
 
 Run: `npm run test:e2e`
 Expected: PASS — every existing spec plus the new `restartReel.spec.ts`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add app/room/[code]/page.tsx e2e/restartReel.spec.ts
