@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { generateRoomCode, generateToken } from './tokens'
+import { generateRoomCode, generateToken, WORDS } from './tokens'
 
 describe('generateToken', () => {
   it('generates a 32-character hex string (128 bits)', () => {
@@ -22,5 +22,15 @@ describe('generateRoomCode', () => {
   it('generates different codes across calls (not exhaustively unique — collision handling is the room store\'s job)', () => {
     const codes = new Set(Array.from({ length: 20 }, () => generateRoomCode()))
     expect(codes.size).toBeGreaterThan(1)
+  })
+})
+
+describe('WORDS', () => {
+  it('has no duplicate entries', () => {
+    expect(new Set(WORDS).size).toBe(WORDS.length)
+  })
+
+  it('has the documented 100-word list size (design spec Network exposure: "a 100-word list")', () => {
+    expect(WORDS.length).toBe(100)
   })
 })

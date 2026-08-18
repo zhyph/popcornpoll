@@ -51,3 +51,26 @@ export function createTokenBucket(
     },
   }
 }
+
+// Resolves the real client IP for rate-limiting purposes, honoring
+// TRUSTED_PROXY_HOPS — an untrusted client can set X-Forwarded-For to
+// anything, so it's only consulted when the deployer has explicitly said
+// how many trusted proxy hops sit in front of this process. Takes plain
+// values instead of a transport-specific request type so both the WS
+// upgrade handler (Node IncomingMessage) and the HTTP route handlers
+// (Web-standard Request, which carries no socket) share one implementation
+// instead of each keeping their own copy. Was previously a private
+// function inside server/ws/server.ts.
+export function getClientIp(
+  forwardedFor: string | null,
+  remoteAddress: string | undefined,
+  trustedProxyHops: number,
+): string {
+  if (trustedProxyHops > 0 && forwardedFor) {
+    const ips = forwardedFor.split(',').map((ip) => ip.trim())
+    const index = ips.length - trustedProxyHops
+    const candidate = index >= 0 ? ips[index] : undefined
+    if (candidate) return candidate
+  }
+  return remoteAddress ?? 'unknown'
+}

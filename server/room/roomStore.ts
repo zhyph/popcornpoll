@@ -14,16 +14,38 @@ export interface RoomStore {
 }
 
 const MAX_CODE_GENERATION_ATTEMPTS = 20
+// Network exposure's cap ("max concurrent rooms, e.g. 50, counting `ended`
+// rooms until they're evicted") — enforced by the HTTP handler
+// (server/http/rooms.ts) against store.all().length before calling
+// create(), not in here; this constant lives with the store it's measured
+// against.
+export const MAX_CONCURRENT_ROOMS = 50
 
-export function createRoomStore(): RoomStore {
+function normalizeCode(code: string): string {
+  return code.trim().toUpperCase()
+}
+
+// codeGenerator defaults to the real generateRoomCode; overriding it is what
+// lets roomStore.test.ts force a deterministic collision without a mocking
+// library.
+export function createRoomStore(codeGenerator: () => string = generateRoomCode): RoomStore {
   const rooms = new Map<string, RoomState>()
 
   return {
     create(matchThreshold, candidateSource, tmdbFilters) {
-      let code = generateRoomCode()
+      let code = normalizeCode(codeGenerator())
       let attempts = 0
-      while (rooms.has(code) && attempts < MAX_CODE_GENERATION_ATTEMPTS) {
-        code = generateRoomCode()
+      while (rooms.has(code)) {
+        if (attempts >= MAX_CODE_GENERATION_ATTEMPTS) {
+          // Previously this loop fell through after MAX_CODE_GENERATION_ATTEMPTS
+          // and called rooms.set() regardless, silently overwriting whatever
+          // live room already held that code. With the ~10^7-code space and
+          // the MAX_CONCURRENT_ROOMS cap above this is effectively
+          // unreachable in production, but it must fail loudly rather than
+          // clobber a live room if it's ever hit.
+          throw new Error(`Could not generate a unique room code after ${MAX_CODE_GENERATION_ATTEMPTS} attempts`)
+        }
+        code = normalizeCode(codeGenerator())
         attempts++
       }
       const hostClaimToken = generateToken()
@@ -61,10 +83,10 @@ export function createRoomStore(): RoomStore {
       return { code, hostClaimToken }
     },
     get(code) {
-      return rooms.get(code)
+      return rooms.get(normalizeCode(code))
     },
     delete(code) {
-      rooms.delete(code)
+      rooms.delete(normalizeCode(code))
     },
     all() {
       return [...rooms.values()]

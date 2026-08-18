@@ -1,5 +1,5 @@
 // server/ws/server.ts
-import type { IncomingMessage, Server } from 'node:http'
+import type { Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
@@ -8,7 +8,7 @@ import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
 import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
 import { WS_CLOSE_TERMINAL, type ClientMessage, type ServerMessage } from './protocol'
-import { createTokenBucket } from '../rateLimit'
+import { createTokenBucket, getClientIp } from '../rateLimit'
 
 export const HEARTBEAT_INTERVAL_MS = 15_000
 export const HEARTBEAT_TIMEOUT_MS = 45_000
@@ -32,19 +32,6 @@ export interface WsServerHandle {
 
 function send(ws: WebSocket, message: ServerMessage): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
-}
-
-function getClientIp(req: IncomingMessage, trustedProxyHops: number): string {
-  if (trustedProxyHops > 0) {
-    const forwarded = req.headers['x-forwarded-for']
-    if (typeof forwarded === 'string') {
-      const ips = forwarded.split(',').map((ip) => ip.trim())
-      const index = ips.length - trustedProxyHops
-      const candidate = index >= 0 ? ips[index] : undefined
-      if (candidate) return candidate
-    }
-  }
-  return req.socket.remoteAddress ?? 'unknown'
 }
 
 export function attachWebSocketServer(
@@ -124,7 +111,12 @@ export function attachWebSocketServer(
       socket.destroy()
       return
     }
-    const clientIp = getClientIp(req, config.trustedProxyHops)
+    const forwardedFor = req.headers['x-forwarded-for']
+    const clientIp = getClientIp(
+      typeof forwardedFor === 'string' ? forwardedFor : null,
+      req.socket.remoteAddress,
+      config.trustedProxyHops,
+    )
     if (!upgradeBucket.tryConsume(clientIp)) {
       socket.destroy()
       return

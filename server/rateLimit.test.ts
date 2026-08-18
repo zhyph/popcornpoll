@@ -1,6 +1,6 @@
 // server/rateLimit.test.ts
 import { describe, expect, it } from 'vitest'
-import { createTokenBucket } from './rateLimit'
+import { createTokenBucket, getClientIp } from './rateLimit'
 
 describe('createTokenBucket', () => {
   it('allows up to maxTokens consumptions, then denies', () => {
@@ -32,5 +32,23 @@ describe('createTokenBucket', () => {
     expect(bucket.size()).toBe(1)
     await new Promise((resolve) => setTimeout(resolve, 40))
     expect(bucket.size()).toBe(0)
+  })
+})
+
+describe('getClientIp', () => {
+  it('ignores X-Forwarded-For when trustedProxyHops is 0', () => {
+    expect(getClientIp('203.0.113.9', '10.0.0.5', 0)).toBe('10.0.0.5')
+  })
+
+  it('reads the (length - trustedProxyHops)th entry of X-Forwarded-For when hops > 0', () => {
+    expect(getClientIp('1.1.1.1, 2.2.2.2, 3.3.3.3', '10.0.0.2', 1)).toBe('3.3.3.3')
+  })
+
+  it('falls back to remoteAddress when X-Forwarded-For is absent', () => {
+    expect(getClientIp(null, '10.0.0.5', 1)).toBe('10.0.0.5')
+  })
+
+  it("falls back to 'unknown' when neither is available", () => {
+    expect(getClientIp(null, undefined, 0)).toBe('unknown')
   })
 })

@@ -1,10 +1,10 @@
 import { randomBytes, randomInt } from 'node:crypto'
 
-const WORDS = [
+export const WORDS = [
   'BLUE', 'RED', 'GOLD', 'FOX', 'WOLF', 'BEAR', 'HAWK', 'STAR', 'MOON', 'RAIN',
   'LEAF', 'ROCK', 'WAVE', 'FIRE', 'SNOW', 'PEAK', 'LAKE', 'ROSE', 'IRON', 'JADE',
   'CROW', 'DOVE', 'SWAN', 'TREE', 'PINE', 'MINT', 'SAGE', 'LIME', 'SAND', 'MIST',
-  'WIND', 'DUSK', 'DAWN', 'GLOW', 'RUST', 'OPAL', 'SAGE', 'SILK', 'CORD', 'BOLT',
+  'WIND', 'DUSK', 'DAWN', 'GLOW', 'RUST', 'OPAL', 'REED', 'SILK', 'CORD', 'BOLT',
   'TWIG', 'MOSS', 'FERN', 'VINE', 'SEED', 'BULB', 'ROOT', 'BARK', 'THORN', 'PETAL',
   'CREST', 'CLAW', 'FANG', 'HOOF', 'TAIL', 'WING', 'BEAK', 'HORN', 'MANE', 'SPINE',
   'ASH', 'DUNE', 'POOL', 'GLEN', 'VALE', 'DELL', 'KNOLL', 'GLADE', 'PLAIN', 'SLOPE',

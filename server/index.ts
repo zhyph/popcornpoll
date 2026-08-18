@@ -62,7 +62,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   const enrichment = createEnrichmentWorker(db, tmdb)
   enrichment.start()
 
-  const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey)
+  const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey, config)
   const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex)
   const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex)
   const healthHandler = createHealthHandler(config.dataDir)
@@ -93,7 +93,8 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         })
         let webRes: Response
         if (url.pathname === '/api/health') webRes = await healthHandler(webReq)
-        else if (url.pathname === '/api/rooms' && req.method === 'POST') webRes = await roomsHandler(webReq)
+        else if (url.pathname === '/api/rooms' && req.method === 'POST')
+          webRes = await roomsHandler(webReq, req.socket.remoteAddress)
         else if (url.pathname === '/api/setup/plex/pin') webRes = await setupHandlers.pin(webReq)
         else if (url.pathname === '/api/setup/plex/callback') webRes = await setupHandlers.callback(webReq)
         else if (url.pathname === '/api/setup/plex/resync') {

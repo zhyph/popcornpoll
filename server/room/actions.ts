@@ -23,6 +23,9 @@ export type ErrorCode =
   | 'not_your_card'
   | 'internal_error'
   | 'room_not_active'
+  | 'rate_limited'
+  | 'room_cap_reached'
+  | 'forbidden_origin'
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; code: ErrorCode }
 
