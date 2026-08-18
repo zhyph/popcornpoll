@@ -1,6 +1,6 @@
 // server/rateLimit.test.ts
-import { describe, expect, it } from 'vitest'
-import { createTokenBucket, getClientIp } from './rateLimit'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createDefaultRateLimitBucket, createTokenBucket, defaultRateLimitRefillPerSecond, getClientIp } from './rateLimit'
 
 describe('createTokenBucket', () => {
   it('allows up to maxTokens consumptions, then denies', () => {
@@ -32,6 +32,36 @@ describe('createTokenBucket', () => {
     expect(bucket.size()).toBe(1)
     await new Promise((resolve) => setTimeout(resolve, 40))
     expect(bucket.size()).toBe(0)
+  })
+})
+
+describe('defaultRateLimitRefillPerSecond / createDefaultRateLimitBucket', () => {
+  afterEach(() => {
+    delete process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND
+  })
+
+  it('falls back to the production rate (10/60 per second) when unset', () => {
+    delete process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND
+    expect(defaultRateLimitRefillPerSecond()).toBeCloseTo(10 / 60, 5)
+  })
+
+  it('falls back to the production rate when set to a non-positive or non-numeric value', () => {
+    process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND = '0'
+    expect(defaultRateLimitRefillPerSecond()).toBeCloseTo(10 / 60, 5)
+    process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND = 'not-a-number'
+    expect(defaultRateLimitRefillPerSecond()).toBeCloseTo(10 / 60, 5)
+  })
+
+  it('uses the override when set to a positive number', () => {
+    process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND = '5'
+    expect(defaultRateLimitRefillPerSecond()).toBe(5)
+  })
+
+  it('createDefaultRateLimitBucket has a fixed 10-token capacity regardless of the refill override', () => {
+    process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND = '100' // fast refill, but capacity is still capped at 10
+    const bucket = createDefaultRateLimitBucket()
+    for (let i = 0; i < 10; i++) expect(bucket.tryConsume('ip-1')).toBe(true)
+    expect(bucket.tryConsume('ip-1')).toBe(false)
   })
 })
 

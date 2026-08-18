@@ -8,7 +8,7 @@ import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
 import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
 import { WS_CLOSE_TERMINAL, type ClientMessage, type ServerMessage } from './protocol'
-import { createTokenBucket, getClientIp } from '../rateLimit'
+import { createDefaultRateLimitBucket, getClientIp } from '../rateLimit'
 
 export const HEARTBEAT_INTERVAL_MS = 15_000
 export const HEARTBEAT_TIMEOUT_MS = 45_000
@@ -44,7 +44,7 @@ export function attachWebSocketServer(
 ): WsServerHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
   const sockets = new Map<WebSocket, SocketMeta>()
-  const upgradeBucket = createTokenBucket(10, 10 / 60)
+  const upgradeBucket = createDefaultRateLimitBucket()
 
   function broadcastToRoom(roomCode: string, messages: ServerMessage[]): void {
     for (const [otherWs, otherMeta] of sockets) {

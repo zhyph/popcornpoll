@@ -19,10 +19,19 @@ test('rate-limits a burst of room-creation requests from one client', async ({ b
   // many rooms earlier spec files already created via the UI. Asserting an
   // exact "the Nth request fails" boundary would be order-dependent and
   // flaky. What's guaranteed regardless of history is the bucket's
-  // *capacity*: it never holds more than 10 tokens and refills at ~1 token
-  // per 6 seconds, so a burst of 15 near-simultaneous requests — far more
-  // than can be refilled in the time it takes to fire them — must contain
-  // at least one rejection.
+  // *capacity*: it never holds more than 10 tokens (see
+  // server/rateLimit.ts), so a burst of 15 near-simultaneous requests — more
+  // than the bucket can ever hold at once — must contain at least one
+  // rejection.
+  //
+  // This burst deliberately drains the bucket to 0 for this client IP. That
+  // would otherwise starve whatever room-creation or WS upgrade runs next in
+  // the same shared-server suite (createRoom() toasts and returns on a 429
+  // rather than throwing, so the failure would surface elsewhere as a bare
+  // navigation timeout with no clear cause) — playwright.config.ts sets
+  // ROOM_RATE_LIMIT_REFILL_PER_SECOND high specifically so this recovers in
+  // ~2 seconds instead of up to a minute, rather than leaving each spec file
+  // to work around it individually.
   const origin = new URL(baseURL!).origin
   const ctx = await request.newContext({ baseURL, extraHTTPHeaders: { Origin: origin } })
   const results = await Promise.all(

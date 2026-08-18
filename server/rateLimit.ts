@@ -7,6 +7,40 @@ export interface TokenBucket {
 const DEFAULT_IDLE_EVICTION_MS = 30 * 60_000
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000
 
+// Production default: 10-token capacity, refilling at 10/minute per IP.
+// Both per-IP buckets in this app (HTTP room creation in
+// server/http/rooms.ts, WS upgrade in server/ws/server.ts) share this shape
+// and this factory, so they can't silently drift apart.
+//
+// Capacity is NOT overridable — e2e/rateLimit.spec.ts's burst test relies on
+// the real 10-token capacity to prove the 429 path with a small, fast burst
+// (a bigger capacity would mean a bigger burst, and every successful request
+// in that burst is a real throwaway room hitting MAX_CONCURRENT_ROOMS).
+//
+// Refill speed IS overridable, via ROOM_RATE_LIMIT_REFILL_PER_SECOND, for
+// one reason: the e2e suite runs its entire ~28-test run against one shared
+// server process, all traffic resolving to the same loopback IP — so
+// whatever rateLimit.spec.ts's burst test drains (by design, down to 0) takes
+// up to a minute to recover at the production refill rate, long enough to
+// starve whatever room-creation or WS-upgrade attempt runs next in the same
+// suite. createRoom() toasts and returns on a 429 rather than throwing, so
+// that failure surfaces as a bare navigation timeout with no clear cause.
+// playwright.config.ts sets this env var high so the bucket recovers in
+// seconds instead of a minute. Unset (any real deployment), this resolves to
+// the production refill rate.
+const PRODUCTION_CAPACITY = 10
+const PRODUCTION_REFILL_PER_SECOND = PRODUCTION_CAPACITY / 60
+
+export function defaultRateLimitRefillPerSecond(): number {
+  const raw = process.env.ROOM_RATE_LIMIT_REFILL_PER_SECOND
+  const parsed = raw ? Number.parseFloat(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : PRODUCTION_REFILL_PER_SECOND
+}
+
+export function createDefaultRateLimitBucket(): TokenBucket {
+  return createTokenBucket(PRODUCTION_CAPACITY, defaultRateLimitRefillPerSecond())
+}
+
 export function createTokenBucket(
   maxTokens: number,
   refillPerSecond: number,

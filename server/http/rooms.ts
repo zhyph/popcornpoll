@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
-import { createTokenBucket, getClientIp } from '../rateLimit'
+import { createDefaultRateLimitBucket, getClientIp } from '../rateLimit'
 import { isValidThreshold } from '../room/matchThreshold'
 import { MAX_CONCURRENT_ROOMS, type RoomStore } from '../room/roomStore'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../room/types'
@@ -67,12 +67,12 @@ export function createRoomsHandler(
   config: AppConfig,
   librarySync: ReturnType<typeof createLibrarySync>,
 ): (req: Request, remoteAddress: string | undefined) => Promise<Response> {
-  // Same 10/minute-per-IP shape as the WS upgrade bucket in ws/server.ts —
-  // this is the HTTP half of Network exposure's rate-limiting requirement.
-  // Join attempts are already covered separately by the WS upgrade bucket
-  // and the per-connection failedJoins guard (Task 19); joining doesn't go
-  // through this HTTP route.
-  const rateLimitBucket = createTokenBucket(10, 10 / 60)
+  // Same shape as the WS upgrade bucket in ws/server.ts (both come from
+  // createDefaultRateLimitBucket) — this is the HTTP half of Network
+  // exposure's rate-limiting requirement. Join attempts are already covered
+  // separately by the WS upgrade bucket and the per-connection failedJoins
+  // guard (Task 19); joining doesn't go through this HTTP route.
+  const rateLimitBucket = createDefaultRateLimitBucket()
 
   return async (req, remoteAddress) => {
     // The client currently POSTs without a Content-Type header (app/page.tsx),

@@ -56,8 +56,12 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
     }
   }
 
-  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible()
+  // The last swipe still has to round-trip through the WS server (record the
+  // vote, detect exhaustion, broadcast the fallback) before this renders —
+  // the bare 5s default expect timeout leaves no margin for that under load,
+  // unlike the explicit 15s waits already used elsewhere in this file.
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 15000 })
   await hostPage.reload()
-  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible() // recoverable from the joined snapshot, not just the one-shot event
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 15000 }) // recoverable from the joined snapshot, not just the one-shot event
   await browser.close()
 })
