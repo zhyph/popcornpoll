@@ -53,9 +53,12 @@
   "joinRoom": {
     "invitedTo": "Você foi convidado para",
     "nameCardTitle": "Seu nome no ingresso",
-    "nameLabel": "Nome",
-    "namePlaceholder": "Seu nome",
-    "joinButton": "Entrar"
+    "namePlaceholder": "Digite aqui",
+    "nameCountCaption": "{count}/24 caracteres · visível para todos na sala",
+    "joinButton": "GARANTIR MEU LUGAR",
+    "noPasswordNote": "Sem senha, sem conta. A sala fecha quando o anfitrião decidir.",
+    "admitOneLabel": "ENTRADA ÚNICA",
+    "seatLabel": "Fileira C · Assento 14"
   },
   "room": {
     "connecting": "Conectando…",
