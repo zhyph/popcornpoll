@@ -76,11 +76,6 @@ body {
   50% { text-shadow: 0 0 26px rgba(245,166,35,.6), 0 0 90px rgba(245,166,35,.2); }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
 @keyframes sprocket {
   from { background-position-x: 0; }
   to { background-position-x: -32px; }

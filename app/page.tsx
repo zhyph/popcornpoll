@@ -10,12 +10,6 @@ import CountUp from '../components/ui/reactbits/CountUp'
 import BlurText from '../components/ui/reactbits/BlurText'
 import SplitText from '../components/ui/reactbits/SplitText'
 import StarBorder from '../components/ui/reactbits/StarBorder'
-import { Button } from '../components/ui/button'
-import { Card, CardContent, CardHeader } from '../components/ui/card'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
-import { Separator } from '../components/ui/separator'
 import { Skeleton } from '../components/ui/skeleton'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/room/types'
 
@@ -121,11 +115,12 @@ export default function CreateRoomPage() {
             <p className="font-mono text-[11px] uppercase tracking-widest text-ink/60">{t('ticketNoLabel')}</p>
           </div>
 
-          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('housePicturesLabel')}</p>
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('housePicturesLabel')}</p>
           <div className="mb-5 grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => setCandidateSource('plex')}
+              aria-pressed={candidateSource === 'plex'}
               className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
                 candidateSource === 'plex' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
               }`}
@@ -136,6 +131,7 @@ export default function CreateRoomPage() {
             <button
               type="button"
               onClick={() => setCandidateSource('plex+tmdb')}
+              aria-pressed={candidateSource === 'plex+tmdb'}
               className={`flex flex-col gap-1.5 border-2 p-3.5 text-left transition-all ${
                 candidateSource === 'plex+tmdb' ? 'border-exit-red bg-exit-red/10' : 'border-ink/25'
               }`}
@@ -145,13 +141,14 @@ export default function CreateRoomPage() {
             </button>
           </div>
 
-          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('houseRuleLabel')}</p>
+          <p className="mb-2 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('houseRuleLabel')}</p>
           <div className="mb-4 flex flex-wrap gap-2">
             {(['all', 'majority', 'atLeast'] as const).map((kind) => (
               <button
                 key={kind}
                 type="button"
                 onClick={() => setThresholdKind(kind)}
+                aria-pressed={thresholdKind === kind}
                 className={`px-3.5 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-all ${
                   thresholdKind === kind ? 'bg-ink text-ticket' : 'border border-ink/35 text-ink/70'
                 }`}
@@ -184,9 +181,9 @@ export default function CreateRoomPage() {
             </div>
           )}
 
-          <p className="mb-2.5 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/62">{t('trimTheBillLabel')}</p>
+          <p className="mb-2.5 font-mono text-[10.5px] uppercase tracking-[.2em] text-ink/60">{t('trimTheBillLabel')}</p>
           <div className="mb-6 grid grid-cols-2 gap-2.5">
-            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('genreLabel')}
               <input
                 value={genre}
@@ -195,7 +192,7 @@ export default function CreateRoomPage() {
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('minRatingLabel')}
               <input
                 type="number"
@@ -207,7 +204,7 @@ export default function CreateRoomPage() {
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('yearFromLabel')}
               <input
                 type="number"
@@ -216,7 +213,7 @@ export default function CreateRoomPage() {
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/62">
+            <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('yearToLabel')}
               <input
                 type="number"
@@ -306,7 +303,7 @@ export default function CreateRoomPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2.5 border border-dashed border-brass/45 px-4.5 py-3.5 font-mono text-[11px] tracking-wider text-ticket/65">
+          <div className="flex flex-wrap items-center gap-2.5 border border-dashed border-brass/45 px-[18px] py-3.5 font-mono text-[11px] tracking-wider text-ticket/65">
             <span
               className="h-2.5 w-2.5 rounded-full"
               style={{
@@ -315,7 +312,9 @@ export default function CreateRoomPage() {
               }}
             />
             {stats?.plexLinked
-              ? t('plexLinkedStatus', { minutes: stats.lastSyncAt ? Math.max(0, Math.round((Date.now() - stats.lastSyncAt) / 60_000)) : 0 })
+              ? stats.lastSyncAt !== null
+                ? t('plexLinkedStatus', { minutes: Math.max(0, Math.round((Date.now() - stats.lastSyncAt) / 60_000)) })
+                : t('plexLinkedSyncUnknown')
               : t('plexNotLinkedStatus')}
             <a
               href="/setup"

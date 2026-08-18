@@ -25,6 +25,10 @@ export function createEligibleCountHandler(db: Database.Database): (req: Request
         { status: 400 },
       )
     }
+    // Plex-only count: 'plex+tmdb' candidateSource pulls additional TMDB-discover
+    // results in at room-start time (see startRoom/buildPool), which can't be
+    // known ahead of that live call — this endpoint intentionally undercounts
+    // for that source rather than guess.
     const count = findEligiblePlexRows(db, result.filters).length
     return Response.json({ count })
   }
