@@ -113,6 +113,59 @@ describe('buildPool', () => {
     expect(result.pool.length).toBeGreaterThan(33)
   })
 
+  it('targets ~70% of the cap from Plex and the remainder from TMDB, not the other way around — regression for an inverted split', async () => {
+    seedPlexRows(200) // plenty of Plex supply so Plex is never the shortfall source
+    const tmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockResolvedValue(
+        Array.from({ length: 100 }, (_, i) => ({
+          tmdbId: 5000 + i,
+          title: `TMDB ${i}`,
+          overview: '',
+          posterPath: null,
+          year: 2010,
+          genreIds: [],
+          rating: 7,
+          voteCount: 1000,
+        })),
+      ),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
+    const plexCount = result.pool.filter((e) => e.posterSource === 'plex').length
+    const tmdbCount = result.pool.filter((e) => e.posterSource === 'tmdb').length
+    expect(plexCount).toBeGreaterThan(tmdbCount) // ~70 vs ~30, not ~30 vs ~70
+    expect(plexCount).toBeGreaterThanOrEqual(65)
+    expect(plexCount).toBeLessThanOrEqual(75)
+  })
+
+  it('resolves the free-text genre filter into a numeric TMDB genre id before calling discoverMovies', async () => {
+    seedPlexRows(10)
+    const discoverMovies = vi.fn().mockResolvedValue([])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Sci-Fi' }, 1)
+    expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: 878 }), expect.any(Number))
+  })
+
+  it('omits genreId (rather than failing) when the free-text genre has no TMDB mapping', async () => {
+    seedPlexRows(10)
+    const discoverMovies = vi.fn().mockResolvedValue([])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Not A Real Genre' }, 1)
+    expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: undefined }), expect.any(Number))
+  })
+
+  it('dedupes duplicate tmdbIds within a single discover call before resolving rows', async () => {
+    seedPlexRows(2)
+    const dup = {
+      tmdbId: 42, title: 'Dup', overview: '', posterPath: null, year: 2000, genreIds: [], rating: 7, voteCount: 1000,
+    }
+    const discoverMovies = vi.fn().mockResolvedValue([dup, dup])
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
+    expect(result.pool.filter((e) => e.title === 'Dup')).toHaveLength(1)
+  })
+
   it('is deterministic for a fixed rngSeed', async () => {
     seedPlexRows(150)
     const a = await buildPool(db, noOpTmdb, 'plex', {}, 42)

@@ -4,7 +4,8 @@ import { findByTmdbId, findEligiblePlexRows, mergeTmdbOnlyIntoPlexRow, stampLast
 import type { MovieRow } from '../db/movies'
 import { computeCAndM, reputationScore } from '../ranking/reputation'
 import { createRng, weightedSampleWithoutReplacement } from '../ranking/rng'
-import { TMDB_DISCOVER_PAGE_CAP, type TmdbClient } from '../tmdb/client'
+import { TMDB_DISCOVER_PAGE_CAP, type TmdbClient, type TmdbMovie } from '../tmdb/client'
+import { resolveGenreId } from '../tmdb/genres'
 
 export function getPoolCap(): number {
   if (process.env.FAKE_EXTERNAL_APIS === 'true' && process.env.POOL_SIZE_CAP) {
@@ -13,7 +14,7 @@ export function getPoolCap(): number {
   return 100
 }
 export const POOL_MIN_SIZE = 5
-const TMDB_SHARE = 0.7
+const PLEX_SHARE = 0.7 // spec: "up to 70% of the cap is targeted from the Plex sample and the remainder from TMDB discover results"
 
 export interface PoolEntry {
   movieId: number
@@ -54,6 +55,17 @@ function toEntry(row: MovieRow): PoolEntry {
     rating: row.rating,
     voteCount: row.voteCount,
   }
+}
+
+function dedupeByTmdbId(movies: TmdbMovie[]): TmdbMovie[] {
+  const seen = new Set<number>()
+  const deduped: TmdbMovie[] = []
+  for (const m of movies) {
+    if (seen.has(m.tmdbId)) continue
+    seen.add(m.tmdbId)
+    deduped.push(m)
+  }
+  return deduped
 }
 
 async function resolveTmdbCandidatesIntoRows(
@@ -99,10 +111,15 @@ export async function buildPool(
   if (candidateSource === 'plex+tmdb') {
     try {
       const discovered = await tmdb.discoverMovies(
-        { yearMin: filters.yearMin, yearMax: filters.yearMax, ratingMin: filters.ratingMin },
+        {
+          genreId: resolveGenreId(filters.genre),
+          yearMin: filters.yearMin,
+          yearMax: filters.yearMax,
+          ratingMin: filters.ratingMin,
+        },
         TMDB_DISCOVER_PAGE_CAP,
       )
-      tmdbRows = await resolveTmdbCandidatesIntoRows(db, discovered)
+      tmdbRows = await resolveTmdbCandidatesIntoRows(db, dedupeByTmdbId(discovered))
     } catch (err) {
       // TMDB is down/rate-limited/misconfigured — degrade to a Plex-only
       // pool for this room instead of letting the failure propagate up
@@ -135,7 +152,7 @@ export async function buildPool(
   const rng = createRng(rngSeed)
 
   const poolCap = getPoolCap()
-  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(poolCap * (1 - TMDB_SHARE)) : poolCap
+  let targetPlexCount = candidateSource === 'plex+tmdb' ? Math.round(poolCap * PLEX_SHARE) : poolCap
   let targetTmdbCount = candidateSource === 'plex+tmdb' ? poolCap - targetPlexCount : 0
 
   const plexEligible = eligible.filter((r) => r.plexRatingKey !== null)
