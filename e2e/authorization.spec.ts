@@ -18,6 +18,11 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
+  // Confirm the guest's join actually completed (both participants visible
+  // on the host's roster) before asserting Start stays invisible for the
+  // guest — otherwise this could pass vacuously against a silently-failed
+  // join, since a guest who never joined also never sees "Start".
+  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
   await expect(guestPage.locator('text=Start')).not.toBeVisible()
   await browser.close()

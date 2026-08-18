@@ -11,8 +11,13 @@ import { Card, CardContent } from './ui/card'
 export function RoomShare({ code }: { code: string }) {
   const t = useTranslations('roomShare')
   const [copied, setCopied] = useState(false)
+  const [canShare, setCanShare] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const joinUrl = typeof window !== 'undefined' ? `${window.location.origin}/join/${code}` : ''
+
+  useEffect(() => {
+    setCanShare(typeof navigator !== 'undefined' && 'share' in navigator)
+  }, [])
 
   useEffect(() => {
     if (!joinUrl || !canvasRef.current) return
@@ -48,7 +53,7 @@ export function RoomShare({ code }: { code: string }) {
           <Button variant="outline" className="border-brass text-ticket" onClick={copyLink}>
             {copied ? t('copied') : t('copyLink')}
           </Button>
-          {typeof navigator !== 'undefined' && 'share' in navigator && (
+          {canShare && (
             <Button
               className="bg-marquee text-ink hover:bg-marquee/90"
               onClick={() => navigator.share({ title: t('shareTitle'), url: joinUrl })}

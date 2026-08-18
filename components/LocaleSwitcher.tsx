@@ -20,7 +20,7 @@ export function LocaleSwitcher() {
   }
 
   return (
-    <div className="flex gap-1 font-mono text-xs uppercase tracking-widest text-brass">
+    <div className="flex gap-1 font-mono text-[10px] uppercase tracking-widest text-brass sm:text-xs">
       <Button
         variant="ghost"
         size="sm"

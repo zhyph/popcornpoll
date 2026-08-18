@@ -71,11 +71,17 @@
     "not_your_card": "Esse filme não é mais o seu card atual.",
     "invalid_name": "Nome inválido. Use entre 1 e 24 caracteres.",
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou.",
+    "room_not_active": "Esta sala não está ativa no momento.",
     "generic": "Algo deu errado."
   },
   "kicked": {
     "kicked": "O anfitrião te removeu da sala.",
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou."
+  },
+  "roomEnded": {
+    "host_ended": "O anfitrião encerrou esta sessão.",
+    "inactivity_timeout": "Esta sessão foi encerrada após um período de inatividade.",
+    "server_restarting": "O servidor está reiniciando. Entre novamente em instantes."
   },
   "localeSwitcher": {
     "english": "English",

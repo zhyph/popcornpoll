@@ -14,15 +14,26 @@ import { Card, CardContent, CardHeader } from '../../../components/ui/card'
 import type { ParticipantView, RoomSnapshot } from '../../../server/ws/protocol'
 import type { PoolEntry } from '../../../server/pool/buildPool'
 
+type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } | { type: 'room_ended'; reason: string }
+
+// How long a match reveal stays on screen before it's dismissed and the
+// swipe deck resumes — long enough to read the title, short enough not to
+// block swiping on whatever remains unmatched.
+const MATCH_REVEAL_MS = 4000
+
 export default function RoomPage({ params }: { params: { code: string } }) {
   const t = useTranslations('room')
   const tErrors = useTranslations('errors')
+  const tKicked = useTranslations('kicked')
+  const tRoomEnded = useTranslations('roomEnded')
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
   const [participants, setParticipants] = useState<ParticipantView[]>([])
   const [pool, setPool] = useState<PoolEntry[]>([])
   const [pendingCardId, setPendingCardId] = useState<number | null>(null)
   const [isHost, setIsHost] = useState(false)
   const [client, setClient] = useState<WsClient | null>(null)
+  const [terminal, setTerminal] = useState<TerminalState | null>(null)
+  const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
 
   useEffect(() => {
     const ws = createWsClient(`${location.origin.replace('http', 'ws')}/ws`)
@@ -70,6 +81,8 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     const unsubError = ws.on('error', (msg) => {
       toast(tErrors.has(msg.code) ? tErrors(msg.code) : tErrors('generic'))
     })
+    const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
+    const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
@@ -98,12 +111,44 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       unsubMatch()
       unsubExhausted()
       unsubError()
+      unsubKicked()
+      unsubRoomEnded()
       clearInterval(heartbeat)
       ws.close()
     }
   }, [params.code])
 
+  // Once a match's id has been shown for MATCH_REVEAL_MS, dismiss it and
+  // don't show it again — without this, deriving latestMatch directly from
+  // snapshot.matches every render means the reveal never goes away once a
+  // match has happened, permanently blocking the swipe deck underneath it.
+  const latestMatchId = snapshot && snapshot.matches.length > 0 ? snapshot.matches[snapshot.matches.length - 1]! : null
+  useEffect(() => {
+    if (latestMatchId === null || latestMatchId === dismissedMatchId) return
+    const timer = setTimeout(() => setDismissedMatchId(latestMatchId), MATCH_REVEAL_MS)
+    return () => clearTimeout(timer)
+  }, [latestMatchId, dismissedMatchId])
+
   if (!snapshot) return <p className="p-8 font-mono text-brass">{t('connecting')}</p>
+
+  if (terminal || snapshot.status === 'ended') {
+    const message =
+      terminal?.type === 'kicked'
+        ? tKicked.has(terminal.reason)
+          ? tKicked(terminal.reason)
+          : tKicked('kicked')
+        : tRoomEnded.has(terminal?.reason ?? 'host_ended')
+          ? tRoomEnded(terminal?.reason ?? 'host_ended')
+          : tRoomEnded('host_ended')
+    return (
+      <main
+        data-testid="terminal-screen"
+        className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-4 py-10 text-center"
+      >
+        <p className="font-display text-2xl text-ticket">{message}</p>
+      </main>
+    )
+  }
 
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
     return (
@@ -148,9 +193,10 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   }
 
   const currentCard = pool.find((entry) => entry.movieId === pendingCardId) ?? null
-  const latestMatch = snapshot.matches.length > 0
-    ? pool.find((e) => e.movieId === snapshot.matches[snapshot.matches.length - 1])
-    : null
+  const latestMatch =
+    latestMatchId !== null && latestMatchId !== dismissedMatchId
+      ? (pool.find((e) => e.movieId === latestMatchId) ?? null)
+      : null
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-4 py-10">

@@ -23,10 +23,12 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   await guestPage.click('text=Join')
   // See e2e/reconnect.spec.ts for why this wait is needed: clicking Start
   // immediately after the guest's client-side navigation races the guest's
-  // WS 'join' round-trip, and Start can fail silently (not_enough_participants,
-  // no client-side 'error' handler) if it wins that race. A plain `text=Guest`
-  // wait doesn't work because the host's own default display name is also
-  // "Guest" — wait for both participants' "Remove" buttons instead.
+  // WS 'join' round-trip, and Start can fail with not_enough_participants if
+  // it wins that race — the page does toast an 'error' handler now, but this
+  // test doesn't assert on toasts, so waiting for both participants avoids
+  // the race outright. A plain `text=Guest` wait doesn't work because the
+  // host's own default display name is also "Guest" — wait for both
+  // participants' "Remove" buttons instead.
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
   await hostPage.click('text=Start')
   await guestPage.waitForSelector('[data-testid="swipe-card"]')

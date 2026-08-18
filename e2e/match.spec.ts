@@ -25,8 +25,9 @@ test('two participants reach a match', async ({ baseURL }) => {
   // Wait for the host's own roster to show both participants before starting
   // — clicking Start immediately after the guest's client-side navigation
   // races the guest's WS 'join' round-trip, and Start can fail with
-  // not_enough_participants (silently, since the client has no 'error'
-  // handler) if it wins that race. See e2e/reconnect.spec.ts.
+  // not_enough_participants if it wins that race (the page does toast an
+  // 'error' handler now, but this test doesn't wait on a toast — waiting for
+  // both participants avoids the race outright). See e2e/reconnect.spec.ts.
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
   await hostPage.click('text=Start')

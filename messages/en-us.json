@@ -71,11 +71,17 @@
     "not_your_card": "That movie is no longer your current card.",
     "invalid_name": "Invalid name. Use between 1 and 24 characters.",
     "excluded_at_start": "You were excluded because you were disconnected when the session started.",
+    "room_not_active": "This room isn't active right now.",
     "generic": "Something went wrong."
   },
   "kicked": {
     "kicked": "The host removed you from the room.",
     "excluded_at_start": "You were excluded because you were disconnected when the session started."
+  },
+  "roomEnded": {
+    "host_ended": "The host ended this session.",
+    "inactivity_timeout": "This session ended after a period of inactivity.",
+    "server_restarting": "The server is restarting. Please rejoin in a moment."
   },
   "localeSwitcher": {
     "english": "English",
