@@ -1,5 +1,5 @@
 // e2e/fixtures.ts
-import { request } from '@playwright/test'
+import { request, type BrowserContext } from '@playwright/test'
 
 export async function seedFakeLibrary(baseURL: string): Promise<void> {
   const ctx = await request.newContext({ baseURL })
@@ -11,4 +11,9 @@ export async function seedFakeLibrary(baseURL: string): Promise<void> {
   // fake mode, so by the time this resolves the pool is ready.
   await ctx.post('/api/setup/plex/resync', { headers: { Authorization: 'Bearer admin' } })
   await ctx.dispose()
+}
+
+export async function pinEnglishLocale(context: BrowserContext, baseURL: string): Promise<void> {
+  const url = new URL(baseURL)
+  await context.addCookies([{ name: 'locale', value: 'en-us', domain: url.hostname, path: '/' }])
 }

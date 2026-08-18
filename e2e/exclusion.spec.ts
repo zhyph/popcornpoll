@@ -1,11 +1,13 @@
 // e2e/exclusion.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { seedFakeLibrary } from './fixtures'
+import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('a participant disconnected through Start is excluded and their reconnect is rejected', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
   const browser = await chromium.launch()
-  const hostPage = await (await browser.newContext()).newPage()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   await hostPage.click('text=Create room')
   await hostPage.waitForURL(/\/room\//)
@@ -18,13 +20,16 @@ test('a participant disconnected through Start is excluded and their reconnect i
   // very first yes swipe). With only host + 1 disconnecting guest, Start
   // would correctly be rejected — this scenario needs someone who stays
   // connected through Start so the post-exclusion count is still 2.
-  const stayingGuestPage = await (await browser.newContext()).newPage()
+  const stayingGuestContext = await browser.newContext()
+  await pinEnglishLocale(stayingGuestContext, baseURL!)
+  const stayingGuestPage = await stayingGuestContext.newPage()
   await stayingGuestPage.goto(`/join/${roomCode}`)
   await stayingGuestPage.fill('input[placeholder="Your name"]', 'Staying Guest')
   await stayingGuestPage.click('text=Join')
   await stayingGuestPage.waitForSelector('text=Admitted')
 
   const guestContext = await browser.newContext()
+  await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Disconnecting Guest')
@@ -37,7 +42,9 @@ test('a participant disconnected through Start is excluded and their reconnect i
   await hostPage.click('text=Start')
   await hostPage.waitForSelector('[data-testid="swipe-card"]')
 
-  const reconnectingPage = await (await browser.newContext()).newPage()
+  const reconnectingContext = await browser.newContext()
+  await pinEnglishLocale(reconnectingContext, baseURL!)
+  const reconnectingPage = await reconnectingContext.newPage()
   await reconnectingPage.goto(`/room/${roomCode}`)
   await reconnectingPage.evaluate(
     ({ code, token }) => sessionStorage.setItem(`sessionToken:${code}`, token as string),

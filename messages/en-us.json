@@ -1,0 +1,82 @@
+{
+  "common": {
+    "appName": "PopcornPoll"
+  },
+  "createRoom": {
+    "title": "Tonight's showing",
+    "candidateSourceLabel": "Candidate source",
+    "candidateSourcePlex": "Plex library only",
+    "candidateSourcePlexTmdb": "Plex + TMDB discover",
+    "matchRuleLabel": "Match rule",
+    "matchRuleAll": "Everyone must say yes",
+    "matchRuleMajority": "Majority",
+    "matchRuleAtLeast": "At least N",
+    "atLeastNLabel": "N",
+    "filtersLabel": "Filters",
+    "genreLabel": "Genre",
+    "genrePlaceholder": "e.g. Comedy",
+    "yearFromLabel": "Year, from",
+    "yearToLabel": "Year, to",
+    "minRatingLabel": "Minimum rating",
+    "createButton": "Create room",
+    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB."
+  },
+  "joinRoom": {
+    "invitedTo": "You're invited to",
+    "nameCardTitle": "Your name on the ticket",
+    "nameLabel": "Name",
+    "namePlaceholder": "Your name",
+    "joinButton": "Join"
+  },
+  "room": {
+    "connecting": "Connecting…",
+    "admitted": "Admitted",
+    "removeButton": "Remove",
+    "startButton": "Start",
+    "buildingPool": "Building your pool…",
+    "noUnanimousPick": "No unanimous pick — closest picks",
+    "endSession": "End session"
+  },
+  "swipeDeck": {
+    "inLibrary": "In your library",
+    "noMoreCards": "No more cards",
+    "yesAriaLabel": "Yes",
+    "noAriaLabel": "No"
+  },
+  "marqueeReveal": {
+    "matchLabel": "It's a match",
+    "readyInLibrary": "Ready to watch in your library"
+  },
+  "roomShare": {
+    "copyLink": "Copy link",
+    "copied": "Copied!",
+    "share": "Share",
+    "linkCopiedToast": "Link copied",
+    "shareTitle": "Join my movie night"
+  },
+  "ticketAvatar": {
+    "away": "away",
+    "done": "done"
+  },
+  "errors": {
+    "room_not_found": "Room not found.",
+    "already_started": "This room has already started.",
+    "room_full": "This room is full.",
+    "bad_token": "Your session expired. Refresh the page.",
+    "kicked": "You were removed from this room.",
+    "not_host": "Only the host can do that.",
+    "invalid_threshold": "Invalid match rule.",
+    "not_enough_participants": "At least 2 connected participants are needed to start.",
+    "pool_too_small": "Not enough movies to start. Try adjusting your filters.",
+    "not_your_card": "That movie is no longer your current card.",
+    "generic": "Something went wrong."
+  },
+  "kicked": {
+    "kicked": "The host removed you from the room.",
+    "excluded_at_start": "You were excluded because you were disconnected when the session started."
+  },
+  "localeSwitcher": {
+    "english": "English",
+    "portuguese": "Português"
+  }
+}

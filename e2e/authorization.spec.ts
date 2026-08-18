@@ -1,15 +1,20 @@
 // e2e/authorization.spec.ts
 import { test, expect, chromium } from '@playwright/test'
+import { pinEnglishLocale } from './fixtures'
 
 test('a non-host cannot start the room', async ({ baseURL }) => {
   const browser = await chromium.launch()
-  const hostPage = await (await browser.newContext()).newPage()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   await hostPage.click('text=Create room')
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
-  const guestPage = await (await browser.newContext()).newPage()
+  const guestContext = await browser.newContext()
+  await pinEnglishLocale(guestContext, baseURL!)
+  const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')
@@ -21,6 +26,7 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
 test('reconnecting with only sessionToken (no hostToken) does not grant host controls', async ({ baseURL }) => {
   const browser = await chromium.launch()
   const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   await hostPage.click('text=Create room')
@@ -32,6 +38,7 @@ test('reconnecting with only sessionToken (no hostToken) does not grant host con
   // (e.g. copied out-of-band) but never received hostToken — the real
   // credential kept only in the original browser's localStorage.
   const strippedContext = await browser.newContext()
+  await pinEnglishLocale(strippedContext, baseURL!)
   const strippedPage = await strippedContext.newPage()
   await strippedPage.goto(`/room/${roomCode}`)
   await strippedPage.evaluate(

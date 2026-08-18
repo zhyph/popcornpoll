@@ -1,7 +1,9 @@
 // app/room/[code]/page.tsx
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
 import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
@@ -13,6 +15,8 @@ import type { ParticipantView, RoomSnapshot } from '../../../server/ws/protocol'
 import type { PoolEntry } from '../../../server/pool/buildPool'
 
 export default function RoomPage({ params }: { params: { code: string } }) {
+  const t = useTranslations('room')
+  const tErrors = useTranslations('errors')
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
   const [participants, setParticipants] = useState<ParticipantView[]>([])
   const [pool, setPool] = useState<PoolEntry[]>([])
@@ -63,6 +67,9 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     const unsubExhausted = ws.on('exhausted', (msg) =>
       setSnapshot((prev) => prev && { ...prev, topCandidates: msg.topCandidates }),
     )
+    const unsubError = ws.on('error', (msg) => {
+      toast(tErrors.has(msg.code) ? tErrors(msg.code) : tErrors('generic'))
+    })
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
@@ -90,12 +97,13 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       unsubNextCard()
       unsubMatch()
       unsubExhausted()
+      unsubError()
       clearInterval(heartbeat)
       ws.close()
     }
   }, [params.code])
 
-  if (!snapshot) return <p className="p-8 font-mono text-brass">Connecting…</p>
+  if (!snapshot) return <p className="p-8 font-mono text-brass">{t('connecting')}</p>
 
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
     return (
@@ -103,7 +111,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         <RoomShare code={params.code} />
         <Card className="w-full border border-brass/50 bg-velvet">
           <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-            Admitted
+            {t('admitted')}
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {participants.map((p) => (
@@ -116,7 +124,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
                     className="text-exit-red hover:bg-exit-red/10"
                     onClick={() => client?.send({ type: 'kick', participantId: p.id })}
                   >
-                    Remove
+                    {t('removeButton')}
                   </Button>
                 )}
               </div>
@@ -129,11 +137,11 @@ export default function RoomPage({ params }: { params: { code: string } }) {
             className="bg-marquee text-ink hover:bg-marquee/90"
             onClick={() => client?.send({ type: 'start' })}
           >
-            Start
+            {t('startButton')}
           </Button>
         )}
         {snapshot.status === 'starting' && (
-          <p className="font-mono text-sm text-brass">Building your pool…</p>
+          <p className="font-mono text-sm text-brass">{t('buildingPool')}</p>
         )}
       </main>
     )
@@ -154,7 +162,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
       {snapshot.exhausted && snapshot.matches.length === 0 && (
         <Card data-testid="fallback" className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-display text-xl text-ticket">No unanimous pick — closest picks</CardHeader>
+          <CardHeader className="font-display text-xl text-ticket">{t('noUnanimousPick')}</CardHeader>
           <CardContent className="flex flex-col gap-1">
             {(snapshot.topCandidates ?? []).map((entry) => (
               <p key={entry.movieId} className="font-mono text-sm text-ticket">{entry.title}</p>
@@ -168,7 +176,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
           className="border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
           onClick={() => client?.send({ type: 'end_room' })}
         >
-          End session
+          {t('endSession')}
         </Button>
       )}
     </main>

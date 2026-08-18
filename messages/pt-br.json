@@ -1,0 +1,82 @@
+{
+  "common": {
+    "appName": "PopcornPoll"
+  },
+  "createRoom": {
+    "title": "Sessão de hoje",
+    "candidateSourceLabel": "Fonte dos candidatos",
+    "candidateSourcePlex": "Somente biblioteca do Plex",
+    "candidateSourcePlexTmdb": "Plex + descoberta TMDB",
+    "matchRuleLabel": "Regra de match",
+    "matchRuleAll": "Todos precisam dizer sim",
+    "matchRuleMajority": "Maioria",
+    "matchRuleAtLeast": "Pelo menos N",
+    "atLeastNLabel": "N",
+    "filtersLabel": "Filtros",
+    "genreLabel": "Gênero",
+    "genrePlaceholder": "ex. Comédia",
+    "yearFromLabel": "Ano, a partir de",
+    "yearToLabel": "Ano, até",
+    "minRatingLabel": "Nota mínima",
+    "createButton": "Criar sala",
+    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB."
+  },
+  "joinRoom": {
+    "invitedTo": "Você foi convidado para",
+    "nameCardTitle": "Seu nome no ingresso",
+    "nameLabel": "Nome",
+    "namePlaceholder": "Seu nome",
+    "joinButton": "Entrar"
+  },
+  "room": {
+    "connecting": "Conectando…",
+    "admitted": "Admitidos",
+    "removeButton": "Remover",
+    "startButton": "Iniciar",
+    "buildingPool": "Montando seu catálogo…",
+    "noUnanimousPick": "Sem escolha unânime — mais próximas",
+    "endSession": "Encerrar sessão"
+  },
+  "swipeDeck": {
+    "inLibrary": "Na sua biblioteca",
+    "noMoreCards": "Não há mais filmes",
+    "yesAriaLabel": "Sim",
+    "noAriaLabel": "Não"
+  },
+  "marqueeReveal": {
+    "matchLabel": "Deu match",
+    "readyInLibrary": "Pronto para assistir na sua biblioteca"
+  },
+  "roomShare": {
+    "copyLink": "Copiar link",
+    "copied": "Copiado!",
+    "share": "Compartilhar",
+    "linkCopiedToast": "Link copiado",
+    "shareTitle": "Venha para minha sessão de cinema"
+  },
+  "ticketAvatar": {
+    "away": "ausente",
+    "done": "pronto"
+  },
+  "errors": {
+    "room_not_found": "Sala não encontrada.",
+    "already_started": "Esta sala já começou.",
+    "room_full": "Esta sala está cheia.",
+    "bad_token": "Sua sessão expirou. Atualize a página.",
+    "kicked": "Você foi removido desta sala.",
+    "not_host": "Somente o anfitrião pode fazer isso.",
+    "invalid_threshold": "Regra de match inválida.",
+    "not_enough_participants": "É preciso pelo menos 2 pessoas conectadas para começar.",
+    "pool_too_small": "Não há filmes suficientes para começar. Ajuste os filtros.",
+    "not_your_card": "Esse filme não é mais o seu card atual.",
+    "generic": "Algo deu errado."
+  },
+  "kicked": {
+    "kicked": "O anfitrião te removeu da sala.",
+    "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou."
+  },
+  "localeSwitcher": {
+    "english": "English",
+    "portuguese": "Português"
+  }
+}

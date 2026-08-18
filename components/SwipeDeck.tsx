@@ -2,6 +2,7 @@
 'use client'
 
 import { motion, useAnimation, type PanInfo } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { useEffect, useState } from 'react'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -16,6 +17,7 @@ export function SwipeDeck({
   card: PoolEntry | null
   onDecide: (vote: 'yes' | 'no') => void
 }) {
+  const t = useTranslations('swipeDeck')
   const controls = useAnimation()
   const [dragDirection, setDragDirection] = useState<'yes' | 'no' | null>(null)
 
@@ -42,7 +44,7 @@ export function SwipeDeck({
   })
 
   if (!card) {
-    return <p className="font-display text-xl text-brass">No more cards</p>
+    return <p className="font-display text-xl text-brass">{t('noMoreCards')}</p>
   }
 
   async function handleDragEnd(_: unknown, info: PanInfo) {
@@ -78,7 +80,7 @@ export function SwipeDeck({
         <h2 className="font-display text-2xl text-ticket">{card.title}</h2>
         <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{card.overview}</p>
         {card.inLibrary && (
-          <Badge className="mt-2 bg-marquee text-ink">In your library</Badge>
+          <Badge className="mt-2 bg-marquee text-ink">{t('inLibrary')}</Badge>
         )}
       </motion.div>
       <div className="flex gap-6">
@@ -87,7 +89,7 @@ export function SwipeDeck({
           variant="outline"
           className="h-14 w-14 rounded-full border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
           onClick={() => animateDecision('no')}
-          aria-label="No"
+          aria-label={t('noAriaLabel')}
         >
           ✕
         </Button>
@@ -95,7 +97,7 @@ export function SwipeDeck({
           size="icon"
           className="h-14 w-14 rounded-full bg-marquee text-ink hover:bg-marquee/90"
           onClick={() => animateDecision('yes')}
-          aria-label="Yes"
+          aria-label={t('yesAriaLabel')}
         >
           ♥
         </Button>

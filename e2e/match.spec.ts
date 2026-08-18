@@ -1,11 +1,13 @@
 // e2e/match.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { seedFakeLibrary } from './fixtures'
+import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('two participants reach a match', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
   const browser = await chromium.launch()
-  const hostPage = await (await browser.newContext()).newPage()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   // Candidate source defaults to 'plex' (CreateRoomPage's initial state) — no
   // interaction with the shadcn Select needed for this scenario.
@@ -13,7 +15,9 @@ test('two participants reach a match', async ({ baseURL }) => {
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
-  const guestPage = await (await browser.newContext()).newPage()
+  const guestContext = await browser.newContext()
+  await pinEnglishLocale(guestContext, baseURL!)
+  const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')

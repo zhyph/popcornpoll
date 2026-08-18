@@ -1,11 +1,13 @@
 // e2e/exhaustion.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { seedFakeLibrary } from './fixtures'
+import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('a session with an unreachable threshold exhausts and shows the ranked fallback, even after a refresh', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
   const browser = await chromium.launch()
-  const hostPage = await (await browser.newContext()).newPage()
+  const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
+  const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   // Match rule defaults to 'all' (CreateRoomPage's initial state) — require
   // unanimity, so one "no" prevents any match. No Select interaction needed.
@@ -13,7 +15,9 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   await hostPage.waitForURL(/\/room\//)
   const roomCode = hostPage.url().split('/room/')[1]
 
-  const guestPage = await (await browser.newContext()).newPage()
+  const guestContext = await browser.newContext()
+  await pinEnglishLocale(guestContext, baseURL!)
+  const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')
   await guestPage.click('text=Join')

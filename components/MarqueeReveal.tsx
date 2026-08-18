@@ -2,11 +2,13 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import type { PoolEntry } from '../server/pool/buildPool'
 
 const BULB_COUNT = 20
 
 export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
+  const t = useTranslations('marqueeReveal')
   return (
     <motion.div
       role="alert"
@@ -24,7 +26,7 @@ export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
           transition={{ duration: 1.2, repeat: Infinity, delay: (i / BULB_COUNT) * 1.2, ease: 'easeInOut' }}
         />
       ))}
-      <p className="font-mono text-xs uppercase tracking-widest text-brass">It's a match</p>
+      <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('matchLabel')}</p>
       <motion.h2
         className="font-display text-4xl text-ticket"
         initial={{ y: 20, opacity: 0 }}
@@ -33,7 +35,7 @@ export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
       >
         {movie.title}
       </motion.h2>
-      {movie.inLibrary && <p className="mt-2 text-sm text-marquee">Ready to watch in your library</p>}
+      {movie.inLibrary && <p className="mt-2 text-sm text-marquee">{t('readyInLibrary')}</p>}
     </motion.div>
   )
 }

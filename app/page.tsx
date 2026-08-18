@@ -1,6 +1,7 @@
 // app/page.tsx
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Button } from '../components/ui/button'
@@ -12,6 +13,7 @@ import { Separator } from '../components/ui/separator'
 import type { CandidateSource, MatchThreshold, TmdbFilters } from '../server/room/types'
 
 export default function CreateRoomPage() {
+  const t = useTranslations('createRoom')
   const router = useRouter()
   const [candidateSource, setCandidateSource] = useState<CandidateSource>('plex')
   const [thresholdKind, setThresholdKind] = useState<MatchThreshold['kind']>('all')
@@ -46,35 +48,35 @@ export default function CreateRoomPage() {
       <h1 className="font-display text-5xl text-marquee">POPCORNPOLL</h1>
       <Card className="w-full border-2 border-brass bg-velvet">
         <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-          Tonight's showing
+          {t('title')}
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label>Candidate source</Label>
+            <Label>{t('candidateSourceLabel')}</Label>
             <Select value={candidateSource} onValueChange={(v) => setCandidateSource(v as CandidateSource)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="plex">Plex library only</SelectItem>
-                <SelectItem value="plex+tmdb">Plex + TMDB discover</SelectItem>
+                <SelectItem value="plex">{t('candidateSourcePlex')}</SelectItem>
+                <SelectItem value="plex+tmdb">{t('candidateSourcePlexTmdb')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Match rule</Label>
+            <Label>{t('matchRuleLabel')}</Label>
             <Select value={thresholdKind} onValueChange={(v) => setThresholdKind(v as MatchThreshold['kind'])}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Everyone must say yes</SelectItem>
-                <SelectItem value="majority">Majority</SelectItem>
-                <SelectItem value="atLeast">At least N</SelectItem>
+                <SelectItem value="all">{t('matchRuleAll')}</SelectItem>
+                <SelectItem value="majority">{t('matchRuleMajority')}</SelectItem>
+                <SelectItem value="atLeast">{t('matchRuleAtLeast')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           {thresholdKind === 'atLeast' && (
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="atLeastN">N</Label>
+              <Label htmlFor="atLeastN">{t('atLeastNLabel')}</Label>
               <Input
                 id="atLeastN"
                 type="number"
@@ -86,24 +88,24 @@ export default function CreateRoomPage() {
           )}
 
           <Separator className="bg-brass/40" />
-          <p className="font-mono text-xs uppercase tracking-widest text-brass">Filters</p>
+          <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('filtersLabel')}</p>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="genre">Genre</Label>
-            <Input id="genre" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="e.g. Comedy" />
+            <Label htmlFor="genre">{t('genreLabel')}</Label>
+            <Input id="genre" value={genre} onChange={(e) => setGenre(e.target.value)} placeholder={t('genrePlaceholder')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMin">Year, from</Label>
+              <Label htmlFor="yearMin">{t('yearFromLabel')}</Label>
               <Input id="yearMin" type="number" value={yearMin} onChange={(e) => setYearMin(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="yearMax">Year, to</Label>
+              <Label htmlFor="yearMax">{t('yearToLabel')}</Label>
               <Input id="yearMax" type="number" value={yearMax} onChange={(e) => setYearMax(e.target.value)} />
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="ratingMin">Minimum rating</Label>
+            <Label htmlFor="ratingMin">{t('minRatingLabel')}</Label>
             <Input
               id="ratingMin"
               type="number"
@@ -116,11 +118,11 @@ export default function CreateRoomPage() {
           </div>
 
           <Button className="mt-2 bg-marquee text-ink hover:bg-marquee/90" onClick={createRoom}>
-            Create room
+            {t('createButton')}
           </Button>
           {candidateSource === 'plex+tmdb' && (
             <p className="text-center text-xs text-muted-foreground">
-              This product uses the TMDB API but is not endorsed or certified by TMDB.
+              {t('tmdbAttribution')}
             </p>
           )}
         </CardContent>

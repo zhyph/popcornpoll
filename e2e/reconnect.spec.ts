@@ -1,11 +1,12 @@
 // e2e/reconnect.spec.ts
 import { expect, test, chromium } from '@playwright/test'
-import { seedFakeLibrary } from './fixtures'
+import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('participant reconnects and keeps their current pending card', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
   const browser = await chromium.launch()
   const hostContext = await browser.newContext()
+  await pinEnglishLocale(hostContext, baseURL!)
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
   await hostPage.click('text=Create room')
@@ -13,6 +14,7 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   const roomCode = hostPage.url().split('/room/')[1]
 
   const guestContext = await browser.newContext()
+  await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.fill('input[placeholder="Your name"]', 'Guest')

@@ -1,6 +1,7 @@
 // components/RoomShare.tsx
 'use client'
 
+import { useTranslations } from 'next-intl'
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -8,6 +9,7 @@ import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
 
 export function RoomShare({ code }: { code: string }) {
+  const t = useTranslations('roomShare')
   const [copied, setCopied] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const joinUrl = typeof window !== 'undefined' ? `${window.location.origin}/join/${code}` : ''
@@ -33,7 +35,7 @@ export function RoomShare({ code }: { code: string }) {
       document.body.removeChild(input)
     }
     setCopied(true)
-    toast('Link copied')
+    toast(t('linkCopiedToast'))
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -44,14 +46,14 @@ export function RoomShare({ code }: { code: string }) {
         <canvas ref={canvasRef} aria-label={`QR code for ${joinUrl}`} className="rounded bg-ticket p-2" />
         <div className="flex gap-2">
           <Button variant="outline" className="border-brass text-ticket" onClick={copyLink}>
-            {copied ? 'Copied!' : 'Copy link'}
+            {copied ? t('copied') : t('copyLink')}
           </Button>
           {typeof navigator !== 'undefined' && 'share' in navigator && (
             <Button
               className="bg-marquee text-ink hover:bg-marquee/90"
-              onClick={() => navigator.share({ title: 'Join my movie night', url: joinUrl })}
+              onClick={() => navigator.share({ title: t('shareTitle'), url: joinUrl })}
             >
-              Share
+              {t('share')}
             </Button>
           )}
         </div>
