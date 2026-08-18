@@ -435,7 +435,7 @@ describe('createStatsHandler', () => {
        VALUES ('pk1', 'Rear Window', 'plex', 1, '2026-01-01T00:00:00.000Z')`,
     ).run()
     insertMatch(db, { movieId: 1, roomCode: 'BLUE-FOX-427', title: 'Rear Window', posterPath: null, posterSource: 'plex', year: 1954 })
-    await savePlexLink(db, KEY, {
+    savePlexLink(db, KEY, {
       clientIdentifier: 'client-1',
       serverUrl: 'http://plex.local',
       authToken: 'tok',
@@ -467,7 +467,7 @@ describe('createStatsHandler', () => {
 })
 ```
 
-Check `server/plex/link.ts`'s actual `savePlexLink` signature before writing this — if it isn't `async` or its parameter shape differs from the guess above, match what the file actually exports (`server/http/setup.ts` or `server/http/setup.test.ts` already call it — copy the exact call shape from there).
+(`savePlexLink(db, key, link): void` is synchronous — confirmed directly against `server/plex/link.ts` — hence no `await` above.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
