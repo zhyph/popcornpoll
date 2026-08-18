@@ -9,6 +9,7 @@ import { createRoomStore } from '../room/roomStore'
 import { handleMessage } from './router'
 import type Database from 'better-sqlite3'
 import type { RoomStore } from '../room/roomStore'
+import type { SyncWaiter } from '../room/activeActions'
 import type { TmdbClient } from '../tmdb/client'
 import type { ConnectionState } from './router'
 
@@ -20,6 +21,7 @@ const noOpTmdb: TmdbClient = {
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
 }
+const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'popcornpoll-router-'))
@@ -59,7 +61,7 @@ function seedPlexRows(count: number) {
 describe('handleMessage: join', () => {
   it('a successful join returns a joined message on toSender and a state_update on toRoom', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
-    const result = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: code,
       displayName: 'Alice',
@@ -72,7 +74,7 @@ describe('handleMessage: join', () => {
   })
 
   it('joining an unknown room returns an error and does not bind connection state', async () => {
-    const result = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: 'NOPE-NOPE-000',
       displayName: 'Alice',
@@ -86,17 +88,17 @@ describe('handleMessage: start + room_started', () => {
   it('a successful start emits room_started to the whole room, accompanied by a same-seq state_update', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     let state = freshState()
-    const joined = await handleMessage(store, db, noOpTmdb, state, {
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, {
       type: 'join',
       roomCode: code,
       displayName: 'Host',
       hostClaimToken,
     })
     state = joined.newState
-    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
     seedPlexRows(20)
 
-    const result = await handleMessage(store, db, noOpTmdb, state, { type: 'start' })
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, { type: 'start' })
     const started = result.toRoom.find((m) => m.type === 'room_started')
     const stateUpdate = result.toRoom.find((m) => m.type === 'state_update' && m.status === 'active')
     expect(started).toBeDefined()
@@ -117,14 +119,14 @@ describe('handleMessage: start + room_started', () => {
   it('emits a degraded_to_plex_only notice to the room when TMDB fails during start', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
     let state = freshState()
-    const joined = await handleMessage(store, db, noOpTmdb, state, {
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, {
       type: 'join',
       roomCode: code,
       displayName: 'Host',
       hostClaimToken,
     })
     state = joined.newState
-    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
     seedPlexRows(20)
 
     const failingTmdb: TmdbClient = {
@@ -132,7 +134,7 @@ describe('handleMessage: start + room_started', () => {
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
     }
-    const result = await handleMessage(store, db, failingTmdb, state, { type: 'start' })
+    const result = await handleMessage(store, db, failingTmdb, noOpLibrarySync, state, { type: 'start' })
     const notice = result.toRoom.find((m) => m.type === 'notice')
     expect(notice).toEqual({
       type: 'notice',
@@ -144,13 +146,13 @@ describe('handleMessage: start + room_started', () => {
 
   it('a non-host start attempt returns not_host and does not change room status', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
-    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Host', hostClaimToken })
-    const otherJoined = await handleMessage(store, db, noOpTmdb, freshState(), {
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Host', hostClaimToken })
+    const otherJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: code,
       displayName: 'Other',
     })
-    const result = await handleMessage(store, db, noOpTmdb, otherJoined.newState, { type: 'start' })
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, otherJoined.newState, { type: 'start' })
     expect(result.toSender).toEqual([{ type: 'error', code: 'not_host', message: expect.any(String) }])
     expect(store.get(code)!.status).toBe('lobby')
   })
@@ -159,20 +161,20 @@ describe('handleMessage: start + room_started', () => {
 describe('handleMessage: swipe -> next_card', () => {
   it('a consumed swipe sends next_card only to the swiping participant, not the whole room', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
-    const hostJoined = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const hostJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: code,
       displayName: 'Host',
       hostClaimToken,
     })
-    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
     seedPlexRows(20)
-    const started = await handleMessage(store, db, noOpTmdb, hostJoined.newState, { type: 'start' })
+    const started = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostJoined.newState, { type: 'start' })
     const hostState = started.newState
     const room = store.get(code)!
     const pending = room.participants.get(hostState.participantId!)!.pendingCardId!
 
-    const result = await handleMessage(store, db, noOpTmdb, hostState, {
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
       type: 'swipe',
       movieId: pending,
       vote: 'yes',
@@ -186,18 +188,18 @@ describe('handleMessage: start broadcasts a transitional state_update via onBroa
   it('calls onBroadcast with a "starting" state_update before the pool build resolves', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     let state = freshState()
-    const joined = await handleMessage(store, db, noOpTmdb, state, {
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, {
       type: 'join',
       roomCode: code,
       displayName: 'Host',
       hostClaimToken,
     })
     state = joined.newState
-    await handleMessage(store, db, noOpTmdb, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
     seedPlexRows(20)
 
     const broadcastStatuses: string[] = []
-    await handleMessage(store, db, noOpTmdb, state, { type: 'start' }, (messages) => {
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, { type: 'start' }, (messages) => {
       for (const m of messages) if (m.type === 'state_update') broadcastStatuses.push(m.status)
     })
 
@@ -209,23 +211,23 @@ describe('handleMessage: kick -> exhausted', () => {
   it('emits an exhausted event when kicking the last unfinished participant in an active room', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     let hostState = freshState()
-    const hostJoined = await handleMessage(store, db, noOpTmdb, hostState, {
+    const hostJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
       type: 'join',
       roomCode: code,
       displayName: 'Host',
       hostClaimToken,
     })
     hostState = hostJoined.newState
-    const guestJoined = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const guestJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: code,
       displayName: 'Guest',
     })
     seedPlexRows(20)
-    await handleMessage(store, db, noOpTmdb, hostState, { type: 'start' })
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, { type: 'start' })
     store.get(code)!.participants.get(hostState.participantId!)!.finished = true
 
-    const result = await handleMessage(store, db, noOpTmdb, hostState, {
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
       type: 'kick',
       participantId: guestJoined.newState.participantId!,
     })
@@ -237,13 +239,13 @@ describe('handleMessage: kick -> exhausted', () => {
 describe('handleMessage: reconnect', () => {
   it('reconnect with a valid sessionToken rebinds connection state', async () => {
     const { code } = store.create({ kind: 'all' }, 'plex', {})
-    const joined = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'join',
       roomCode: code,
       displayName: 'Alice',
     })
     const sessionToken = (joined.toSender[0] as { type: 'joined'; sessionToken: string }).sessionToken
-    const result = await handleMessage(store, db, noOpTmdb, freshState(), {
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
       type: 'reconnect',
       roomCode: code,
       sessionToken,

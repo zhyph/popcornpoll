@@ -13,6 +13,10 @@ import type { RoomState } from './types'
 
 export const MIN_PARTICIPANTS_TO_START = 2
 
+export interface SyncWaiter {
+  waitForCurrent(): Promise<void>
+}
+
 function ok<T>(data: T): ActionResult<T> {
   return { ok: true, data }
 }
@@ -58,6 +62,7 @@ export async function startRoom(
   callerIsHost: boolean,
   db: Database.Database,
   tmdb: TmdbClient,
+  librarySync: SyncWaiter,
   notifyStarting?: () => void,
 ): Promise<ActionResult<{ excludedParticipantIds: string[]; pool: PoolEntry[]; degraded: boolean }>> {
   if (!callerIsHost) return err('not_host')
@@ -83,6 +88,13 @@ export async function startRoom(
   // race described in the spec's Concurrency section.
   room.status = 'starting'
   notifyStarting?.()
+
+  // Spec: pool construction awaits an in-flight sync if one is running, using
+  // the same single-flight promise the sync module already holds — otherwise
+  // a pool could be built from a half-synced library, mixing already-removed
+  // and not-yet-added titles. Room *creation* deliberately does NOT await a
+  // staleness-triggered sync (see server/http/rooms.ts) — only Start does.
+  await librarySync.waitForCurrent()
 
   const result = await buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
   if (result.tooSmall) {

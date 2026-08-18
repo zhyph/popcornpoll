@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
 import { joinRoom } from './actions'
-import { startRoom, swipeAction } from './activeActions'
+import { startRoom, swipeAction, type SyncWaiter } from './activeActions'
 import { createRoomStore } from './roomStore'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
@@ -18,6 +18,7 @@ const noOpTmdb: TmdbClient = {
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
 }
+const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'popcornpoll-active-'))
@@ -54,7 +55,7 @@ describe('startRoom', () => {
     const store = createRoomStore()
     const { code } = store.create({ kind: 'all' }, 'plex', {})
     seedPlexRows(10)
-    const result = await startRoom(store, code, false, db, noOpTmdb)
+    const result = await startRoom(store, code, false, db, noOpTmdb, noOpLibrarySync)
     expect(result).toEqual({ ok: false, code: 'not_host' })
   })
 
@@ -63,7 +64,7 @@ describe('startRoom', () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
     joinRoom(store, code, 'Host', hostClaimToken)
     seedPlexRows(10)
-    const result = await startRoom(store, code, true, db, noOpTmdb)
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     expect(result).toEqual({ ok: false, code: 'not_enough_participants' })
   })
 
@@ -77,7 +78,7 @@ describe('startRoom', () => {
     store.get(code)!.participants.get(flaky.data.participantId)!.connectionStatus = 'disconnected'
     seedPlexRows(10)
 
-    const result = await startRoom(store, code, true, db, noOpTmdb)
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.excludedParticipantIds).toEqual([flaky.data.participantId])
@@ -93,7 +94,7 @@ describe('startRoom', () => {
     joinRoom(store, code, 'Host', hostClaimToken)
     joinRoom(store, code, 'B')
     seedPlexRows(2) // below POOL_MIN_SIZE (5)
-    const result = await startRoom(store, code, true, db, noOpTmdb)
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     expect(result).toEqual({ ok: false, code: 'pool_too_small' })
     expect(store.get(code)!.status).toBe('lobby')
   })
@@ -106,7 +107,7 @@ describe('startRoom', () => {
     if (!host.ok || !other.ok) throw new Error('setup failed')
     seedPlexRows(20)
 
-    const result = await startRoom(store, code, true, db, noOpTmdb)
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     expect(result.ok).toBe(true)
     const room = store.get(code)!
     expect(room.status).toBe('active')
@@ -128,7 +129,7 @@ describe('startRoom', () => {
       findByImdbId: vi.fn(),
     }
 
-    const result = await startRoom(store, code, true, db, failingTmdb)
+    const result = await startRoom(store, code, true, db, failingTmdb, noOpLibrarySync)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.degraded).toBe(true)
@@ -146,7 +147,7 @@ describe('startRoom notifyStarting callback', () => {
 
     const seenStatuses: string[] = []
     const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
-    await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync, notifyStarting)
 
     expect(notifyStarting).toHaveBeenCalledTimes(1)
     expect(seenStatuses).toEqual(['starting'])
@@ -161,7 +162,7 @@ describe('startRoom notifyStarting callback', () => {
 
     const seenStatuses: string[] = []
     const notifyStarting = vi.fn(() => seenStatuses.push(store.get(code)!.status))
-    const result = await startRoom(store, code, true, db, noOpTmdb, notifyStarting)
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync, notifyStarting)
 
     expect(result).toEqual({ ok: false, code: 'pool_too_small' })
     expect(notifyStarting).toHaveBeenCalledTimes(2)
@@ -186,7 +187,7 @@ describe('swipeAction', () => {
     const other = joinRoom(store, code, 'Other')
     if (!host.ok || !other.ok) throw new Error('setup failed')
     seedPlexRows(20)
-    await startRoom(store, code, true, db, noOpTmdb)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     return { store, code, hostId: host.data.participantId, otherId: other.data.participantId }
   }
 
@@ -243,7 +244,7 @@ describe('swipeAction', () => {
     const other = joinRoom(store, code, 'Other')
     if (!host.ok || !other.ok) throw new Error('setup failed')
     seedPlexRows(5) // exactly POOL_MIN_SIZE, so this session is fast to exhaust
-    await startRoom(store, code, true, db, noOpTmdb)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
     const room = store.get(code)!
 
     let exhaustedNow = false

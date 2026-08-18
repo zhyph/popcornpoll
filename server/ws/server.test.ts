@@ -13,6 +13,7 @@ import { attachWebSocketServer, MAX_FAILED_JOINS, RECONNECT_GRACE_MS } from './s
 import { WS_CLOSE_TERMINAL } from './protocol'
 import type { Server } from 'node:http'
 import type Database from 'better-sqlite3'
+import type { SyncWaiter } from '../room/activeActions'
 import type { TmdbClient } from '../tmdb/client'
 import type { AppConfig } from '../config'
 
@@ -34,13 +35,14 @@ const noOpTmdb: TmdbClient = {
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
 }
+const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'popcornpoll-wsserver-'))
   db = openDb(dir)
   const store = createRoomStore()
   httpServer = createServer()
-  attachWebSocketServer(httpServer, store, db, noOpTmdb, {
+  attachWebSocketServer(httpServer, store, db, noOpTmdb, noOpLibrarySync, {
     ...config,
     appOrigin: '', // '' disables Origin enforcement for this test's plain ws:// client
   })
@@ -289,7 +291,7 @@ describe('attachWebSocketServer: handleMessage failures do not crash the process
     crashDb = openDb(crashDir)
     const store = createRoomStore()
     crashServer = createServer()
-    attachWebSocketServer(crashServer, store, crashDb, noOpTmdb, { ...config, appOrigin: '' })
+    attachWebSocketServer(crashServer, store, crashDb, noOpTmdb, noOpLibrarySync, { ...config, appOrigin: '' })
     await new Promise<void>((resolve) => crashServer.listen(0, resolve))
     crashPort = (crashServer.address() as AddressInfo).port
     ;(globalThis as { __crashStore?: ReturnType<typeof createRoomStore> }).__crashStore = store

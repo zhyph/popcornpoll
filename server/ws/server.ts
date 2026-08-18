@@ -3,7 +3,7 @@ import type { Server } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
-import { recomputeExhaustion } from '../room/activeActions'
+import { recomputeExhaustion, type SyncWaiter } from '../room/activeActions'
 import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
 import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
@@ -39,6 +39,7 @@ export function attachWebSocketServer(
   store: RoomStore,
   db: Database.Database,
   tmdb: TmdbClient,
+  librarySync: SyncWaiter,
   config: AppConfig,
 ): WsServerHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
@@ -147,7 +148,7 @@ export function attachWebSocketServer(
 
       let result: Awaited<ReturnType<typeof handleMessage>>
       try {
-        result = await handleMessage(store, db, tmdb, meta.state, message, (messages) => {
+        result = await handleMessage(store, db, tmdb, librarySync, meta.state, message, (messages) => {
           if (meta.state.roomCode) broadcastToRoom(meta.state.roomCode, messages)
         })
       } catch (err) {

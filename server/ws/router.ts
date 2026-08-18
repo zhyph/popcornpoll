@@ -1,7 +1,7 @@
 // server/ws/router.ts
 import type Database from 'better-sqlite3'
 import { joinRoom, kickParticipant, reconnectRoom, updateSettings } from '../room/actions'
-import { startRoom, swipeAction } from '../room/activeActions'
+import { startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
 import { endRoom, touchActivity } from '../room/lifecycle'
 import type { RoomStore } from '../room/roomStore'
 import type { Participant, RoomState } from '../room/types'
@@ -85,6 +85,7 @@ export async function handleMessage(
   store: RoomStore,
   db: Database.Database,
   tmdb: TmdbClient,
+  librarySync: SyncWaiter,
   state: ConnectionState,
   message: ClientMessage,
   onBroadcast?: (messages: ServerMessage[]) => void,
@@ -204,7 +205,7 @@ export async function handleMessage(
     case 'start': {
       if (!state.roomCode) return emptyOutput(state)
       const roomCode = state.roomCode
-      const result = await startRoom(store, roomCode, state.isHost, db, tmdb, () => {
+      const result = await startRoom(store, roomCode, state.isHost, db, tmdb, librarySync, () => {
         const room = store.get(roomCode)
         if (room) onBroadcast?.([stateUpdate(room)])
       })
