@@ -8444,7 +8444,7 @@ git commit -m "docs+chore: Dockerfile, healthcheck, and README"
 - Modify: `package.json` (add `next-intl` dependency)
 
 **Interfaces:**
-- Consumes: `ParticipantView`, `ServerMessage` (Task 18's `server/ws/protocol.ts`) for the WS `error.code`/`kicked.reason`/`room_ended.reason` values this task adds translated copy for.
+- Consumes: `ParticipantView`, `ServerMessage` (Task 18's `server/ws/protocol.ts`) for the WS `error.code`/`kicked.reason` values this task adds translated copy for. **Correction from an earlier draft of this line:** `room_ended.reason` is NOT covered — `app/room/[code]/page.tsx` has never had a `ws.on('room_ended', ...)` handler at all (a pre-existing gap from Task 22, same class as the already-noted `kicked` handler gap), so there is nothing for translated copy to attach to yet. Out of scope here for the same reason `kicked`'s own UX is: it needs a real handler and UI treatment, not a bolt-on dictionary key. `kicked`'s dictionary keys (below) are added anyway, ahead of that future handler, since they cost nothing and the values are already known — `room_ended` has only one known value (`'host_ended'`) and no home to render it in yet, so it's left out entirely rather than adding a translation nothing will ever read.
 - Produces: `useTranslations(namespace)` usage across every component listed above — a namespace per component/page (`createRoom`, `joinRoom`, `room`, `swipeDeck`, `marqueeReveal`, `roomShare`, `ticketAvatar`, `errors`, `kicked`, `common`), matching `messages/*.json`'s top-level keys exactly.
 
 - [ ] **Step 1: Install next-intl**
@@ -8524,6 +8524,8 @@ Create `messages/pt-br.json`:
     "room_full": "Esta sala está cheia.",
     "bad_token": "Sua sessão expirou. Atualize a página.",
     "kicked": "Você foi removido desta sala.",
+    "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou.",
+    "invalid_name": "Nome inválido. Use entre 1 e 24 caracteres.",
     "not_host": "Somente o anfitrião pode fazer isso.",
     "invalid_threshold": "Regra de match inválida.",
     "not_enough_participants": "É preciso pelo menos 2 pessoas conectadas para começar.",
@@ -8611,6 +8613,8 @@ Create `messages/en-us.json` — same keys, English values:
     "room_full": "This room is full.",
     "bad_token": "Your session expired. Refresh the page.",
     "kicked": "You were removed from this room.",
+    "excluded_at_start": "You were excluded because you were disconnected when the session started.",
+    "invalid_name": "Invalid name. Use between 1 and 24 characters.",
     "not_host": "Only the host can do that.",
     "invalid_threshold": "Invalid match rule.",
     "not_enough_participants": "At least 2 connected participants are needed to start.",
