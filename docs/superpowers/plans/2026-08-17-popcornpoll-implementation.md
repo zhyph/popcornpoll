@@ -58,8 +58,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",
-    "build": "next build && tsc -p tsconfig.server.json",
-    "start": "node dist/server/index.js",
+    "build": "next build",
+    "start": "tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -72,6 +72,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tsx": "^4.19.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -81,12 +82,13 @@
     "@types/react": "^18.3.5",
     "@types/qrcode": "^1.5.5",
     "@types/ws": "^8.5.12",
-    "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   }
 }
 ```
+
+**A note that belongs here even though it only matters starting at Task 24:** `start` runs the server via `tsx` (the same as `dev`), not a separate `tsc`-to-`dist/`-then-`node` compile step. `server/db/index.ts` (Task 3) uses `import.meta.dirname`, which TypeScript only permits under an ESM-family `module` target (`es2020`+/`nodenext`/etc.) — never `CommonJS`. Compiling the server to CommonJS would fail outright. Compiling it to an ESM target instead avoids that, but running the *emitted* `.js` with plain `node` hits a second, deeper problem: Node's native ESM resolver requires explicit `.js` extensions on every relative import, and this codebase's `server/**/*.ts` files (already written and approved across Tasks 1-23) use extensionless relative imports throughout — under `tsx` at dev-time this is transparently handled, but a real `tsc` compile would either fail to typecheck (strict `NodeNext` resolution) or silently emit `.js` files with the same extensionless imports, which then fail at runtime under plain `node` regardless. Rewriting every relative import in the server codebase to add `.js` extensions, just to support an ahead-of-time compile step, is a large, invasive change for no real benefit in a small self-hosted app — running `tsx` in production too (same command as dev, differing only in the environment it's given) is simpler and keeps dev/prod symmetric, which is exactly the property that would have caught this gap earlier if it had been in place from the start.
 
 - [ ] **Step 2: Write `tsconfig.json`**
 
@@ -7731,7 +7733,7 @@ git add server/index.ts server/index.test.ts
 git commit -m "fix: wire Next.js request handling into the custom server — no task ever served a single page over HTTP before this"
 ```
 
-**Note for whoever builds Task 24 (deployment):** the production `start` script runs `node dist/server/index.js`, which now calls `next({ dev: false })` at startup — this requires the `.next` build output (from `next build`, already the first half of the `build` script) to be present alongside the compiled server code in the runtime image, not just the `dist/` output from `tsc -p tsconfig.server.json`. Make sure the Dockerfile's runtime stage copies `.next/`, `public/` (if any), `next.config.js`, and `package.json`/`node_modules` (Next needs its own runtime deps available), not only `dist/`.
+**Note for whoever builds Task 24 (deployment):** the production `start` script now calls `next({ dev: false })` at startup — this requires the `.next` build output (from `next build`) to be present in the runtime image alongside the server's own source. (Task 24 also found and fixed a separate, unrelated gap in Task 1's `package.json`: `start` was originally specified as `node dist/server/index.js`, an ahead-of-time `tsc` compile that can't actually work for this codebase — see Task 1's `package.json` step for why. `start` runs the server via `tsx` instead, the same as `dev`.) Either way, make sure the Dockerfile's runtime stage copies `.next/`, `public/` (if any), `next.config.js`, and `package.json`/`node_modules` — Next needs its own runtime deps available.
 
 **A third bug, also discovered by this task and also fixed here:** `server/ws/server.ts`'s `toRoom` delivery loop explicitly excludes the sender (`if (otherWs === ws) continue`, from Task 19). This is correct for `swipe` only in the sense that the swiper's own next card comes through `toSender` — but `state_update`/`match`/`exhausted`/`room_started`/`room_ended` are room-wide facts every connected participant needs, the acting participant included, and every one of `start`/`kick`/`update_settings`/`end_room`'s success paths puts its entire payload in `toRoom` with nothing in `toSender`. Since only the host can ever send `start`, and no one else's action can retroactively deliver it, the host who clicks Start never learns the room started and stays stuck on the lobby screen forever — confirmed live via Playwright by this task, not guessed. `matches`/`exhausted` reaching the swiper who caused them has the same bug, just less visible (another participant's next action happens to relay it).
 
@@ -8237,34 +8239,16 @@ git commit -m "test: playwright e2e coverage for match, reconnect, exhaustion, a
 **Files:**
 - Create: `Dockerfile`
 - Create: `.dockerignore`
-- Create: `tsconfig.server.json`
 - Create: `README.md`
 
 **Interfaces:**
-- Consumes: `npm run build` / `npm run start` (Task 1's `package.json` scripts), `/api/health` (Task 20)
+- Consumes: `npm run build` / `npm run start` (Task 1's `package.json` scripts — `start` runs the server via `tsx`, same as `dev`, not an ahead-of-time `tsc` compile; see the note on Task 1's `package.json` step for why), `/api/health` (Task 20)
 
-- [ ] **Step 1: Write `tsconfig.server.json`** (a separate, emitting config for the `npm run build` server compile step, distinct from the frontend's Next.js build)
-
-```json
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "Node",
-    "outDir": "dist",
-    "noEmit": false
-  },
-  "include": ["server/**/*.ts"],
-  "exclude": ["server/**/*.test.ts", "node_modules", "dist", ".next"]
-}
-```
-
-- [ ] **Step 2: Write `.dockerignore`**
+- [ ] **Step 1: Write `.dockerignore`**
 
 ```
 node_modules
 .next
-dist
 data
 *.db
 .git
@@ -8272,7 +8256,9 @@ e2e
 **/*.test.ts
 ```
 
-- [ ] **Step 3: Write the multi-stage `Dockerfile`**
+- [ ] **Step 2: Write the multi-stage `Dockerfile`**
+
+The runtime image needs the compiled Next.js output (`.next/`, produced by `npm run build`) but runs the server itself straight from TypeScript source via `tsx` — so the runtime stage copies `server/`, `next.config.js`, and `tsconfig.json` alongside `.next/`, not a `dist/` directory (there isn't one; see Task 1's `package.json` note).
 
 ```dockerfile
 # Dockerfile
@@ -8288,11 +8274,11 @@ WORKDIR /app
 RUN groupadd -r popcornpoll && useradd -r -g popcornpoll popcornpoll
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.js ./next.config.js
-COPY --from=builder /app/server/db/migrations ./dist/server/db/migrations
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/server ./server
 
 RUN mkdir -p /data && chown -R popcornpoll:popcornpoll /data /app
 USER popcornpoll
@@ -8304,10 +8290,10 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-CMD ["node", "dist/server/index.js"]
+CMD ["npx", "tsx", "server/index.ts"]
 ```
 
-- [ ] **Step 4: Build the image and run the healthcheck manually to confirm the Dockerfile is correct**
+- [ ] **Step 3: Build the image and run the healthcheck manually to confirm the Dockerfile is correct**
 
 ```bash
 docker build -t popcornpoll:local .
@@ -8323,7 +8309,7 @@ docker volume rm popcornpoll-test-data
 
 Expected: the `curl` returns `{"status":"ok"}` with a 200.
 
-- [ ] **Step 5: Write `README.md`**
+- [ ] **Step 4: Write `README.md`**
 
 ```markdown
 # PopcornPoll
@@ -8404,10 +8390,10 @@ npm run test:e2e        # end-to-end tests (Playwright, runs against FAKE_EXTERN
 \`\`\`
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add Dockerfile .dockerignore tsconfig.server.json README.md
+git add Dockerfile .dockerignore README.md
 git commit -m "docs+chore: Dockerfile, healthcheck, and README"
 ```
 
