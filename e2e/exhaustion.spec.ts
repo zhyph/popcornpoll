@@ -19,8 +19,8 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   // See e2e/reconnect.spec.ts for why this wait is needed: clicking Start
   // immediately after the guest's client-side navigation races the guest's
   // WS 'join' round-trip, and Start can fail with not_enough_participants if

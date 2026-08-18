@@ -17,8 +17,8 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   await pinEnglishLocale(guestContext, baseURL!)
   const guestPage = await guestContext.newPage()
   await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.fill('input[placeholder="Your name"]', 'Guest')
-  await guestPage.click('text=Join')
+  await guestPage.getByTestId('join-name-input').fill('Guest')
+  await guestPage.getByTestId('join-submit').click()
   // Wait for the guest's own client-side navigation to the room page to land
   // before doing anything else with guestPage — without this, a later action
   // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an
