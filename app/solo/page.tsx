@@ -29,6 +29,10 @@ export default function SoloPage() {
   const [yearMin, setYearMin] = useState('')
   const [yearMax, setYearMax] = useState('')
   const [eligibleCount, setEligibleCount] = useState<number | null>(null)
+  // Same closed genre list as the Box Office screen (shared soloVals()/
+  // renderVals() genreOptions in the design) — was still a free-text input
+  // here even after Box Office's was fixed.
+  const [genreOptions, setGenreOptions] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<SubmitError>(null)
 
@@ -65,6 +69,13 @@ export default function SoloPage() {
 
     return () => clearTimeout(timer)
   }, [genre, ratingMin, yearMin, yearMax])
+
+  useEffect(() => {
+    fetch('/api/genres')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { genres: string[] } | null) => setGenreOptions(body?.genres ?? []))
+      .catch(() => {})
+  }, [])
 
   function resetSolo() {
     setGenre('')
@@ -243,20 +254,24 @@ export default function SoloPage() {
           <div className="mb-5 grid grid-cols-2 gap-2.5">
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {tCreateRoom('genreLabel')}
-              <input
+              <select
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
-                placeholder={tCreateRoom('genrePlaceholder')}
-                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
-              />
+                className="h-10 cursor-pointer border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              >
+                <option value="">{tCreateRoom('anyGenreOption')}</option>
+                {genreOptions.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {tCreateRoom('minRatingLabel')}
               <input
-                type="number"
-                step={0.1}
-                min={0}
-                max={10}
+                type="text"
+                placeholder={tCreateRoom('ratingPlaceholder')}
                 value={ratingMin}
                 onChange={(e) => setRatingMin(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -265,7 +280,8 @@ export default function SoloPage() {
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {tCreateRoom('yearFromLabel')}
               <input
-                type="number"
+                type="text"
+                placeholder={tCreateRoom('yearFromPlaceholder')}
                 value={yearMin}
                 onChange={(e) => setYearMin(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -274,7 +290,8 @@ export default function SoloPage() {
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {tCreateRoom('yearToLabel')}
               <input
-                type="number"
+                type="text"
+                placeholder={tCreateRoom('yearToPlaceholder')}
                 value={yearMax}
                 onChange={(e) => setYearMax(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -373,7 +390,7 @@ export default function SoloPage() {
           {shortlist.slice(0, 24).map((entry, i) => (
             <div key={entry.movieId} className="flex flex-col border border-brass/35 bg-ink" data-testid="shortlist-card">
               <div className="relative box-border flex aspect-[2/3] items-end bg-velvet/40 p-2.5">
-                {entry.posterPath && (
+                {(entry.posterSource === 'plex' || entry.posterPath) && (
                   <img
                     className="absolute inset-0 h-full w-full object-cover"
                     src={entry.posterSource === 'plex' ? `/api/plex-image?movieId=${entry.movieId}` : `https://image.tmdb.org/t/p/w342${entry.posterPath}`}
@@ -442,7 +459,7 @@ export default function SoloPage() {
       </div>
       <div className="flex w-full flex-wrap items-start justify-center gap-6 border-2 border-brass/60 bg-gradient-to-b from-velvet/70 to-ink/92 p-6 text-left sm:p-8">
         <div className="aspect-[2/3] w-[clamp(150px,22vw,200px)] flex-none bg-velvet/40">
-          {picked.posterPath && (
+          {(picked.posterSource === 'plex' || picked.posterPath) && (
             <img
               className="h-full w-full object-cover"
               src={picked.posterSource === 'plex' ? `/api/plex-image?movieId=${picked.movieId}` : `https://image.tmdb.org/t/p/w342${picked.posterPath}`}
