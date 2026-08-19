@@ -249,4 +249,17 @@ describe('updateSettings', () => {
       code: 'already_started',
     })
   })
+
+  it('rejects tmdbFilters with yearMin > yearMax, same as the HTTP create-room boundary', () => {
+    const { store, code } = newRoom()
+    const result = updateSettings(store, code, true, { tmdbFilters: { yearMin: 2020, yearMax: 2000 } })
+    expect(result).toEqual({ ok: false, code: 'invalid_filters' })
+    expect(store.get(code)!.tmdbFilters).toEqual({})
+  })
+
+  it('clamps an out-of-range ratingMin instead of storing it verbatim', () => {
+    const { store, code } = newRoom()
+    updateSettings(store, code, true, { tmdbFilters: { ratingMin: 99 } })
+    expect(store.get(code)!.tmdbFilters.ratingMin).toBe(10)
+  })
 })
