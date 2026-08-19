@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from './index'
 import { insertMatch } from './matchHistory'
 import {
+  findDistinctGenres,
   findEligiblePlexRows,
   findRowsNeedingEnrichment,
   mergeTmdbOnlyIntoPlexRow,
@@ -247,6 +248,83 @@ describe('pruneStaleTmdbOnlyRows', () => {
     db.prepare("UPDATE movies SET last_used_at = '2020-01-01' WHERE id = ?").run(stale.id)
     expect(() => pruneStaleTmdbOnlyRows(db, 30, new Set())).not.toThrow()
     expect(db.prepare('SELECT * FROM movies WHERE id = ?').get(stale.id)).toBeUndefined()
+  })
+})
+
+describe('findDistinctGenres', () => {
+  it('returns the deduped, sorted union of genres across in-library rows only', () => {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-g1',
+      tmdbId: null,
+      imdbId: null,
+      title: 'A',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2015,
+      genres: ['Comedy', 'Crime'],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-g2',
+      tmdbId: null,
+      imdbId: null,
+      title: 'B',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2016,
+      genres: ['Crime', 'Noir'],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-g3',
+      tmdbId: null,
+      imdbId: null,
+      title: 'Removed',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2017,
+      genres: ['Western'],
+      rating: null,
+      voteCount: null,
+      inLibrary: false,
+      lastUsedAt: null,
+    })
+    expect(findDistinctGenres(db)).toEqual(['Comedy', 'Crime', 'Noir'])
+  })
+
+  it('skips a row with malformed genres JSON instead of throwing', () => {
+    upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-good',
+      tmdbId: null,
+      imdbId: null,
+      title: 'Good Row',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: 2015,
+      genres: ['Comedy'],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    // Simulates data that somehow bypassed the JSON.stringify writers (e.g.
+    // a hand-edited DB row) — findDistinctGenres must not let one bad row
+    // 500 the whole /api/genres response.
+    db.prepare(
+      `INSERT INTO movies (plex_rating_key, title, poster_source, in_library, genres, cached_at)
+       VALUES ('pk-bad', 'Bad Row', 'plex', 1, 'not-json', '2026-01-01T00:00:00.000Z')`,
+    ).run()
+    expect(findDistinctGenres(db)).toEqual(['Comedy'])
   })
 })
 

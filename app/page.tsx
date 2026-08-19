@@ -32,6 +32,11 @@ export default function CreateRoomPage() {
     lastSyncAt: number | null
   } | null>(null)
   const [eligibleCount, setEligibleCount] = useState<number | null>(null)
+  // The mockup's genre field is a closed select, not free text — its
+  // options come from whatever's actually on the linked library's shelf.
+  const [genreOptions, setGenreOptions] = useState<string[]>([])
+  const [joinPromptOpen, setJoinPromptOpen] = useState(false)
+  const [joinCode, setJoinCode] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams()
@@ -56,6 +61,19 @@ export default function CreateRoomPage() {
       .then(setStats)
       .catch(() => {}) // stats are decorative — a failed fetch just keeps the skeleton state, no error UI
   }, [])
+
+  useEffect(() => {
+    fetch('/api/genres')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { genres: string[] } | null) => setGenreOptions(body?.genres ?? []))
+      .catch(() => {}) // a failed fetch just leaves the select at "any genre" only
+  }, [])
+
+  function submitJoinCode() {
+    const code = joinCode.trim()
+    if (!code) return
+    router.push(`/join/${encodeURIComponent(code)}`)
+  }
 
   async function createRoom() {
     const matchThreshold: MatchThreshold =
@@ -89,7 +107,7 @@ export default function CreateRoomPage() {
   return (
     <main className="mx-auto flex flex-1 max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6">
       <div className="relative flex flex-col items-center gap-4 border-2 border-brass/75 bg-gradient-to-b from-velvet/85 to-ink/90 px-6 py-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,.9)] sm:px-10 sm:py-11">
-        <BulbFrame count={24} />
+        <BulbFrame count={28} />
         <p className="font-mono text-[11px] uppercase tracking-[.42em] text-brass">{t('performancesTag')}</p>
         <SplitText
           text="POPCORNPOLL"
@@ -157,8 +175,8 @@ export default function CreateRoomPage() {
                 type="button"
                 onClick={() => setThresholdKind(kind)}
                 aria-pressed={thresholdKind === kind}
-                className={`px-3.5 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-all ${
-                  thresholdKind === kind ? 'bg-ink text-ticket' : 'border border-ink/35 text-ink/70'
+                className={`border border-ink/35 px-3.5 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-all ${
+                  thresholdKind === kind ? 'bg-ink text-ticket' : 'text-ink/70'
                 }`}
               >
                 {kind === 'all' ? t('matchRuleAll') : kind === 'majority' ? t('matchRuleMajority') : t('matchRuleAtLeast')}
@@ -193,20 +211,24 @@ export default function CreateRoomPage() {
           <div className="mb-6 grid grid-cols-2 gap-2.5">
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('genreLabel')}
-              <input
+              <select
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
-                placeholder={t('genrePlaceholder')}
-                className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
-              />
+                className="h-10 cursor-pointer border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              >
+                <option value="">{t('anyGenreOption')}</option>
+                {genreOptions.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('minRatingLabel')}
               <input
-                type="number"
-                step={0.1}
-                min={0}
-                max={10}
+                type="text"
+                placeholder={t('ratingPlaceholder')}
                 value={ratingMin}
                 onChange={(e) => setRatingMin(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -215,7 +237,8 @@ export default function CreateRoomPage() {
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('yearFromLabel')}
               <input
-                type="number"
+                type="text"
+                placeholder={t('yearFromPlaceholder')}
                 value={yearMin}
                 onChange={(e) => setYearMin(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -224,7 +247,8 @@ export default function CreateRoomPage() {
             <label className="flex flex-col gap-1.5 text-[11.5px] uppercase tracking-wider text-ink/60">
               {t('yearToLabel')}
               <input
-                type="number"
+                type="text"
+                placeholder={t('yearToPlaceholder')}
                 value={yearMax}
                 onChange={(e) => setYearMax(e.target.value)}
                 className="h-10 border-0 border-b-2 border-ink/35 bg-transparent px-0.5 font-mono text-sm text-ink outline-none focus:border-exit-red"
@@ -247,7 +271,7 @@ export default function CreateRoomPage() {
             // renders — this is the create-room button ("PRINT THE
             // TICKETS") always rendering the vendored component's default
             // black instead of the mockup's brick red.
-            className="w-full [&>div:last-child]:relative [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-none [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket"
+            className="w-full [&>div:last-child]:relative [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-none [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket [&>div:last-child]:transition-colors hover:[&>div:last-child]:bg-[#DC5142]"
           >
             {t('createButton')}
             <span
@@ -257,8 +281,36 @@ export default function CreateRoomPage() {
           </StarBorder>
           <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-ink/50">{t('tearHereLabel')}</p>
 
-          {candidateSource === 'plex+tmdb' && (
-            <p className="mt-3 text-center text-xs text-ink/55">{t('tmdbAttribution')}</p>
+          {joinPromptOpen ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                submitJoinCode()
+              }}
+              className="mt-3.5 flex w-full gap-2"
+            >
+              <input
+                autoFocus
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+                placeholder={t('joinCodePlaceholder')}
+                className="h-11 flex-1 border border-ink/40 bg-transparent px-3 font-mono text-sm text-ink outline-none focus:border-exit-red"
+              />
+              <button
+                type="submit"
+                className="border border-ink/40 px-4 font-mono text-[11px] uppercase tracking-wider text-ink transition-colors hover:border-exit-red hover:text-exit-red"
+              >
+                {t('joinCodeGo')}
+              </button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setJoinPromptOpen(true)}
+              className="mt-3.5 w-full border border-dashed border-ink/40 px-3 py-3 font-mono text-[10.5px] uppercase tracking-wider text-ink/75 transition-colors hover:border-exit-red hover:text-exit-red"
+            >
+              {t('joinRoomButton')}
+            </button>
           )}
         </div>
         <div className="flex flex-col gap-4">
