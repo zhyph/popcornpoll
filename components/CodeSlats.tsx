@@ -71,7 +71,7 @@ export default function CodeSlats({
           height: `clamp(37px, 8.4vw, ${maxHeight}px)`,
           fontSize: `clamp(24px, 6vw, ${maxFont}px)`,
         }
-  const gap = size === 'small' ? 'gap-1' : 'gap-3 sm:gap-4'
+  const gap = size === 'small' ? 'gap-1' : 'gap-1.5 sm:gap-3'
   const innerGap = size === 'small' ? 'gap-0.5' : 'gap-1 sm:gap-1.5'
 
   return (
@@ -83,7 +83,7 @@ export default function CodeSlats({
               key={li}
               aria-hidden
               className={tileClass}
-              style={{ ...tileStyle, animation: `slatFlip .5s ease-out both ${delay}s` }}
+              style={{ ...tileStyle, animation: `slatFlip .7s cubic-bezier(.3,1.5,.5,1) both ${delay}s` }}
             >
               {letter}
             </span>

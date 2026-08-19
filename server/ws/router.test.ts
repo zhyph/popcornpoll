@@ -326,7 +326,12 @@ describe('handleMessage: start broadcasts a transitional state_update via onBroa
 
 describe('handleMessage: kick -> exhausted', () => {
   it('emits an exhausted event when kicking the last unfinished participant in an active room', async () => {
-    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    // atLeast:2 (not 'all') so the host's single 'yes' swipe below can't
+    // accidentally satisfy the threshold once the guest is kicked and only
+    // the host remains — reevaluateMatches runs on kick against whoever's
+    // left, and with 'all' that single remaining yes would fire a real
+    // match instead of exhaustion.
+    const { code, hostClaimToken } = store.create({ kind: 'atLeast', n: 2 }, 'plex', {})
     let hostState = freshState()
     const hostJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
       type: 'join',
@@ -342,14 +347,26 @@ describe('handleMessage: kick -> exhausted', () => {
     })
     seedPlexRows(20)
     await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, { type: 'start' })
-    store.get(code)!.participants.get(hostState.participantId!)!.finished = true
+    const room = store.get(code)!
+    const firstMovieId = room.pool[0]!.movieId
+    room.participants.get(hostState.participantId!)!.swipes.set(firstMovieId, 'yes')
+    room.participants.get(hostState.participantId!)!.finished = true
 
     const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostState, {
       type: 'kick',
       participantId: guestJoined.newState.participantId!,
     })
 
-    expect(result.toRoom.some((m) => m.type === 'exhausted')).toBe(true)
+    const exhausted = result.toRoom.find((m) => m.type === 'exhausted')
+    expect(exhausted).toBeDefined()
+    // Runners Up shows each candidate's yes-tally next to its rank — the
+    // host's single 'yes' swipe above should surface as yesCount: 1 on that
+    // movie's ranked entry, and the highest-ranked entry.
+    if (exhausted?.type === 'exhausted') {
+      const ranked = exhausted.topCandidates.find((c) => c.movieId === firstMovieId)
+      expect(ranked?.yesCount).toBe(1)
+      expect(exhausted.topCandidates[0]?.movieId).toBe(firstMovieId)
+    }
   })
 })
 

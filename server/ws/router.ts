@@ -7,7 +7,7 @@ import { endRoom, touchActivity } from '../room/lifecycle'
 import type { RoomStore } from '../room/roomStore'
 import type { Participant, RoomState } from '../room/types'
 import type { TmdbClient } from '../tmdb/client'
-import type { ClientMessage, ParticipantView, RoomSnapshot, ServerMessage } from './protocol'
+import type { ClientMessage, ParticipantView, RankedCandidate, RoomSnapshot, ServerMessage } from './protocol'
 
 export interface ConnectionState {
   roomCode: string | null
@@ -52,15 +52,14 @@ export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'st
   }
 }
 
-export function topCandidatesFor(room: RoomState): (typeof room.pool) {
+export function topCandidatesFor(room: RoomState): RankedCandidate[] {
+  const yesCountFor = (movieId: number) =>
+    [...room.participants.values()].filter((p) => p.swipes.get(movieId) === 'yes').length
   return [...room.pool]
     .filter((entry) => !room.matchedMovieIds.has(entry.movieId))
-    .sort((a, b) => {
-      const yesA = [...room.participants.values()].filter((p) => p.swipes.get(a.movieId) === 'yes').length
-      const yesB = [...room.participants.values()].filter((p) => p.swipes.get(b.movieId) === 'yes').length
-      return yesB - yesA
-    })
+    .sort((a, b) => yesCountFor(b.movieId) - yesCountFor(a.movieId))
     .slice(0, 5)
+    .map((entry) => ({ ...entry, yesCount: yesCountFor(entry.movieId) }))
 }
 
 function snapshotFor(room: RoomState, participant: Participant): RoomSnapshot {

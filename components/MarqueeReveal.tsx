@@ -6,41 +6,84 @@ import { useTranslations } from 'next-intl'
 import CodeSlats from './CodeSlats'
 import type { PoolEntry } from '../server/pool/buildPool'
 
-const BULB_COUNT = 24
+const BULB_COUNT = 28
 
-export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
+export function MarqueeReveal({
+  movie,
+  matchRuleLabel,
+  secondsLeft,
+  isHost,
+  onDismiss,
+  onEndSession,
+}: {
+  movie: PoolEntry
+  matchRuleLabel: string
+  secondsLeft: number
+  isHost: boolean
+  onDismiss: () => void
+  onEndSession: () => void
+}) {
   const t = useTranslations('marqueeReveal')
   const metaParts = [
     movie.year ? String(movie.year) : null,
-    movie.genres.length > 0 ? movie.genres.join(', ') : null,
+    movie.genres.length > 0 ? movie.genres.map((g) => g.toLowerCase()).join(' · ') : null,
     movie.rating !== null ? `★ ${movie.rating.toFixed(1)}` : null,
+    matchRuleLabel,
   ].filter((part): part is string => part !== null)
 
   return (
-    <motion.div
-      role="alert"
-      className="relative border-2 border-brass bg-velvet p-8 text-center"
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-    >
-      {Array.from({ length: BULB_COUNT }).map((_, i) => (
-        <span
-          key={i}
-          aria-hidden
-          className="absolute h-2 w-2 rounded-full bg-marquee"
-          style={{ ...bulbPosition(i, BULB_COUNT), animation: `bulb 1.4s ease-in-out infinite ${((i / BULB_COUNT) * 1.4).toFixed(2)}s` }}
-        />
-      ))}
-      <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('matchLabel')}</p>
-      <div className="my-3">
-        <CodeSlats code={movie.title.toUpperCase()} splitOn="space" />
-      </div>
-      {metaParts.length > 0 && (
-        <p className="font-mono text-xs uppercase tracking-wider text-ticket/70">{metaParts.join(' · ')}</p>
-      )}
-      {movie.inLibrary && <p className="mt-2 text-sm text-marquee">{t('readyInLibrary')}</p>}
-    </motion.div>
+    // Timed overlay, not a destination — dismisses back to the deck
+    // underneath, same as the mockup's own doc comment describes it. A
+    // full-viewport takeover (not an inline banner stacked above the still-
+    // swipeable deck) so the reveal is a genuine pause, not something you
+    // can swipe straight through.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[radial-gradient(circle_at_50%_45%,rgba(44,17,22,.92),rgba(16,12,9,.97))] p-4">
+      <motion.div
+        role="alert"
+        className="relative w-full max-w-lg border-[3px] border-brass bg-velvet p-8 text-center shadow-[0_0_120px_-20px_rgba(245,166,35,.45)]"
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+      >
+        {Array.from({ length: BULB_COUNT }).map((_, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className="absolute h-2 w-2 rounded-full bg-marquee"
+            style={{ ...bulbPosition(i, BULB_COUNT), animation: `bulb 1.4s ease-in-out infinite ${((i / BULB_COUNT) * 1.4).toFixed(2)}s` }}
+          />
+        ))}
+        <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('kicker')}</p>
+        <div className="my-3">
+          <CodeSlats code={movie.title.toUpperCase()} splitOn="space" />
+        </div>
+        {metaParts.length > 0 && (
+          <p className="font-mono text-xs uppercase tracking-wider text-ticket/70">{metaParts.join(' · ')}</p>
+        )}
+        {movie.inLibrary && <p className="mt-2 text-sm text-marquee">{t('readyInLibrary')}</p>}
+        <p className="mt-4 font-mono text-[11px] uppercase tracking-widest text-brass/80">
+          {t('backToDeckIn', { seconds: secondsLeft })}
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2.5">
+          {isHost && (
+            <button
+              type="button"
+              onClick={onEndSession}
+              className="bg-exit-red px-5 py-3 font-display text-sm text-ticket hover:bg-exit-red/90"
+            >
+              {t('rollItEndSession')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="border border-brass/55 px-5 py-3 font-mono text-[11px] uppercase tracking-widest text-ticket hover:border-marquee hover:text-marquee"
+          >
+            {t('keepSwiping')}
+          </button>
+        </div>
+      </motion.div>
+    </div>
   )
 }
 

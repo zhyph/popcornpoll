@@ -71,11 +71,18 @@
     "joinButton": "GARANTIR MEU LUGAR",
     "noPasswordNote": "Sem senha, sem conta. A sala fecha quando o anfitrião decidir.",
     "admitOneLabel": "ENTRADA ÚNICA",
-    "seatLabel": "Fileira C · Assento 14"
+    "seatLabel": "FILEIRA C · ASSENTO 14"
   },
   "room": {
     "connecting": "Conectando…",
     "admitted": "Admitidos",
+    "admittedOfSeats": "{count} de {cap} lugares",
+    "infoStripSourcePlex": "Somente a biblioteca do Plex",
+    "infoStripSourceTmdb": "Plex + TMDB",
+    "lobbyFootnoteHost": "Só o anfitrião · quem estiver desconectado fica de fora desta sessão",
+    "lobbyFootnoteGuest": "O anfitrião inicia a sessão · você pode sair a qualquer momento antes disso",
+    "reelCardOf": "Filme {cardNo} de {cardTotal}",
+    "deckFooterHint": "Deslize o card, use os botões, ou aperte ← / → · a casa anuncia o match assim que a regra é cumprida",
     "removeButton": "Remover",
     "startButton": "APAGAR AS LUZES",
     "buildingPool": "Montando seu catálogo…",
@@ -85,7 +92,8 @@
     "restartReelDiscardLabel": "Descartar {count} votos?",
     "noUnanimousPick": "SEM ESCOLHA UNÂNIME",
     "closestThreeLabel": "os três mais próximos",
-    "runnersUpExplainer": "A casa sugere o primeiro da lista. O anfitrião pode começar uma nova sessão, ou decidir a mão levantada.",
+    "runnersUpExplainer": "A casa sugere o primeiro da lista. O anfitrião pode começar uma nova sessão com filtros mais soltos, ou decidir a mão levantada.",
+    "votesTally": "{yes} de {total} sim",
     "secondReelLabel": "NOVA SESSÃO",
     "closeTheHouseLabel": "Encerrar a casa",
     "endSession": "Encerrar sessão",
@@ -100,11 +108,22 @@
     "yesAriaLabel": "Sim",
     "noAriaLabel": "Não",
     "passLabel": "PASSAR",
-    "admitLabel": "ADMITIR"
+    "admitLabel": "ADMITIR",
+    "voidStampLabel": "NULO",
+    "passHintDesktop": "← seta",
+    "passHintMobile": "deslize p/ esquerda",
+    "admitHintDesktop": "seta →",
+    "admitHintMobile": "deslize p/ direita"
   },
   "marqueeReveal": {
-    "matchLabel": "Deu match",
-    "readyInLibrary": "Pronto para assistir na sua biblioteca"
+    "kicker": "A sessão de hoje",
+    "readyInLibrary": "Pronto para assistir na sua biblioteca",
+    "backToDeckIn": "De volta em {seconds}s",
+    "rollItEndSession": "BATE O SINO · ENCERRAR SESSÃO",
+    "keepSwiping": "Continuar deslizando",
+    "matchRuleAllLabel": "unânime",
+    "matchRuleMajorityLabel": "maioria",
+    "matchRuleAtLeastLabel": "{n} disseram sim"
   },
   "roomShare": {
     "copyLink": "Copiar link",
@@ -115,7 +134,9 @@
   },
   "ticketAvatar": {
     "away": "ausente",
-    "done": "pronto"
+    "done": "pronto",
+    "host": "anfitrião",
+    "ready": "pronto"
   },
   "errors": {
     "room_not_found": "Sala não encontrada.",
@@ -142,10 +163,10 @@
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou."
   },
   "roomEnded": {
-    "host_ended": "O anfitrião encerrou esta sessão.",
-    "inactivity_timeout": "Esta sessão foi encerrada após um período de inatividade.",
-    "server_restarting": "O servidor está reiniciando. Entre novamente em instantes.",
-    "host_disconnected_timeout": "O anfitrião desconectou e não voltou a tempo."
+    "host_ended": "O anfitrião encerrou esta sessão. Seu canhoto ainda vale — comece uma nova sala quando a pipoca estiver pronta.",
+    "inactivity_timeout": "Esta sessão foi encerrada após um período de inatividade. Seu canhoto ainda vale — comece uma nova sala quando a pipoca estiver pronta.",
+    "server_restarting": "O servidor está reiniciando. Entre novamente em instantes. Seu canhoto ainda vale — comece uma nova sala quando a pipoca estiver pronta.",
+    "host_disconnected_timeout": "O anfitrião desconectou e não voltou a tempo. Seu canhoto ainda vale — comece uma nova sala quando a pipoca estiver pronta."
   },
   "localeSwitcher": {
     "english": "English",
@@ -214,7 +235,7 @@
     "hostGoneTitle": "O ANFITRIÃO CAIU DA SESSÃO",
     "hostGoneBody": "Perdemos a conexão do anfitrião. A sala continua aberta por dois minutos, caso ele volte rapidinho.",
     "hostGoneDetail": "Reconectando… seus votos estão guardados. Se ele não voltar, a sala se fecha sozinha.",
-    "hostGonePrimary": "Voltar para a sala",
+    "hostGonePrimary": "Continuar esperando",
     "hostGoneSecondary": "Sair da sala",
     "poolFailKicker": "Rolo emperrou",
     "poolFailTitle": "NÃO FOI POSSÍVEL MONTAR O CATÁLOGO",

@@ -39,6 +39,13 @@ export interface ParticipantView {
   isHost: boolean
 }
 
+// The Runners Up screen shows each candidate's yes-tally alongside its rank
+// (the design's "3 of 4 yes" line), so the ranked list carries that count
+// along with the pool entry instead of just the entry itself.
+export interface RankedCandidate extends PoolEntry {
+  yesCount: number
+}
+
 export interface RoomSnapshot {
   status: RoomStatus
   mySwipes: Record<number, 'yes' | 'no'>
@@ -51,7 +58,7 @@ export interface RoomSnapshot {
   seq: number
   pool?: PoolEntry[]
   pendingCardId?: number | null
-  topCandidates?: PoolEntry[]
+  topCandidates?: RankedCandidate[]
 }
 
 export type ServerMessage =
@@ -77,7 +84,7 @@ export type ServerMessage =
       seq: number
     }
   | { type: 'match'; movieId: number; movie: PoolEntry; seq: number }
-  | { type: 'exhausted'; topCandidates: PoolEntry[] }
+  | { type: 'exhausted'; topCandidates: RankedCandidate[] }
   | { type: 'notice'; level: 'info' | 'warning'; code: string; message: string }
   | { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' }
   | { type: 'host_disconnected' }
