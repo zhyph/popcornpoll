@@ -371,6 +371,16 @@ describe('swipeAction', () => {
     expect(room.participants.get(hostId)!.swipes.size).toBe(0)
   })
 
+  it('rejects a client-supplied null movieId even when the participant has no pending card', async () => {
+    const { store, code, hostId } = await startedRoom()
+    const room = store.get(code)!
+    // Simulate the participant having exhausted the pool, which sets pendingCardId to null.
+    room.participants.get(hostId)!.pendingCardId = null
+    const result = swipeAction(store, code, hostId, null as unknown as number, 'yes')
+    expect(result).toEqual({ ok: false, code: 'not_your_card' })
+    expect(room.participants.get(hostId)!.swipes.size).toBe(0)
+  })
+
   it('a duplicate/replayed swipe for an already-recorded movieId is a no-op with consumed: false', async () => {
     const { store, code, hostId } = await startedRoom()
     const room = store.get(code)!
