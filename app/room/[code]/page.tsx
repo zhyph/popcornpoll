@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
 import { useSetRoomStep, type ChapterStep } from '../../../components/chrome/RoomStatusContext'
@@ -20,7 +20,8 @@ type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } 
 // block swiping on whatever remains unmatched.
 const MATCH_REVEAL_MS = 4000
 
-export default function RoomPage({ params }: { params: { code: string } }) {
+export default function RoomPage({ params }: { params: Promise<{ code: string }> }) {
+  const { code } = use(params)
   const router = useRouter()
   const t = useTranslations('room')
   const tErrors = useTranslations('errors')
@@ -77,9 +78,9 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
       if (msg.hostToken) {
         setIsHost(true)
-        localStorage.setItem(`hostToken:${params.code}`, msg.hostToken)
+        localStorage.setItem(`hostToken:${code}`, msg.hostToken)
       }
-      sessionStorage.setItem(`sessionToken:${params.code}`, msg.sessionToken)
+      sessionStorage.setItem(`sessionToken:${code}`, msg.sessionToken)
       applySeq(msg.room.seq)
     })
     const unsubState = ws.on('state_update', (msg) => {
@@ -124,23 +125,23 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
     const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
 
-    const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
+    const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
 
     const unsubOpen = ws.onOpen(() => {
-      const storedSessionToken = sessionStorage.getItem(`sessionToken:${params.code}`)
-      const storedHostToken = localStorage.getItem(`hostToken:${params.code}`) ?? undefined
+      const storedSessionToken = sessionStorage.getItem(`sessionToken:${code}`)
+      const storedHostToken = localStorage.getItem(`hostToken:${code}`) ?? undefined
       if (storedSessionToken) {
         ws.send({
           type: 'reconnect',
-          roomCode: params.code,
+          roomCode: code,
           sessionToken: storedSessionToken,
           hostToken: storedHostToken,
         })
       } else {
         ws.send({
           type: 'join',
-          roomCode: params.code,
+          roomCode: code,
           displayName: pendingDisplayName ?? 'Guest',
           hostClaimToken,
         })
@@ -165,7 +166,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       clearInterval(heartbeat)
       ws.close()
     }
-  }, [params.code])
+  }, [code])
 
   const latestMatchId = snapshot && snapshot.matches.length > 0 ? snapshot.matches[snapshot.matches.length - 1]! : null
   useEffect(() => {
@@ -228,7 +229,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
     return (
       <main className="mx-auto flex flex-1 max-w-md flex-col items-center gap-6 px-4 py-10">
-        <RoomShare code={params.code} />
+        <RoomShare code={code} />
         <div className="w-full border border-brass/50 bg-velvet">
           <p className="border-b border-brass/30 px-4 py-3 font-mono text-xs uppercase tracking-widest text-brass">
             {t('admitted')}
