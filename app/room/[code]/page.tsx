@@ -9,8 +9,6 @@ import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
 import { SwipeDeck } from '../../../components/SwipeDeck'
 import { TicketAvatar } from '../../../components/TicketAvatar'
-import { Button } from '../../../components/ui/button'
-import { Card, CardContent, CardHeader } from '../../../components/ui/card'
 import type { ParticipantView, RoomSnapshot } from '../../../server/ws/protocol'
 import type { PoolEntry } from '../../../server/pool/buildPool'
 
@@ -256,24 +254,41 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   if (snapshot.exhausted && snapshot.matches.length === 0) {
     return (
-      <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
-        <Card data-testid="fallback" className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-display text-xl text-ticket">{t('noUnanimousPick')}</CardHeader>
-          <CardContent className="flex flex-col gap-1">
-            {(snapshot.topCandidates ?? []).map((entry) => (
-              <p key={entry.movieId} className="font-mono text-sm text-ticket">{entry.title}</p>
+      <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10">
+        <div data-testid="fallback" className="w-full border-2 border-brass/60 bg-[#141313] p-6 sm:p-9">
+          <div className="mb-5 flex items-baseline justify-between gap-3 border-b border-brass/40 pb-3.5">
+            <p className="font-display text-2xl text-ticket sm:text-3xl">{t('noUnanimousPick')}</p>
+            <p className="font-mono text-[10.5px] uppercase tracking-wider text-brass">{t('closestThreeLabel')}</p>
+          </div>
+          <div className="flex flex-col">
+            {(snapshot.topCandidates ?? []).map((entry, i) => (
+              <div key={entry.movieId} className="flex items-center gap-3.5 border-b border-dashed border-brass/25 py-4">
+                <span className="min-w-[34px] font-display text-xl text-brass">{i + 1}</span>
+                <span className="flex-1 font-display text-lg text-ticket sm:text-xl">{entry.title}</span>
+              </div>
             ))}
-          </CardContent>
-        </Card>
-        {isHost && (
-          <Button
-            variant="outline"
-            className="border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
-            onClick={() => client?.send({ type: 'end_room' })}
-          >
-            {t('endSession')}
-          </Button>
-        )}
+          </div>
+          <p className="mt-5 font-mono text-[11px] leading-relaxed text-ticket/60">{t('runnersUpExplainer')}</p>
+          {isHost && (
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                data-testid="restart-reel"
+                onClick={() => client?.send({ type: 'restart_reel' })}
+                className="bg-marquee px-6 py-3.5 font-display text-base text-ink hover:bg-marquee/90"
+              >
+                {t('secondReelLabel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => client?.send({ type: 'end_room' })}
+                className="border border-exit-red px-5 py-3.5 font-mono text-[11px] uppercase tracking-widest text-exit-red hover:bg-exit-red hover:text-ticket"
+              >
+                {t('closeTheHouseLabel')}
+              </button>
+            </div>
+          )}
+        </div>
       </main>
     )
   }
