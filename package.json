@@ -57,5 +57,11 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^5.5.4",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "@parcel/watcher@2.6.0": true,
+    "better-sqlite3@13.0.3": true,
+    "esbuild@0.28.2": true,
+    "@swc/core@1.15.47": true
   }
 }
