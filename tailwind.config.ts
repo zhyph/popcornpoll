@@ -47,6 +47,7 @@ const config: Config = {
   			brass: 'hsl(var(--brass))',
   			'exit-red': 'hsl(var(--exit-red))',
   			'admit-teal': 'hsl(var(--admit-teal))',
+  			'setup-done': 'hsl(var(--setup-done))',
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',
