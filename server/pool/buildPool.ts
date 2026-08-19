@@ -39,6 +39,7 @@ export interface PoolFilters {
 export interface BuildPoolResult {
   pool: PoolEntry[]
   tooSmall: boolean
+  tooSmallReason?: 'library_empty'
   degraded: boolean
 }
 
@@ -172,9 +173,22 @@ export async function buildPool(
   const finalRows = [...pickedPlex, ...pickedTmdb].slice(0, poolCap)
   stampLastUsed(db, finalRows.map((r) => r.id), new Date().toISOString())
 
+  const tooSmall = finalRows.length < POOL_MIN_SIZE
+  let tooSmallReason: 'library_empty' | undefined
+  if (tooSmall && candidateSource === 'plex') {
+    // plexRows above is already filtered — check the UNFILTERED count to
+    // tell "library has nothing in it" apart from "filters excluded
+    // everything". Only a hard 0 counts as library_empty; a non-empty but
+    // sparse library still gets the generic pool_too_small treatment (its
+    // advice — widen filters, add TMDB — still applies).
+    const unfilteredCount = findEligiblePlexRows(db, {}).length
+    if (unfilteredCount === 0) tooSmallReason = 'library_empty'
+  }
+
   return {
     pool: finalRows.map(toEntry),
-    tooSmall: finalRows.length < POOL_MIN_SIZE,
+    tooSmall,
+    tooSmallReason,
     degraded,
   }
 }
