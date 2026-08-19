@@ -217,7 +217,19 @@ export function findDistinctGenres(db: Database.Database): string[] {
     .all() as { genres: string }[]
   const genres = new Set<string>()
   for (const row of rows) {
-    for (const genre of JSON.parse(row.genres) as string[]) genres.add(genre)
+    // Every writer (upsertPlexRow/upsertTmdbOnlyRow) JSON.stringifies this
+    // column, so malformed JSON shouldn't occur in practice — but this feeds
+    // a decorative dropdown, not a critical path, so one corrupt row must
+    // not 500 the whole /api/genres response and blank out every other
+    // movie's genres. Skip just that row instead.
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.genres)
+    } catch {
+      continue
+    }
+    if (!Array.isArray(parsed)) continue
+    for (const genre of parsed) if (typeof genre === 'string') genres.add(genre)
   }
   return [...genres].sort((a, b) => a.localeCompare(b))
 }
