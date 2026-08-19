@@ -134,14 +134,15 @@
     "portuguese": "Português"
   },
   "setup": {
-    "title": "First-time setup",
+    "title": "THREAD THE PROJECTOR",
+    "kickerLabel": "Projection booth · one time, owner only",
     "boxOffice": "Box office",
     "tokenExplainer": "Enter the admin token (ADMIN_SETUP_TOKEN) set in the server's environment variables.",
     "tokenLabel": "Admin token",
     "tokenPlaceholder": "Paste your token here",
     "startButton": "Generate Plex code",
     "linkPlexTitle": "Link your Plex server",
-    "openPlexButton": "Open Plex to authorize",
+    "openPlexButton": "OPEN PLEX TO AUTHORIZE",
     "waitingForApproval": "Waiting for approval…",
     "cancelButton": "Cancel",
     "newCodeButton": "Generate a new code",
@@ -149,7 +150,7 @@
     "noServersFound": "No servers found on this Plex account.",
     "chooseLibrariesTitle": "Choose your movie libraries",
     "noMovieLibraries": "No movie libraries found on this server.",
-    "finishButton": "Finish linking",
+    "finishButton": "FINISH LINKING · OPEN THE BOX OFFICE",
     "successTitle": "Plex linked",
     "successMessage": "Your Plex server is linked. You can create rooms now.",
     "syncNowButton": "Sync now",
@@ -157,6 +158,12 @@
     "syncTriggeredToast": "Sync started",
     "genericError": "Something went wrong. Try again.",
     "unauthorizedError": "Invalid admin token.",
-    "pollTimeoutError": "Timed out waiting for authorization. Generate a new code."
+    "pollTimeoutError": "Timed out waiting for authorization. Generate a new code.",
+    "stepTokenLabel": "Admin token",
+    "stepLinkLabel": "Link Plex account",
+    "stepLibraryLabel": "Choose server & libraries",
+    "stepSyncLabel": "Sync complete",
+    "stepStateCurrent": "Current",
+    "stepStateDone": "Done"
   }
 }

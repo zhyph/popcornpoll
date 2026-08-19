@@ -134,14 +134,15 @@
     "portuguese": "Português"
   },
   "setup": {
-    "title": "Configuração inicial",
+    "title": "PREPARE O PROJETOR",
+    "kickerLabel": "Cabine de projeção · uma vez, somente o proprietário",
     "boxOffice": "Bilheteria",
     "tokenExplainer": "Informe o token de administrador (ADMIN_SETUP_TOKEN) definido nas variáveis de ambiente do servidor.",
     "tokenLabel": "Token de administrador",
     "tokenPlaceholder": "Cole o token aqui",
     "startButton": "Gerar código do Plex",
     "linkPlexTitle": "Vincular ao Plex",
-    "openPlexButton": "Abrir Plex para autorizar",
+    "openPlexButton": "ABRIR PLEX PARA AUTORIZAR",
     "waitingForApproval": "Aguardando aprovação…",
     "cancelButton": "Cancelar",
     "newCodeButton": "Gerar novo código",
@@ -149,7 +150,7 @@
     "noServersFound": "Nenhum servidor encontrado nesta conta do Plex.",
     "chooseLibrariesTitle": "Escolha as bibliotecas de filmes",
     "noMovieLibraries": "Nenhuma biblioteca de filmes encontrada neste servidor.",
-    "finishButton": "Concluir vínculo",
+    "finishButton": "CONCLUIR VÍNCULO · ABRIR A BILHETERIA",
     "successTitle": "Plex vinculado",
     "successMessage": "Seu servidor Plex está vinculado. Você já pode criar salas.",
     "syncNowButton": "Sincronizar agora",
@@ -157,6 +158,12 @@
     "syncTriggeredToast": "Sincronização iniciada",
     "genericError": "Algo deu errado. Tente novamente.",
     "unauthorizedError": "Token de administrador inválido.",
-    "pollTimeoutError": "Tempo esgotado aguardando a autorização. Gere um novo código."
+    "pollTimeoutError": "Tempo esgotado aguardando a autorização. Gere um novo código.",
+    "stepTokenLabel": "Token de administrador",
+    "stepLinkLabel": "Vincular conta do Plex",
+    "stepLibraryLabel": "Escolher servidor e bibliotecas",
+    "stepSyncLabel": "Sincronização concluída",
+    "stepStateCurrent": "Atual",
+    "stepStateDone": "Concluído"
   }
 }
