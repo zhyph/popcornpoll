@@ -29,10 +29,14 @@ export function trackerStepFor(step: Step): TrackerKey {
 }
 
 export function stateFor(row: TrackerKey, current: TrackerKey, step: Step): RowState {
-  // 'linked' and 'done' land on the sync row with every prior row already
-  // done — there's nothing left "now" or "next" once the owner is fully
-  // linked, unlike a freshly-started 'token'/'pin'/'servers' flow.
-  if (step === 'linked' || step === 'done') return 'done'
+  // 'checking', 'linked', and 'done' all land on the sync row (see
+  // trackerStepFor) with every prior row already done — there's nothing left
+  // "now" or "next" once the owner is fully linked, unlike a freshly-started
+  // 'token'/'pin'/'servers' flow. Without 'checking' here, the brief on-mount
+  // probe would show the sync row pulsing as "now" instead of "done", i.e.
+  // claim a sync is actively in progress before we even know if the owner is
+  // linked at all.
+  if (step === 'checking' || step === 'linked' || step === 'done') return 'done'
   const rowIndex = TRACKER_ORDER.indexOf(row)
   const currentIndex = TRACKER_ORDER.indexOf(current)
   if (rowIndex < currentIndex) return 'done'

@@ -119,6 +119,40 @@ describe('createPlexClient', () => {
     )
   })
 
+  it('getLibrarySections degrades a single section to count 0 instead of failing the whole list', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/library/sections')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            MediaContainer: {
+              Directory: [
+                { key: '1', title: 'Movies', type: 'movie' },
+                { key: '2', title: 'Classics', type: 'movie' },
+              ],
+            },
+          }),
+        }
+      }
+      if (url.includes('/library/sections/1/all')) {
+        return { ok: true, status: 200, json: async () => ({ MediaContainer: { totalSize: 412 } }) }
+      }
+      if (url.includes('/library/sections/2/all')) {
+        // Simulates a transient network failure on just this section's count request.
+        throw new Error('network error')
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const client = createPlexClient('client-id')
+    const sections = await client.getLibrarySections('http://192.168.1.10:32400', 'token')
+    expect(sections).toEqual([
+      { id: '1', title: 'Movies', type: 'movie', count: 412 },
+      { id: '2', title: 'Classics', type: 'movie', count: 0 },
+    ])
+  })
+
   it('getLibraryItems requests with includeGuids=1 and maps fields', async () => {
     mockFetchOnce({
       MediaContainer: {

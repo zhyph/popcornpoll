@@ -100,18 +100,30 @@ export function createPlexClient(clientIdentifier: string): PlexClient {
       // reads the container's totalSize header back.
       return Promise.all(
         movieSections.map(async (d) => {
-          const countRes = await fetch(
-            `${serverUrl}/library/sections/${d.key}/all?X-Plex-Container-Start=0&X-Plex-Container-Size=0`,
-            { headers: { ...headers(clientIdentifier), 'X-Plex-Token': authToken } },
-          )
-          const countBody = (await countRes.json()) as {
-            MediaContainer: { totalSize?: number; size?: number }
-          }
-          return {
-            id: d.key,
-            title: d.title,
-            type: d.type,
-            count: countBody.MediaContainer.totalSize ?? countBody.MediaContainer.size ?? 0,
+          // One section's count request failing (network error, non-2xx,
+          // malformed JSON) must not take the whole sections list down with
+          // it via Promise.all rejection — that would block the setup UI's
+          // library-picker step, and abort background librarySync's whole
+          // run, over what's ultimately just a cosmetic "X titles" figure.
+          // Degrade that one section's count to 0 and keep going.
+          try {
+            const countRes = await fetch(
+              `${serverUrl}/library/sections/${d.key}/all?X-Plex-Container-Start=0&X-Plex-Container-Size=0`,
+              { headers: { ...headers(clientIdentifier), 'X-Plex-Token': authToken } },
+            )
+            if (!countRes.ok) throw new Error(`count request failed with status ${countRes.status}`)
+            const countBody = (await countRes.json()) as {
+              MediaContainer: { totalSize?: number; size?: number }
+            }
+            return {
+              id: d.key,
+              title: d.title,
+              type: d.type,
+              count: countBody.MediaContainer.totalSize ?? countBody.MediaContainer.size ?? 0,
+            }
+          } catch (err) {
+            console.error(`getLibrarySections: count fetch failed for section ${d.key}`, err)
+            return { id: d.key, title: d.title, type: d.type, count: 0 }
           }
         }),
       )

@@ -34,6 +34,13 @@ describe('stateFor', () => {
     expect(stateFor('sync', 'link', 'pin')).toBe('next')
   })
 
+  it('marks every row done during the on-mount checking probe too, not just once linked/done', () => {
+    expect(stateFor('token', 'sync', 'checking')).toBe('done')
+    expect(stateFor('link', 'sync', 'checking')).toBe('done')
+    expect(stateFor('library', 'sync', 'checking')).toBe('done')
+    expect(stateFor('sync', 'sync', 'checking')).toBe('done')
+  })
+
   it('marks every row done once the owner is already linked, even though the tracker key is sync', () => {
     expect(stateFor('token', 'sync', 'linked')).toBe('done')
     expect(stateFor('link', 'sync', 'linked')).toBe('done')
