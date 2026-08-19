@@ -20,6 +20,7 @@ import { createImageProxyHandler } from './http/imageProxy'
 import { createHealthHandler } from './http/health'
 import { createStatsHandler } from './http/stats'
 import { createEligibleCountHandler } from './http/eligibleCount'
+import { createSoloHandlers } from './http/solo'
 import { DecryptionError, getPlexLink, savePlexLink } from './plex/link'
 
 const SWEEP_INTERVAL_MS = 60_000
@@ -75,6 +76,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   const healthHandler = createHealthHandler(config.dataDir)
   const statsHandler = createStatsHandler(db, config.authEncryptionKey, librarySync)
   const eligibleCountHandler = createEligibleCountHandler(db)
+  const soloHandlers = createSoloHandlers(db, tmdb, config, librarySync)
 
   const nextApp = opts.skipFrontend ? null : next({ dev: process.env.NODE_ENV !== 'production' })
   const handleNextRequest = nextApp?.getRequestHandler()
@@ -125,6 +127,10 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
         else if (url.pathname === '/api/stats' && req.method === 'GET') webRes = await statsHandler(webReq)
         else if (url.pathname === '/api/eligible-count' && req.method === 'GET') webRes = await eligibleCountHandler(webReq)
+        else if (url.pathname === '/api/solo/pool' && req.method === 'GET')
+          webRes = await soloHandlers.pool(webReq, req.socket.remoteAddress)
+        else if (url.pathname === '/api/solo/surprise' && req.method === 'POST') webRes = await soloHandlers.surprise(webReq)
+        else if (url.pathname === '/api/solo/pick' && req.method === 'POST') webRes = await soloHandlers.pick(webReq)
         else {
           res.writeHead(404).end()
           return

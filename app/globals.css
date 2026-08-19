@@ -82,6 +82,10 @@ body {
   to { background-position-x: -32px; }
 }
 
+@keyframes reelSpin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes marqueeSlide {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }

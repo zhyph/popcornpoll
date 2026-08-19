@@ -43,7 +43,7 @@ export interface BuildPoolResult {
   degraded: boolean
 }
 
-function toEntry(row: MovieRow): PoolEntry {
+export function toEntry(row: MovieRow): PoolEntry {
   return {
     movieId: row.id,
     title: row.title,

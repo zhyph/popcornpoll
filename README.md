@@ -2,7 +2,8 @@
 
 Self-hosted, group movie-night picker for Plex. Swipe Tinder-style through a
 shared candidate pool; a title becomes a match once your group's chosen
-threshold of yes-votes is reached.
+threshold of yes-votes is reached. A solo mode is also available for
+deciding alone.
 
 ## Requirements
 
@@ -75,9 +76,10 @@ you expose it beyond that, put it behind your own access control (a
 reverse-proxy with basic auth, an authenticating gateway, etc.) — this is
 your responsibility, not something the app does for you.
 
-Room creation and the WebSocket connection are rate-limited **per client
-IP**. If your whole group joins from behind the same NAT (one home
-network, campus wifi, a shared office), they share one bucket — expect a
+Room creation, the WebSocket connection, and the solo pool endpoint are
+all rate-limited **per client IP**. If your whole group joins from behind
+the same NAT (one home network, campus wifi, a shared office), they
+share one bucket — expect a
 group of many people on one IP to hit the limit sooner than the same
 number of people spread across different networks. This is deliberate
 (it's what stops one bad actor from spamming rooms) but worth knowing
