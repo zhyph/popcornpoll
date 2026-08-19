@@ -23,3 +23,17 @@ export function generateRoomCode(): string {
   const digits = String(randomInt(0, 1000)).padStart(3, '0')
   return `${wordA}-${wordB}-${digits}`
 }
+
+// Solo picks aren't stored in a room — match_history.room_code still needs
+// a stable per-pick value (no FK constraint on it, see
+// server/db/migrations/002_match_history.sql). Excludes 0/O/1/I: the code
+// is shown back to the user on the confirmed-pick screen, and those pairs
+// are easy to misread in the app's monospace UI. Not a security boundary —
+// nothing gates access by this value, unlike generateToken's tokens.
+const SOLO_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+export function generateSoloCode(): string {
+  let suffix = ''
+  for (let i = 0; i < 4; i++) suffix += SOLO_CODE_CHARS[randomInt(SOLO_CODE_CHARS.length)]
+  return `solo-${suffix}`
+}

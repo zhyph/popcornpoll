@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { generateRoomCode, generateToken, WORDS } from './tokens'
+import { generateRoomCode, generateSoloCode, generateToken, WORDS } from './tokens'
 
 describe('generateToken', () => {
   it('generates a 32-character hex string (128 bits)', () => {
@@ -21,6 +21,18 @@ describe('generateRoomCode', () => {
 
   it('generates different codes across calls (not exhaustively unique — collision handling is the room store\'s job)', () => {
     const codes = new Set(Array.from({ length: 20 }, () => generateRoomCode()))
+    expect(codes.size).toBeGreaterThan(1)
+  })
+})
+
+describe('generateSoloCode', () => {
+  it('matches the solo-XXXX format (4 unambiguous uppercase-alphanumeric chars)', () => {
+    const code = generateSoloCode()
+    expect(code).toMatch(/^solo-[A-HJ-NP-Z2-9]{4}$/)
+  })
+
+  it('generates different codes across calls', () => {
+    const codes = new Set(Array.from({ length: 20 }, () => generateSoloCode()))
     expect(codes.size).toBeGreaterThan(1)
   })
 })
