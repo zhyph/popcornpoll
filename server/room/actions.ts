@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'bad_token'
   | 'not_enough_participants'
   | 'pool_too_small'
+  | 'library_empty'
   | 'not_your_card'
   | 'internal_error'
   | 'room_not_active'

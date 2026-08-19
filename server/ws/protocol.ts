@@ -74,6 +74,8 @@ export type ServerMessage =
   | { type: 'exhausted'; topCandidates: PoolEntry[] }
   | { type: 'notice'; level: 'info' | 'warning'; code: string; message: string }
   | { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' }
+  | { type: 'host_disconnected' }
+  | { type: 'host_reconnected' }
   | { type: 'room_ended'; reason: string; seq: number }
   | { type: 'error'; code: ErrorCode; message: string }
   | { type: 'heartbeat_ack' }
