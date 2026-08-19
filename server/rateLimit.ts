@@ -8,9 +8,10 @@ const DEFAULT_IDLE_EVICTION_MS = 30 * 60_000
 const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60_000
 
 // Production default: 10-token capacity, refilling at 10/minute per IP.
-// Both per-IP buckets in this app (HTTP room creation in
-// server/http/rooms.ts, WS upgrade in server/ws/server.ts) share this shape
-// and this factory, so they can't silently drift apart.
+// Every per-IP bucket in this app (HTTP room creation in
+// server/http/rooms.ts, WS upgrade in server/ws/server.ts, and the solo
+// pool endpoint in server/http/solo.ts) shares this shape and this
+// factory, so they can't silently drift apart.
 //
 // Capacity is NOT overridable — e2e/rateLimit.spec.ts's burst test relies on
 // the real 10-token capacity to prove the 429 path with a small, fast burst

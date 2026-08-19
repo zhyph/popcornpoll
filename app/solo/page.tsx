@@ -91,25 +91,30 @@ export default function SoloPage() {
     if (yearMax) params.set('yearMax', yearMax)
     params.set('candidateSource', candidateSource)
 
-    const res = await fetch(`/api/solo/pool?${params.toString()}`)
-    setSubmitting(false)
-    if (!res.ok) {
-      const code = await res
-        .json()
-        .then((b) => b?.error?.code as string | undefined)
-        .catch(() => undefined)
-      if (code === 'pool_too_small' || code === 'library_empty') {
-        setSubmitError(code)
+    try {
+      const res = await fetch(`/api/solo/pool?${params.toString()}`)
+      if (!res.ok) {
+        const code = await res
+          .json()
+          .then((b) => b?.error?.code as string | undefined)
+          .catch(() => undefined)
+        if (code === 'pool_too_small' || code === 'library_empty') {
+          setSubmitError(code)
+          return
+        }
+        toast(code && tErrors.has(code) ? tErrors(code) : tErrors('generic'))
         return
       }
-      toast(code && tErrors.has(code) ? tErrors(code) : tErrors('generic'))
-      return
+      const body = await res.json()
+      setShortlist(body.pool)
+      setDegraded(body.degraded)
+      setSeen([])
+      setScreen('shortlist')
+    } catch {
+      toast(tErrors('generic'))
+    } finally {
+      setSubmitting(false)
     }
-    const body = await res.json()
-    setShortlist(body.pool)
-    setDegraded(body.degraded)
-    setSeen([])
-    setScreen('shortlist')
   }
 
   async function confirmPick(entry: PoolEntry) {
@@ -188,6 +193,9 @@ export default function SoloPage() {
   }
 
   if (screen === 'filters') {
+    // 5 is a soft-warning threshold only, intentionally decoupled from the
+    // server's authoritative POOL_MIN_SIZE (server/pool/buildPool.ts) — not
+    // imported here since that module drags server-only deps into the bundle.
     const blocked = eligibleCount !== null && eligibleCount < 5
     return (
       <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10 text-center sm:gap-7">
@@ -294,8 +302,8 @@ export default function SoloPage() {
             data-testid="submit-solo"
             className="relative h-[62px] w-full overflow-hidden border-none font-display text-[clamp(17px,2vw,22px)] tracking-wide disabled:cursor-not-allowed"
             style={{
-              background: submitting || eligibleCount === null || blocked ? 'rgba(34,24,18,.2)' : '#CF4436',
-              color: submitting || eligibleCount === null || blocked ? 'rgba(34,24,18,.45)' : '#F3E9D2',
+              background: submitting || eligibleCount === null ? 'rgba(34,24,18,.2)' : '#CF4436',
+              color: submitting || eligibleCount === null ? 'rgba(34,24,18,.45)' : '#F3E9D2',
             }}
           >
             {submitting && (
@@ -330,7 +338,7 @@ export default function SoloPage() {
           <div className="flex flex-col gap-1.5">
             <p className="font-mono text-[10.5px] uppercase tracking-[.34em] text-brass">{t('shortlistKicker')}</p>
             <h2 className="font-display text-[clamp(28px,5vw,52px)] leading-none tracking-wide text-ticket">{t('shortlistTitle')}</h2>
-            <p className="font-mono text-[11px] tracking-wider text-ticket/60">{t('shortlistCountLabel', { count: shortlist.length })}</p>
+            <p className="font-mono text-[11px] tracking-wider text-ticket/60">{t('shortlistCountLabel', { count: Math.min(shortlist.length, 24) })}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <button
@@ -359,7 +367,7 @@ export default function SoloPage() {
         )}
 
         <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-4">
-          {shortlist.map((entry, i) => (
+          {shortlist.slice(0, 24).map((entry, i) => (
             <div key={entry.movieId} className="flex flex-col border border-brass/35 bg-ink" data-testid="shortlist-card">
               <div className="relative box-border flex aspect-[2/3] items-end bg-velvet/40 p-2.5">
                 {entry.posterPath && (
@@ -367,6 +375,7 @@ export default function SoloPage() {
                     className="absolute inset-0 h-full w-full object-cover"
                     src={entry.posterSource === 'plex' ? `/api/plex-image?movieId=${entry.movieId}` : `https://image.tmdb.org/t/p/w342${entry.posterPath}`}
                     alt={entry.title}
+                    loading="lazy"
                   />
                 )}
                 <span className="absolute left-0 top-0 bg-marquee px-2.5 py-1 font-display text-[15px] text-ink">
