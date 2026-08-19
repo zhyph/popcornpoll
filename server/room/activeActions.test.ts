@@ -168,6 +168,17 @@ describe('startRoom', () => {
     expect(store.get(code)!.status).toBe('lobby')
   })
 
+  it('rejects Start with library_empty when the plex library has zero movies at all', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'B')
+    // No seedPlexRows call.
+    const result = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'library_empty' })
+    expect(store.get(code)!.status).toBe('lobby')
+  })
+
   it('on success, moves to active, freezes the pool, and assigns each participant a first pendingCardId', async () => {
     const store = createRoomStore()
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
@@ -324,8 +335,28 @@ describe('restartReel', () => {
     dir = mkdtempSync(join(tmpdir(), 'popcornpoll-active-'))
     const emptyDb = openDb(dir)
     const result = await restartReel(store, code, true, emptyDb, noOpTmdb, noOpLibrarySync)
-    expect(result).toEqual({ ok: false, code: 'pool_too_small' })
+    // A fresh, never-seeded db has zero Plex rows at all — the genuinely
+    // empty library case, so this now surfaces as library_empty rather than
+    // the generic pool_too_small (see the more specific test below).
+    expect(result).toEqual({ ok: false, code: 'library_empty' })
     emptyDb.close()
+  })
+
+  it('rejects restart with library_empty when the plex library has zero movies at all', async () => {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'B')
+    seedPlexRows(10)
+    const started = await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(started.ok).toBe(true)
+
+    // Library goes empty between Start and this restart attempt (e.g. the
+    // synced titles were removed from Plex).
+    db.prepare('DELETE FROM movies').run()
+
+    const result = await restartReel(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(result).toEqual({ ok: false, code: 'library_empty' })
   })
 })
 
@@ -367,6 +398,16 @@ describe('swipeAction', () => {
     const room = store.get(code)!
     const notPending = room.pool.find((p) => p.movieId !== room.participants.get(hostId)!.pendingCardId)!.movieId
     const result = swipeAction(store, code, hostId, notPending, 'yes')
+    expect(result).toEqual({ ok: false, code: 'not_your_card' })
+    expect(room.participants.get(hostId)!.swipes.size).toBe(0)
+  })
+
+  it('rejects a client-supplied null movieId even when the participant has no pending card', async () => {
+    const { store, code, hostId } = await startedRoom()
+    const room = store.get(code)!
+    // Simulate the participant having exhausted the pool, which sets pendingCardId to null.
+    room.participants.get(hostId)!.pendingCardId = null
+    const result = swipeAction(store, code, hostId, null as unknown as number, 'yes')
     expect(result).toEqual({ ok: false, code: 'not_your_card' })
     expect(room.participants.get(hostId)!.swipes.size).toBe(0)
   })

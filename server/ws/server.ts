@@ -7,7 +7,8 @@ import { recomputeExhaustion, type SyncWaiter } from '../room/activeActions'
 import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
 import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
-import { WS_CLOSE_TERMINAL, type ClientMessage, type ServerMessage } from './protocol'
+import { WS_CLOSE_TERMINAL, type ServerMessage } from './protocol'
+import { isClientMessage } from './validateMessage'
 import { createDefaultRateLimitBucket, getClientIp } from '../rateLimit'
 
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -90,6 +91,16 @@ export function attachWebSocketServer(
     broadcastToRoom(roomCode, toRoom)
   }
 
+  function finalizeHostDisconnect(roomCode: string, participantId: string, disconnectedAt: number): void {
+    const room = store.get(roomCode)
+    if (!room || room.status === 'ended') return
+    if (room.hostParticipantId !== participantId) return
+    const participant = room.participants.get(participantId)
+    if (!participant || participant.connectionStatus !== 'disconnected') return
+    if (participant.disconnectedAt !== disconnectedAt) return // stale timer from an earlier disconnect — a later disconnect (and its own timer) supersedes this one
+    broadcastRoomEnded(roomCode, 'host_disconnected_timeout')
+  }
+
   function markDisconnected(state: ConnectionState): void {
     if (!state.roomCode || !state.participantId) return
     const roomCode = state.roomCode
@@ -98,9 +109,24 @@ export function attachWebSocketServer(
     const participant = room?.participants.get(participantId)
     if (!room || !participant || participant.connectionStatus === 'disconnected') return
     participant.connectionStatus = 'disconnected'
-    participant.disconnectedAt = Date.now()
-    broadcastToRoom(roomCode, [stateUpdate(room)])
+    const disconnectedAt = Date.now()
+    participant.disconnectedAt = disconnectedAt
+    const isHost = room.hostParticipantId === participantId
+    const toRoom: ServerMessage[] = [stateUpdate(room)]
+    if (isHost) toRoom.push({ type: 'host_disconnected' })
+    broadcastToRoom(roomCode, toRoom)
     setTimeout(() => finalizeDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
+    if (isHost) {
+      // Capture disconnectedAt as a local value now, not a lazy
+      // `participant.disconnectedAt` read inside the closure — `participant`
+      // is the same mutable object across reconnect/disconnect cycles, so a
+      // property read deferred to fire-time would always see whatever the
+      // *current* value is (defeating the staleness check in
+      // finalizeHostDisconnect, which compares against that same live
+      // object). This local const freezes the value this specific
+      // disconnect actually happened at.
+      setTimeout(() => finalizeHostDisconnect(roomCode, participantId, disconnectedAt), RECONNECT_GRACE_MS).unref()
+    }
   }
 
   httpServer.on('upgrade', (req, socket, head) => {
@@ -136,13 +162,24 @@ export function attachWebSocketServer(
     sockets.set(ws, meta)
 
     ws.on('message', async (raw) => {
-      let message: ClientMessage
+      let parsed: unknown
       try {
-        message = JSON.parse(raw.toString())
+        parsed = JSON.parse(raw.toString())
       } catch {
         send(ws, { type: 'error', code: 'bad_token', message: 'malformed message' })
         return
       }
+      // parsed is `unknown` here on purpose — JSON.parse only proves it's
+      // valid JSON, not that it matches ClientMessage. isClientMessage is
+      // the actual runtime boundary check; a bare `as ClientMessage` cast
+      // would let a client send any shape (e.g. a swipe with movieId: null,
+      // or an unrecognized type) straight into the router, which trusts
+      // every field as typed.
+      if (!isClientMessage(parsed)) {
+        send(ws, { type: 'error', code: 'bad_token', message: 'malformed message' })
+        return
+      }
+      const message = parsed
 
       if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
 

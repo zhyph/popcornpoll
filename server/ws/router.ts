@@ -33,6 +33,7 @@ function participantViews(room: RoomState): ParticipantView[] {
     displayName: p.displayName,
     connectionStatus: p.connectionStatus,
     finished: p.finished,
+    isHost: p.id === room.hostParticipantId,
   }))
 }
 
@@ -142,6 +143,8 @@ export async function handleMessage(
         participantId: result.data.participantId,
         isHost: result.data.isHost,
       }
+      const update = stateUpdate(result.data.room)
+      const toRoom: ServerMessage[] = result.data.isHost ? [update, { type: 'host_reconnected' }] : [update]
       return {
         toSender: [
           {
@@ -153,7 +156,7 @@ export async function handleMessage(
             room: snapshotFor(result.data.room, participant),
           },
         ],
-        toRoom: [stateUpdate(result.data.room)],
+        toRoom,
         toParticipant: [],
         closeSender: false,
         newState,

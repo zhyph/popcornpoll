@@ -113,7 +113,7 @@ export async function startRoom(
   if (result.tooSmall) {
     room.status = 'lobby'
     notifyStarting?.()
-    return err('pool_too_small')
+    return err(result.tooSmallReason === 'library_empty' ? 'library_empty' : 'pool_too_small')
   }
 
   // Start is now guaranteed to succeed — only past this point do we actually
@@ -158,7 +158,7 @@ export async function restartReel(
     await librarySync.waitForCurrent()
     return buildPool(db, tmdb, room.candidateSource, room.tmdbFilters, room.rngSeed)
   })()
-  if (result.tooSmall) return err('pool_too_small')
+  if (result.tooSmall) return err(result.tooSmallReason === 'library_empty' ? 'library_empty' : 'pool_too_small')
 
   room.pool = result.pool
   const { c, m } = computeCAndM(result.pool)
@@ -194,7 +194,7 @@ export function swipeAction(
   if (!participant) return err('room_not_found')
   if (room.status !== 'active') return err('room_not_active')
 
-  if (movieId !== participant.pendingCardId) {
+  if (participant.pendingCardId === null || movieId !== participant.pendingCardId) {
     if (participant.swipes.has(movieId)) {
       // Replayed/duplicate delivery of an already-recorded swipe — idempotent no-op.
       return ok({ consumed: false, newMatches: [], nextCardForParticipant: participant.pendingCardId, exhaustedNow: room.exhausted })

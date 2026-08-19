@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { findEligiblePlexRows } from '../db/movies'
-import { validateTmdbFilters } from './rooms'
+import { validateTmdbFilters } from '../room/tmdbFilters'
 import type { TmdbFilters } from '../room/types'
 
 function numOrUndefined(v: string | null): number | undefined {

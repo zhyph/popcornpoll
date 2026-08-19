@@ -112,12 +112,14 @@
     "kicked": "Você foi removido desta sala.",
     "not_host": "Somente o anfitrião pode fazer isso.",
     "invalid_threshold": "Regra de match inválida.",
+    "invalid_filters": "Filtros inválidos. Confira o intervalo de ano e nota.",
     "not_enough_participants": "É preciso pelo menos 2 pessoas conectadas para começar.",
     "pool_too_small": "Não há filmes suficientes para começar. Ajuste os filtros.",
     "not_your_card": "Esse filme não é mais o seu card atual.",
     "invalid_name": "Nome inválido. Use entre 1 e 24 caracteres.",
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou.",
     "room_not_active": "Esta sala não está ativa no momento.",
+    "library_empty": "Essa biblioteca ainda não tem filmes. Escolha outra biblioteca ou rode uma sincronização.",
     "generic": "Algo deu errado."
   },
   "kicked": {
@@ -127,7 +129,8 @@
   "roomEnded": {
     "host_ended": "O anfitrião encerrou esta sessão.",
     "inactivity_timeout": "Esta sessão foi encerrada após um período de inatividade.",
-    "server_restarting": "O servidor está reiniciando. Entre novamente em instantes."
+    "server_restarting": "O servidor está reiniciando. Entre novamente em instantes.",
+    "host_disconnected_timeout": "O anfitrião desconectou e não voltou a tempo."
   },
   "localeSwitcher": {
     "english": "English",
@@ -165,5 +168,31 @@
     "stepSyncLabel": "Sincronização concluída",
     "stepStateCurrent": "Atual",
     "stepStateDone": "Concluído"
+  },
+  "edgeState": {
+    "kickedKicker": "Seu ingresso foi rasgado",
+    "kickedTitle": "O LANTERNISTA TE PÔS PRA FORA",
+    "kickedDetail": "Se foi engano, peça o código de novo — entrar de novo é instantâneo.",
+    "kickedPrimary": "Digitar um novo código",
+    "excludedKicker": "Assento liberado",
+    "excludedTitle": "SEU ASSENTO FOI LIBERADO",
+    "hostGoneKicker": "Projetor parou",
+    "hostGoneTitle": "O ANFITRIÃO CAIU DA SESSÃO",
+    "hostGoneBody": "Perdemos a conexão do anfitrião. A sala continua aberta por dois minutos, caso ele volte rapidinho.",
+    "hostGoneDetail": "Reconectando… seus votos estão guardados. Se ele não voltar, a sala se fecha sozinha.",
+    "hostGonePrimary": "Voltar para a sala",
+    "hostGoneSecondary": "Sair da sala",
+    "poolFailKicker": "Rolo emperrou",
+    "poolFailTitle": "NÃO FOI POSSÍVEL MONTAR O CATÁLOGO",
+    "poolFailBody": "Seus filtros não trouxeram nada para mostrar, ou o Plex não respondeu a tempo.",
+    "poolFailDetail": "Tente ampliar o intervalo de anos, reduzir a nota mínima, ou adicionar o TMDB como segunda fonte.",
+    "poolFailPrimary": "Voltar aos filtros",
+    "poolFailSecondary": "Ficar e tentar de novo",
+    "emptyLibraryKicker": "Nada na prateleira",
+    "emptyLibraryTitle": "ESSA BIBLIOTECA ESTÁ VAZIA",
+    "emptyLibraryBody": "O Plex está vinculado, mas as bibliotecas escolhidas ainda não têm filmes.",
+    "emptyLibraryDetail": "Escolha outras bibliotecas na cabine, ou rode uma sincronização se você adicionou títulos desde então.",
+    "emptyLibraryPrimary": "Abrir a cabine",
+    "emptyLibraryStayLabel": "Ficar e tentar de novo"
   }
 }

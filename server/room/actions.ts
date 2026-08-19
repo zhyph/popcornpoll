@@ -3,6 +3,7 @@ import { emptyTally, recordVote } from '../ranking/affinity'
 import { generateToken } from '../auth/tokens'
 import { clampThreshold, evaluateThreshold, isValidThreshold } from './matchThreshold'
 import { recomputeExhaustion } from './activeActions'
+import { validateTmdbFilters } from './tmdbFilters'
 import type { RoomStore } from './roomStore'
 import type { CandidateSource, MatchThreshold, Participant, RoomState, TmdbFilters } from './types'
 
@@ -20,6 +21,7 @@ export type ErrorCode =
   | 'bad_token'
   | 'not_enough_participants'
   | 'pool_too_small'
+  | 'library_empty'
   | 'not_your_card'
   | 'internal_error'
   | 'room_not_active'
@@ -194,9 +196,16 @@ export function updateSettings(
     return err('invalid_threshold')
   }
 
+  let filters: TmdbFilters | undefined
+  if (updates.tmdbFilters) {
+    const filterResult = validateTmdbFilters(updates.tmdbFilters)
+    if (!filterResult.ok) return err('invalid_filters')
+    filters = filterResult.filters
+  }
+
   if (updates.matchThreshold) room.matchThreshold = updates.matchThreshold
   if (updates.candidateSource) room.candidateSource = updates.candidateSource
-  if (updates.tmdbFilters) room.tmdbFilters = updates.tmdbFilters
+  if (filters) room.tmdbFilters = filters
   room.lastActivityAt = Date.now()
 
   return ok(null)

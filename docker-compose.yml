@@ -1,0 +1,20 @@
+services:
+  popcornpoll:
+    # Prebuilt multi-arch image (amd64/arm64), published by .github/workflows/docker-publish.yml.
+    # Swap for `build: .` to build from source instead.
+    image: ghcr.io/zhyph/popcornpoll:latest
+    container_name: popcornpoll
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in .env}
+      AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY:?set AUTH_ENCRYPTION_KEY in .env, e.g. openssl rand -hex 16}
+      ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN:?set ADMIN_SETUP_TOKEN in .env, e.g. openssl rand -hex 16}
+      APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN in .env, e.g. http://localhost:3000}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+    volumes:
+      - popcornpoll-data:/data
+
+volumes:
+  popcornpoll-data:
