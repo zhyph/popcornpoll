@@ -112,6 +112,7 @@
     "kicked": "You were removed from this room.",
     "not_host": "Only the host can do that.",
     "invalid_threshold": "Invalid match rule.",
+    "invalid_filters": "Invalid filters. Check your year and rating range.",
     "not_enough_participants": "At least 2 connected participants are needed to start.",
     "pool_too_small": "Not enough movies to start. Try adjusting your filters.",
     "not_your_card": "That movie is no longer your current card.",

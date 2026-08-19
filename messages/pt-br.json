@@ -112,6 +112,7 @@
     "kicked": "Você foi removido desta sala.",
     "not_host": "Somente o anfitrião pode fazer isso.",
     "invalid_threshold": "Regra de match inválida.",
+    "invalid_filters": "Filtros inválidos. Confira o intervalo de ano e nota.",
     "not_enough_participants": "É preciso pelo menos 2 pessoas conectadas para começar.",
     "pool_too_small": "Não há filmes suficientes para começar. Ajuste os filtros.",
     "not_your_card": "Esse filme não é mais o seu card atual.",
