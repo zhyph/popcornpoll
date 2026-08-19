@@ -29,3 +29,28 @@ describe('slatGroups', () => {
     expect(groups[1]?.[0]?.delay).toBe('0.18')
   })
 })
+
+describe('slatGroups with splitOn', () => {
+  it('splits on spaces instead of hyphens when splitOn is "space"', () => {
+    expect(slatGroups('REAR WINDOW', 'space')).toEqual([
+      [
+        { letter: 'R', delay: '0.00' },
+        { letter: 'E', delay: '0.09' },
+        { letter: 'A', delay: '0.18' },
+        { letter: 'R', delay: '0.27' },
+      ],
+      [
+        { letter: 'W', delay: '0.36' },
+        { letter: 'I', delay: '0.45' },
+        { letter: 'N', delay: '0.54' },
+        { letter: 'D', delay: '0.63' },
+        { letter: 'O', delay: '0.72' },
+        { letter: 'W', delay: '0.81' },
+      ],
+    ])
+  })
+
+  it('defaults to hyphen-splitting when splitOn is omitted (Join room codes unaffected)', () => {
+    expect(slatGroups('AB-CD')).toEqual(slatGroups('AB-CD', 'hyphen'))
+  })
+})

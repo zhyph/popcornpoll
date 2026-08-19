@@ -97,6 +97,13 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+@keyframes glitchShift {
+  0%, 92%, 100% { transform: translate(0, 0); }
+  93% { transform: translate(-2px, 1px); }
+  95% { transform: translate(2px, -1px); }
+  97% { transform: translate(-1px, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

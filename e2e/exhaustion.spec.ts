@@ -30,7 +30,7 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   // host's own default display name is also "Guest" — wait for both
   // participants' "Remove" buttons instead.
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   for (const page of [hostPage, guestPage]) {
@@ -59,9 +59,14 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   // The last swipe still has to round-trip through the WS server (record the
   // vote, detect exhaustion, broadcast the fallback) before this renders —
   // the bare 5s default expect timeout leaves no margin for that under load,
-  // unlike the explicit 15s waits already used elsewhere in this file.
-  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 15000 })
+  // unlike the explicit waits already used elsewhere in this file. Bumped
+  // 15000 -> 20000 after repeated reproduction of this exact assertion
+  // missing its margin under real host load during the Room-screens plan's
+  // final-review verification (not caused by that plan's diff — confirmed
+  // this file's config/timeouts were otherwise untouched by it — just a
+  // second empirical data point that 15s isn't always enough under load).
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 20000 })
   await hostPage.reload()
-  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 15000 }) // recoverable from the joined snapshot, not just the one-shot event
+  await expect(hostPage.locator('[data-testid="fallback"]')).toBeVisible({ timeout: 20000 }) // recoverable from the joined snapshot, not just the one-shot event
   await browser.close()
 })

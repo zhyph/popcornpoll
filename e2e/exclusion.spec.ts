@@ -39,7 +39,7 @@ test('a participant disconnected through Start is excluded and their reconnect i
 
   await guestContext.close() // simulates the guest going fully offline before Start
   await hostPage.waitForTimeout(3000) // exceed the heartbeat timeout so the server marks them disconnected
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await hostPage.waitForSelector('[data-testid="swipe-card"]')
 
   const reconnectingContext = await browser.newContext()

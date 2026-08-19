@@ -5,11 +5,11 @@ import { useTranslations } from 'next-intl'
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Button } from './ui/button'
-import { Card, CardContent } from './ui/card'
+import CodeSlats from './CodeSlats'
 
 export function RoomShare({ code }: { code: string }) {
   const t = useTranslations('roomShare')
+  const tRoom = useTranslations('room')
   const [copied, setCopied] = useState(false)
   const [canShare, setCanShare] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -45,24 +45,28 @@ export function RoomShare({ code }: { code: string }) {
   }
 
   return (
-    <Card className="border-2 border-brass bg-velvet">
-      <CardContent className="flex flex-col items-center gap-4 p-6">
-        <p className="font-mono text-3xl tracking-widest text-marquee">{code}</p>
-        <canvas ref={canvasRef} aria-label={`QR code for ${joinUrl}`} className="rounded bg-ticket p-2" />
-        <div className="flex gap-2">
-          <Button variant="outline" className="border-brass text-ticket" onClick={copyLink}>
-            {copied ? t('copied') : t('copyLink')}
-          </Button>
-          {canShare && (
-            <Button
-              className="bg-marquee text-ink hover:bg-marquee/90"
-              onClick={() => navigator.share({ title: t('shareTitle'), url: joinUrl })}
-            >
-              {t('share')}
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex w-full flex-col items-center gap-4 border-2 border-brass/70 bg-gradient-to-b from-velvet/80 to-ink/90 p-6 sm:p-8">
+      <p className="font-mono text-[10.5px] uppercase tracking-[.3em] text-brass">{tRoom('doorCodeLabel')}</p>
+      <CodeSlats code={code} size="small" />
+      <canvas ref={canvasRef} aria-label={`QR code for ${joinUrl}`} className="rounded bg-ticket p-2" />
+      <div className="flex flex-wrap justify-center gap-2.5">
+        <button
+          type="button"
+          onClick={copyLink}
+          className="border border-brass/60 bg-transparent px-4 py-2.5 font-mono text-[11px] uppercase tracking-wider text-ticket hover:border-marquee hover:text-marquee"
+        >
+          {copied ? t('copied') : t('copyLink')}
+        </button>
+        {canShare && (
+          <button
+            type="button"
+            onClick={() => navigator.share({ title: t('shareTitle'), url: joinUrl })}
+            className="bg-marquee px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink hover:bg-marquee/90"
+          >
+            {t('share')}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

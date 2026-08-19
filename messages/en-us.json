@@ -64,16 +64,30 @@
     "connecting": "Connecting…",
     "admitted": "Admitted",
     "removeButton": "Remove",
-    "startButton": "Start",
+    "startButton": "DIM THE LIGHTS",
     "buildingPool": "Building your pool…",
-    "noUnanimousPick": "No unanimous pick — closest picks",
-    "endSession": "End session"
+    "waitingForHost": "Waiting for the host to dim the lights",
+    "doorCodeLabel": "Door code",
+    "restartReelLabel": "Restart reel",
+    "restartReelDiscardLabel": "Discard {count} votes?",
+    "noUnanimousPick": "NO UNANIMOUS PICK",
+    "closestThreeLabel": "closest three",
+    "runnersUpExplainer": "The house suggests the top line. Host can start a second reel, or put it to a show of hands.",
+    "secondReelLabel": "SECOND REEL",
+    "closeTheHouseLabel": "Close the house",
+    "endSession": "End session",
+    "houseLightsUp": "The house lights come up",
+    "endOfShowTitle": "END OF SHOW",
+    "reelChangeFooter": "reel change · thank you for not talking during the picture",
+    "backToBoxOffice": "BACK TO THE BOX OFFICE"
   },
   "swipeDeck": {
     "inLibrary": "In your library",
     "noMoreCards": "No more cards",
     "yesAriaLabel": "Yes",
-    "noAriaLabel": "No"
+    "noAriaLabel": "No",
+    "passLabel": "PASS",
+    "admitLabel": "ADMIT"
   },
   "marqueeReveal": {
     "matchLabel": "It's a match",

@@ -64,16 +64,30 @@
     "connecting": "Conectando…",
     "admitted": "Admitidos",
     "removeButton": "Remover",
-    "startButton": "Iniciar",
+    "startButton": "APAGAR AS LUZES",
     "buildingPool": "Montando seu catálogo…",
-    "noUnanimousPick": "Sem escolha unânime — mais próximas",
-    "endSession": "Encerrar sessão"
+    "waitingForHost": "Esperando o anfitrião apagar as luzes",
+    "doorCodeLabel": "Código da porta",
+    "restartReelLabel": "Reiniciar a sessão",
+    "restartReelDiscardLabel": "Descartar {count} votos?",
+    "noUnanimousPick": "SEM ESCOLHA UNÂNIME",
+    "closestThreeLabel": "os três mais próximos",
+    "runnersUpExplainer": "A casa sugere o primeiro da lista. O anfitrião pode começar uma nova sessão, ou decidir a mão levantada.",
+    "secondReelLabel": "NOVA SESSÃO",
+    "closeTheHouseLabel": "Encerrar a casa",
+    "endSession": "Encerrar sessão",
+    "houseLightsUp": "As luzes da casa se acendem",
+    "endOfShowTitle": "FIM DA SESSÃO",
+    "reelChangeFooter": "troca de rolo · obrigado por não conversar durante o filme",
+    "backToBoxOffice": "VOLTAR PARA A BILHETERIA"
   },
   "swipeDeck": {
     "inLibrary": "Na sua biblioteca",
     "noMoreCards": "Não há mais filmes",
     "yesAriaLabel": "Sim",
-    "noAriaLabel": "Não"
+    "noAriaLabel": "Não",
+    "passLabel": "PASSAR",
+    "admitLabel": "ADMITIR"
   },
   "marqueeReveal": {
     "matchLabel": "Deu match",

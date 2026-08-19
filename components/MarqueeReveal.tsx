@@ -3,12 +3,19 @@
 
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import CodeSlats from './CodeSlats'
 import type { PoolEntry } from '../server/pool/buildPool'
 
-const BULB_COUNT = 20
+const BULB_COUNT = 24
 
 export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
   const t = useTranslations('marqueeReveal')
+  const metaParts = [
+    movie.year ? String(movie.year) : null,
+    movie.genres.length > 0 ? movie.genres.join(', ') : null,
+    movie.rating !== null ? `★ ${movie.rating.toFixed(1)}` : null,
+  ].filter((part): part is string => part !== null)
+
   return (
     <motion.div
       role="alert"
@@ -18,23 +25,20 @@ export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
       transition={{ type: 'spring', stiffness: 200, damping: 20 }}
     >
       {Array.from({ length: BULB_COUNT }).map((_, i) => (
-        <motion.span
+        <span
           key={i}
+          aria-hidden
           className="absolute h-2 w-2 rounded-full bg-marquee"
-          style={bulbPosition(i, BULB_COUNT)}
-          animate={{ opacity: [0.25, 1, 0.25] }}
-          transition={{ duration: 1.2, repeat: Infinity, delay: (i / BULB_COUNT) * 1.2, ease: 'easeInOut' }}
+          style={{ ...bulbPosition(i, BULB_COUNT), animation: `bulb 1.4s ease-in-out infinite ${((i / BULB_COUNT) * 1.4).toFixed(2)}s` }}
         />
       ))}
       <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('matchLabel')}</p>
-      <motion.h2
-        className="font-display text-4xl text-ticket"
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.3 }}
-      >
-        {movie.title}
-      </motion.h2>
+      <div className="my-3">
+        <CodeSlats code={movie.title.toUpperCase()} splitOn="space" />
+      </div>
+      {metaParts.length > 0 && (
+        <p className="font-mono text-xs uppercase tracking-wider text-ticket/70">{metaParts.join(' · ')}</p>
+      )}
       {movie.inLibrary && <p className="mt-2 text-sm text-marquee">{t('readyInLibrary')}</p>}
     </motion.div>
   )
@@ -42,7 +46,8 @@ export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
 
 // Places bulb i of n evenly around a rectangle's perimeter, expressed as
 // inset-based absolute positioning (no layout dependency on the frame's
-// exact pixel size).
+// exact pixel size) — same math as components/BulbFrame.tsx's bulbRing(),
+// kept local here since MarqueeReveal's border geometry differs slightly.
 function bulbPosition(i: number, n: number): React.CSSProperties {
   const perimeterFraction = i / n
   const side = Math.floor(perimeterFraction * 4)
