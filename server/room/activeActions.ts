@@ -194,7 +194,7 @@ export function swipeAction(
   if (!participant) return err('room_not_found')
   if (room.status !== 'active') return err('room_not_active')
 
-  if (movieId !== participant.pendingCardId) {
+  if (participant.pendingCardId === null || movieId !== participant.pendingCardId) {
     if (participant.swipes.has(movieId)) {
       // Replayed/duplicate delivery of an already-recorded swipe — idempotent no-op.
       return ok({ consumed: false, newMatches: [], nextCardForParticipant: participant.pendingCardId, exhaustedNow: room.exhausted })
