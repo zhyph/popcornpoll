@@ -45,6 +45,14 @@ describe('createSetupHandlers', () => {
     expect(res.status).toBe(401)
   })
 
+  it('rejects a token of a different length than the real one without throwing', async () => {
+    const req = new Request('http://localhost/api/setup/plex/pin', {
+      headers: { Authorization: 'Bearer short' },
+    })
+    const res = await handlers().pin(req)
+    expect(res.status).toBe(401)
+  })
+
   it('accepts a pin request with the correct token and returns id/code/clientIdentifier', async () => {
     const req = new Request('http://localhost/api/setup/plex/pin', {
       headers: { Authorization: 'Bearer correct-token' },

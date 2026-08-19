@@ -1,10 +1,13 @@
+import { timingSafeEqual } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import { savePlexLink } from '../plex/link'
 import type { PlexClient } from '../plex/client'
 
 function requireAdmin(req: Request, adminSetupToken: string): boolean {
-  const header = req.headers.get('authorization') ?? ''
-  return header === `Bearer ${adminSetupToken}`
+  const header = Buffer.from(req.headers.get('authorization') ?? '')
+  const expected = Buffer.from(`Bearer ${adminSetupToken}`)
+  if (header.length !== expected.length) return false
+  return timingSafeEqual(header, expected)
 }
 
 function badRequest(code: string, message: string): Response {
