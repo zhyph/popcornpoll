@@ -7,7 +7,8 @@ import { recomputeExhaustion, type SyncWaiter } from '../room/activeActions'
 import type { RoomStore } from '../room/roomStore'
 import type { TmdbClient } from '../tmdb/client'
 import { handleMessage, stateUpdate, topCandidatesFor, type ConnectionState } from './router'
-import { WS_CLOSE_TERMINAL, type ClientMessage, type ServerMessage } from './protocol'
+import { WS_CLOSE_TERMINAL, type ServerMessage } from './protocol'
+import { isClientMessage } from './validateMessage'
 import { createDefaultRateLimitBucket, getClientIp } from '../rateLimit'
 
 export const HEARTBEAT_INTERVAL_MS = 15_000
@@ -136,13 +137,24 @@ export function attachWebSocketServer(
     sockets.set(ws, meta)
 
     ws.on('message', async (raw) => {
-      let message: ClientMessage
+      let parsed: unknown
       try {
-        message = JSON.parse(raw.toString())
+        parsed = JSON.parse(raw.toString())
       } catch {
         send(ws, { type: 'error', code: 'bad_token', message: 'malformed message' })
         return
       }
+      // parsed is `unknown` here on purpose — JSON.parse only proves it's
+      // valid JSON, not that it matches ClientMessage. isClientMessage is
+      // the actual runtime boundary check; a bare `as ClientMessage` cast
+      // would let a client send any shape (e.g. a swipe with movieId: null,
+      // or an unrecognized type) straight into the router, which trusts
+      // every field as typed.
+      if (!isClientMessage(parsed)) {
+        send(ws, { type: 'error', code: 'bad_token', message: 'malformed message' })
+        return
+      }
+      const message = parsed
 
       if (message.type === 'heartbeat') meta.lastHeartbeatAt = Date.now()
 

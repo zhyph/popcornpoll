@@ -395,4 +395,37 @@ describe('attachWebSocketServer: handleMessage failures do not crash the process
     ws.close()
     guest.close()
   })
+
+  it('rejects a message with an unrecognized type instead of crashing the connection', async () => {
+    const ws = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+
+    ws.send(JSON.stringify({ type: 'not_a_real_type' }))
+    const reply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(reply.type).toBe('error')
+    expect(reply.code).toBe('bad_token')
+
+    // The connection must still be alive and responsive afterward.
+    ws.send(JSON.stringify({ type: 'heartbeat' }))
+    const heartbeatReply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(heartbeatReply.type).toBe('heartbeat_ack')
+    ws.close()
+  })
+
+  it('rejects a swipe with a null movieId at the WS boundary, before it reaches the room', async () => {
+    const ws = new WebSocket(`ws://localhost:${crashPort}/ws`)
+    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+
+    ws.send(JSON.stringify({ type: 'swipe', movieId: null, vote: 'yes' }))
+    const reply = await new Promise<Record<string, unknown>>((resolve) => {
+      ws.once('message', (raw) => resolve(JSON.parse(raw.toString())))
+    })
+    expect(reply.type).toBe('error')
+    expect(reply.code).toBe('bad_token')
+    ws.close()
+  })
 })
