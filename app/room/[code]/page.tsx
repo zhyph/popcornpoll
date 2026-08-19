@@ -34,7 +34,25 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const [client, setClient] = useState<WsClient | null>(null)
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
+  const [confirmRestart, setConfirmRestart] = useState(false)
   const lastSeqRef = useRef<number | null>(null)
+  const confirmRestartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function onRestartReel() {
+    if ((snapshot?.totalVotes ?? 0) === 0) {
+      client?.send({ type: 'restart_reel' })
+      return
+    }
+    if (!confirmRestart) {
+      setConfirmRestart(true)
+      if (confirmRestartTimer.current) clearTimeout(confirmRestartTimer.current)
+      confirmRestartTimer.current = setTimeout(() => setConfirmRestart(false), 4000)
+      return
+    }
+    if (confirmRestartTimer.current) clearTimeout(confirmRestartTimer.current)
+    setConfirmRestart(false)
+    client?.send({ type: 'restart_reel' })
+  }
 
   useEffect(() => {
     function applySeq(seq: number) {
@@ -261,22 +279,49 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   }
 
   return (
-    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
+    <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center justify-center gap-6 px-4 py-10">
       {latestMatch && (
         <div data-testid="match-banner">
           <MarqueeReveal movie={latestMatch} />
         </div>
       )}
       <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
-      {isHost && (
-        <Button
-          variant="outline"
-          className="border-exit-red text-exit-red hover:bg-exit-red hover:text-ticket"
-          onClick={() => client?.send({ type: 'end_room' })}
-        >
-          {t('endSession')}
-        </Button>
-      )}
+      <div className="flex w-full flex-wrap items-center gap-3 border border-brass/35 bg-ink/70 px-4 py-3">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-brass">{t('admitted')}</span>
+        {participants.map((p) => (
+          <span key={p.id} className="flex items-center gap-1.5 font-mono text-xs text-ticket/80">
+            <span className={`h-1.5 w-1.5 rounded-full ${p.connectionStatus === 'connected' ? 'bg-marquee' : 'bg-exit-red'}`} />
+            {p.displayName}
+          </span>
+        ))}
+        {isHost && (
+          <button
+            type="button"
+            data-testid="restart-reel"
+            onClick={onRestartReel}
+            onBlur={() => {
+              if (confirmRestartTimer.current) clearTimeout(confirmRestartTimer.current)
+              setConfirmRestart(false)
+            }}
+            className={
+              confirmRestart
+                ? 'ml-auto border border-exit-red bg-exit-red px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-ticket'
+                : 'ml-auto border border-brass/50 bg-transparent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-brass hover:border-marquee hover:text-marquee'
+            }
+          >
+            {confirmRestart ? t('restartReelDiscardLabel', { count: snapshot.totalVotes }) : t('restartReelLabel')}
+          </button>
+        )}
+        {isHost && (
+          <button
+            type="button"
+            onClick={() => client?.send({ type: 'end_room' })}
+            className="border border-exit-red px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-exit-red hover:bg-exit-red hover:text-ticket"
+          >
+            {t('endSession')}
+          </button>
+        )}
+      </div>
     </main>
   )
 }
