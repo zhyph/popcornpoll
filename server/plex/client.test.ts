@@ -23,7 +23,7 @@ describe('createPlexClient', () => {
     const result = await client.createPin()
     expect(result).toEqual({ id: 123, code: 'ABCD' })
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://plex.tv/api/v2/pins',
+      'https://plex.tv/api/v2/pins?strong=true',
       expect.objectContaining({ method: 'POST' }),
     )
   })
