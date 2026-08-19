@@ -11,6 +11,7 @@ import { upsertPlexRow } from '../db/movies'
 import { createRoomStore } from '../room/roomStore'
 import { attachWebSocketServer, MAX_FAILED_JOINS, RECONNECT_GRACE_MS } from './server'
 import { WS_CLOSE_TERMINAL } from './protocol'
+import type { ParticipantView } from './protocol'
 import type { Server } from 'node:http'
 import type Database from 'better-sqlite3'
 import type { SyncWaiter } from '../room/activeActions'
@@ -298,6 +299,213 @@ describe('attachWebSocketServer', () => {
     }
 
     hostWs.close()
+  })
+
+  it('broadcasts host_disconnected to the room when the host drops, and host_reconnected when they return in time', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    // Host drops. The guest should see host_disconnected land alongside (not
+    // instead of) the usual state_update.
+    const guestMessages = collectMessages(guestWs, 2)
+    hostWs.close()
+    const [first, second] = await guestMessages
+    const types = [first?.type, second?.type].sort()
+    expect(types).toEqual(['host_disconnected', 'state_update'].sort())
+
+    // Host reconnects well within the grace period using the same session.
+    const hostWs2 = await connect()
+    const guestReconnectMessage = nextMessage(guestWs)
+    hostWs2.send(
+      JSON.stringify({
+        type: 'reconnect',
+        roomCode: code,
+        sessionToken: hostJoined.sessionToken as string,
+        hostToken: hostJoined.hostToken as string,
+      }),
+    )
+    await nextMessage(hostWs2) // joined
+    const reconnectBroadcast = await guestReconnectMessage
+    expect(reconnectBroadcast.type === 'host_reconnected' || reconnectBroadcast.type === 'state_update').toBe(true)
+
+    hostWs2.close()
+    guestWs.close()
+  })
+
+  it('flags the host in every joined snapshot so a client arriving mid-outage can derive host-gone itself', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    // The host drops with nobody else in the room, so the host_disconnected
+    // broadcast reaches no one. For a client that joins (or reconnects)
+    // afterwards, the joined snapshot is the *only* signal that the host is
+    // gone — without isHost it can't tell which of the listed participants'
+    // connectionStatus to look at.
+    hostWs.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(store.get(code)!.participants.get(hostJoined.participantId as string)!.connectionStatus).toBe('disconnected')
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    const guestJoined = await nextMessage(guestWs)
+    const participants = (guestJoined.room as { participants: ParticipantView[] }).participants
+
+    const flagged = participants.filter((p) => p.isHost)
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0]!.displayName).toBe('Host')
+    expect(flagged[0]!.connectionStatus).toBe('disconnected')
+    expect(participants.find((p) => p.displayName === 'Guest')!.isHost).toBe(false)
+
+    guestWs.close()
+  })
+
+  it('closes the room with reason host_disconnected_timeout if the host never returns within the grace period', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs)
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    vi.useFakeTimers()
+    try {
+      // Same burst-vs-single-`once` gap as the room_ended catch below (this
+      // markDisconnected broadcast is also [state_update, host_disconnected]
+      // together) — safe here only because this call is purely a
+      // synchronization barrier ("some message arrived") and never asserts
+      // on which of the two it actually caught.
+      const hostGoneMessage = nextMessage(guestWs)
+      hostWs.close()
+      await vi.advanceTimersByTimeAsync(0)
+      await hostGoneMessage
+
+      // broadcastRoomEnded sends its state_update and room_ended together in
+      // one batch (same seq, same broadcastToRoom call), which can arrive as
+      // a single synchronous burst of 'message' events — a lone
+      // nextMessage() registered beforehand only ever catches the first of
+      // the two (state_update). Collect both and find room_ended among
+      // them, same pattern already used above for the
+      // host_disconnected/state_update burst.
+      const roomEndedMessages = collectMessages(guestWs, 2)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS)
+      const messages = await roomEndedMessages
+      const roomEnded = messages.find((m) => m.type === 'room_ended')
+      expect(roomEnded).toBeDefined()
+      expect((roomEnded as { reason: string }).reason).toBe('host_disconnected_timeout')
+      expect(store.get(code)!.status).toBe('ended')
+    } finally {
+      vi.useRealTimers()
+    }
+
+    guestWs.close()
+  })
+
+  it('ignores a stale host-disconnect timer after a rapid disconnect -> reconnect -> disconnect cycle, and only closes relative to the later disconnect\'s own deadline', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    vi.useFakeTimers()
+    try {
+      // T1: host disconnects, scheduling a timer for T1 + RECONNECT_GRACE_MS
+      // that will become stale once the host reconnects below. This
+      // nextMessage() is purely a synchronization barrier (see the note on
+      // the equivalent call above) — its content isn't asserted on.
+      const firstDisconnectGone = nextMessage(guestWs)
+      hostWs.terminate()
+      await vi.advanceTimersByTimeAsync(0)
+      await firstDisconnectGone
+
+      // Reconnect well within the grace period, 5s after T1.
+      await vi.advanceTimersByTimeAsync(5_000)
+      const hostWs2 = await connect()
+      hostWs2.send(
+        JSON.stringify({
+          type: 'reconnect',
+          roomCode: code,
+          sessionToken: hostJoined.sessionToken as string,
+          hostToken: hostJoined.hostToken as string,
+        }),
+      )
+      // Awaiting the 'joined' reply confirms the server has already applied
+      // the reconnect (participant.disconnectedAt reset to null) before we
+      // disconnect again below — reconnectRoom runs synchronously inside
+      // the same handler call that produces this reply.
+      await nextMessage(hostWs2)
+      // The reconnect also broadcasts [state_update, host_reconnected] to
+      // the room, including guestWs. Drain both explicitly — otherwise
+      // they're an unconsumed backlog that the *next* nextMessage(guestWs)
+      // below (meant to signal the second disconnect) could catch instead,
+      // making that barrier resolve on a stale message before the second
+      // disconnect has actually been processed server-side.
+      await collectMessages(guestWs, 2)
+
+      // T2 = T1 + 5s: disconnect again immediately. This schedules a fresh
+      // timer for T2 + RECONNECT_GRACE_MS, strictly after the first
+      // (now-stale) timer's deadline.
+      const secondDisconnectGone = nextMessage(guestWs)
+      hostWs2.terminate()
+      await vi.advanceTimersByTimeAsync(0)
+      await secondDisconnectGone
+
+      // Advance to exactly the STALE timer's deadline: T1 + RECONNECT_GRACE_MS,
+      // i.e. RECONNECT_GRACE_MS - 5_000 from here. The room must NOT close —
+      // that timer belongs to the first disconnect, which the host already
+      // recovered from; closing here would be the bug under test.
+      let sawRoomEnded = false
+      const watcher = (raw: Buffer) => {
+        if ((JSON.parse(raw.toString()) as { type: string }).type === 'room_ended') sawRoomEnded = true
+      }
+      guestWs.on('message', watcher)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS - 5_000)
+      guestWs.off('message', watcher)
+      expect(sawRoomEnded).toBe(false)
+      expect(store.get(code)!.status).not.toBe('ended')
+
+      // Advance the remaining 5s to reach the SECOND (legitimate) timer's
+      // deadline, T2 + RECONNECT_GRACE_MS. The host never returned from
+      // that second disconnect either, so the room should close now.
+      const roomEndedMessages = collectMessages(guestWs, 2)
+      await vi.advanceTimersByTimeAsync(5_000)
+      const messages = await roomEndedMessages
+      const roomEnded = messages.find((m) => m.type === 'room_ended')
+      expect(roomEnded).toBeDefined()
+      expect((roomEnded as { reason: string }).reason).toBe('host_disconnected_timeout')
+      expect(store.get(code)!.status).toBe('ended')
+    } finally {
+      vi.useRealTimers()
+    }
+
+    guestWs.close()
   })
 
   it("closes a kicked participant's socket with the terminal close code", async () => {

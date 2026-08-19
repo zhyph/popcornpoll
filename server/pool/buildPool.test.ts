@@ -63,6 +63,44 @@ describe('buildPool', () => {
     expect(result.tooSmall).toBe(true)
   })
 
+  it('sets tooSmallReason to library_empty when a plex-only room has zero eligible rows at all', async () => {
+    // No seedPlexRows call — the library genuinely has nothing in it.
+    const result = await buildPool(db, noOpTmdb, 'plex', {}, 1)
+    expect(result.tooSmall).toBe(true)
+    expect(result.tooSmallReason).toBe('library_empty')
+  })
+
+  it('does not set tooSmallReason when the library has movies but a filter excludes all of them', async () => {
+    seedPlexRows(10) // non-empty library
+    const result = await buildPool(db, noOpTmdb, 'plex', { genre: 'Nonexistent Genre XYZ' }, 1)
+    expect(result.tooSmall).toBe(true)
+    expect(result.tooSmallReason).toBeUndefined()
+  })
+
+  it('does not set tooSmallReason for a plex+tmdb room even with zero Plex rows', async () => {
+    // plex+tmdb can still fill a valid pool from TMDB alone — an empty Plex
+    // library isn't the same dead end there that it is for a plex-only room.
+    const tmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockResolvedValue(
+        Array.from({ length: 10 }, (_, i) => ({
+          tmdbId: 5000 + i,
+          title: `TMDB Movie ${i}`,
+          overview: 'desc',
+          posterPath: '/p.jpg',
+          year: 2020,
+          genreIds: [],
+          rating: 7,
+          voteCount: 1000,
+        })),
+      ),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
+    expect(result.tooSmall).toBe(false)
+    expect(result.tooSmallReason).toBeUndefined()
+  })
+
   it('dedups a film that appears in both the Plex sample and the TMDB discover results', async () => {
     seedPlexRows(10)
     // Give one Plex row a resolved tmdb_id matching a TMDB discover result.
