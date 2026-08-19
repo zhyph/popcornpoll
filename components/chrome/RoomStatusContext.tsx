@@ -3,7 +3,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 
-export type ChapterStep = 'entry' | 'lobby' | 'deck' | 'wrapup'
+export type ChapterStep = 'entry' | 'lobby' | 'deck' | 'wrapup' | 'soloFilters' | 'soloShortlist' | 'soloPick'
 
 const RoomStatusContext = createContext<{
   step: ChapterStep | null

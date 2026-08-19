@@ -6,17 +6,20 @@ import { usePathname } from 'next/navigation'
 import { LocaleSwitcher } from '../LocaleSwitcher'
 import { useRoomStep, type ChapterStep } from './RoomStatusContext'
 
-const STEPS: ChapterStep[] = ['entry', 'lobby', 'deck', 'wrapup']
+const ROOM_STEPS: ChapterStep[] = ['entry', 'lobby', 'deck', 'wrapup']
+const SOLO_STEPS: ChapterStep[] = ['soloFilters', 'soloShortlist', 'soloPick']
 
 // Route-only inference for screens this plan doesn't wire real state into
 // yet: '/' and '/join/[code]' are always 'entry' (nothing else they could
 // be); '/room/[code]' defaults to 'lobby' unless a room page has pushed a
-// more specific step via useSetRoomStep (Task 9's context, wired by a later
-// plan); '/setup' isn't part of this flow, so no step highlights there.
+// more specific step via useSetRoomStep; '/solo' defaults to 'soloFilters'
+// the same way, pushed by app/solo/page.tsx as its own screen state
+// changes; '/setup' isn't part of this flow, so no step highlights there.
 function stepFromPath(pathname: string, pushedStep: ChapterStep | null): ChapterStep | null {
   if (pathname === '/') return 'entry'
   if (pathname.startsWith('/join/')) return 'entry'
   if (pathname.startsWith('/room/')) return pushedStep ?? 'lobby'
+  if (pathname === '/solo') return pushedStep ?? 'soloFilters'
   return null
 }
 
@@ -30,20 +33,27 @@ export function PictureBoothHeader() {
   // routes (e.g. '/' -> '/join/xyz' without a full reload) would leave this
   // stuck on whichever flow the header first mounted under.
   const isGuestFlow = pathname.startsWith('/join/')
+  const isSoloFlow = pathname.startsWith('/solo')
   const currentStep = stepFromPath(pathname, pushedStep)
-  const hostLabels: Record<ChapterStep, string> = {
+  const STEPS = isSoloFlow ? SOLO_STEPS : ROOM_STEPS
+  const hostLabels: Record<'entry' | 'lobby' | 'deck' | 'wrapup', string> = {
     entry: tChrome('hostStepEntry'),
     lobby: tChrome('hostStepLobby'),
     deck: tChrome('hostStepDeck'),
     wrapup: tChrome('hostStepWrapup'),
   }
-  const guestLabels: Record<ChapterStep, string> = {
+  const guestLabels: Record<'entry' | 'lobby' | 'deck' | 'wrapup', string> = {
     entry: tChrome('guestStepEntry'),
     lobby: tChrome('guestStepLobby'),
     deck: tChrome('guestStepDeck'),
     wrapup: tChrome('guestStepWrapup'),
   }
-  const labels = isGuestFlow ? guestLabels : hostLabels
+  const soloLabels: Record<'soloFilters' | 'soloShortlist' | 'soloPick', string> = {
+    soloFilters: tChrome('soloStepFilters'),
+    soloShortlist: tChrome('soloStepShortlist'),
+    soloPick: tChrome('soloStepPick'),
+  }
+  const labels: Record<string, string> = isSoloFlow ? soloLabels : isGuestFlow ? guestLabels : hostLabels
 
   return (
     <header className="relative z-20 flex flex-wrap items-center justify-between gap-4 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-3.5 backdrop-blur-sm sm:px-10">
