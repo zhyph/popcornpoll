@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
 import { useSetRoomStep, type ChapterStep } from '../../../components/chrome/RoomStatusContext'
+import { EdgeState, type EdgeKind } from '../../../components/EdgeState'
 import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
 import { SwipeDeck } from '../../../components/SwipeDeck'
@@ -26,6 +27,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const tErrors = useTranslations('errors')
   const tKicked = useTranslations('kicked')
   const tRoomEnded = useTranslations('roomEnded')
+  const tEdge = useTranslations('edgeState')
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
   const [participants, setParticipants] = useState<ParticipantView[]>([])
   const [pool, setPool] = useState<PoolEntry[]>([])
@@ -35,8 +37,10 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
   const [confirmRestart, setConfirmRestart] = useState(false)
+  const [edgeOverride, setEdgeOverride] = useState<Exclude<EdgeKind, 'kicked'> | null>(null)
   const lastSeqRef = useRef<number | null>(null)
   const confirmRestartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const attemptingStartRef = useRef(false)
 
   function onRestartReel() {
     if ((snapshot?.totalVotes ?? 0) === 0) {
@@ -100,6 +104,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       )
     })
     const unsubStarted = ws.on('room_started', (msg) => {
+      attemptingStartRef.current = false
       checkSeq(ws, msg.seq)
       setPool(msg.pool)
       // room_started fires for both 'start' and 'restart_reel' — the latter
@@ -118,11 +123,21 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       setSnapshot((prev) => prev && { ...prev, topCandidates: msg.topCandidates }),
     )
     const unsubError = ws.on('error', (msg) => {
+      const wasAttemptingStart = attemptingStartRef.current
+      attemptingStartRef.current = false
+      if (wasAttemptingStart && (msg.code === 'pool_too_small' || msg.code === 'library_empty')) {
+        setEdgeOverride(msg.code === 'library_empty' ? 'emptylib' : 'poolfail')
+        return
+      }
       toast(tErrors.has(msg.code) ? tErrors(msg.code) : tErrors('generic'))
     })
     const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
     const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
     const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
+    const unsubHostDisconnected = ws.on('host_disconnected', () => setEdgeOverride('hostgone'))
+    const unsubHostReconnected = ws.on('host_reconnected', () =>
+      setEdgeOverride((prev) => (prev === 'hostgone' ? null : prev)),
+    )
 
     const hostClaimToken = sessionStorage.getItem(`hostClaimToken:${params.code}`) ?? undefined
     const pendingDisplayName = sessionStorage.getItem('pendingDisplayName')
@@ -160,6 +175,8 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       unsubKicked()
       unsubRoomEnded()
       unsubSeqOnRoomEnded()
+      unsubHostDisconnected()
+      unsubHostReconnected()
       unsubOpen()
       lastSeqRef.current = null
       clearInterval(heartbeat)
@@ -191,15 +208,25 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   if (!snapshot) return <p className="p-8 font-mono text-brass">{t('connecting')}</p>
 
-  if (terminal || snapshot.status === 'ended') {
-    const message =
-      terminal?.type === 'kicked'
-        ? tKicked.has(terminal.reason)
-          ? tKicked(terminal.reason)
-          : tKicked('kicked')
-        : tRoomEnded.has(terminal?.reason ?? 'host_ended')
-          ? tRoomEnded(terminal?.reason ?? 'host_ended')
-          : tRoomEnded('host_ended')
+  if (terminal?.type === 'kicked') {
+    const body = tKicked.has(terminal.reason) ? tKicked(terminal.reason) : tKicked('kicked')
+    return (
+      <EdgeState
+        kind="kicked"
+        testId="terminal-screen"
+        kicker={tEdge('kickedKicker')}
+        title={tEdge('kickedTitle')}
+        body={body}
+        detail={tEdge('kickedDetail')}
+        primaryLabel={tEdge('kickedPrimary')}
+        onPrimary={() => router.push('/')}
+      />
+    )
+  }
+
+  if (terminal?.type === 'room_ended' || snapshot.status === 'ended') {
+    const reason = terminal?.type === 'room_ended' ? terminal.reason : 'host_ended'
+    const message = tRoomEnded.has(reason) ? tRoomEnded(reason) : tRoomEnded('host_ended')
     return (
       <main
         data-testid="terminal-screen"
@@ -222,6 +249,41 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         </button>
         <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-brass/70">{t('reelChangeFooter')}</p>
       </main>
+    )
+  }
+
+  if (edgeOverride === 'hostgone') {
+    return (
+      <EdgeState
+        kind="hostgone"
+        testId="edge-hostgone"
+        kicker={tEdge('hostGoneKicker')}
+        title={tEdge('hostGoneTitle')}
+        body={tEdge('hostGoneBody')}
+        detail={tEdge('hostGoneDetail')}
+        primaryLabel={tEdge('hostGonePrimary')}
+        onPrimary={() => setEdgeOverride(null)}
+        secondaryLabel={tEdge('hostGoneSecondary')}
+        onSecondary={() => router.push('/')}
+      />
+    )
+  }
+
+  if (edgeOverride === 'poolfail' || edgeOverride === 'emptylib') {
+    const kind = edgeOverride
+    return (
+      <EdgeState
+        kind={kind}
+        testId={kind === 'poolfail' ? 'edge-poolfail' : 'edge-emptylib'}
+        kicker={tEdge(kind === 'poolfail' ? 'poolFailKicker' : 'emptyLibraryKicker')}
+        title={tEdge(kind === 'poolfail' ? 'poolFailTitle' : 'emptyLibraryTitle')}
+        body={tEdge(kind === 'poolfail' ? 'poolFailBody' : 'emptyLibraryBody')}
+        detail={tEdge(kind === 'poolfail' ? 'poolFailDetail' : 'emptyLibraryDetail')}
+        primaryLabel={tEdge(kind === 'poolfail' ? 'poolFailPrimary' : 'emptyLibraryPrimary')}
+        onPrimary={() => router.push(kind === 'poolfail' ? '/' : '/setup')}
+        secondaryLabel={kind === 'poolfail' ? tEdge('poolFailSecondary') : undefined}
+        onSecondary={kind === 'poolfail' ? () => router.push('/setup') : undefined}
+      />
     )
   }
 
@@ -253,7 +315,10 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         {isHost && snapshot.status === 'lobby' && (
           <button
             type="button"
-            onClick={() => client?.send({ type: 'start' })}
+            onClick={() => {
+              attemptingStartRef.current = true
+              client?.send({ type: 'start' })
+            }}
             className="h-[62px] w-full bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90"
           >
             {t('startButton')}
