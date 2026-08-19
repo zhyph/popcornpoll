@@ -30,7 +30,7 @@ test('two participants reach a match', async ({ baseURL }) => {
   // both participants avoids the race outright). See e2e/reconnect.spec.ts.
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await hostPage.waitForSelector('[data-testid="swipe-card"]')
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 

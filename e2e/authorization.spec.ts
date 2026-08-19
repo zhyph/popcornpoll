@@ -24,7 +24,7 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
   // join, since a guest who never joined also never sees "Start".
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
-  await expect(guestPage.locator('text=Start')).not.toBeVisible()
+  await expect(guestPage.getByRole('button', { name: 'DIM THE LIGHTS' })).not.toBeVisible()
   await browser.close()
 })
 
@@ -52,7 +52,7 @@ test('reconnecting with only sessionToken (no hostToken) does not grant host con
   )
   await strippedPage.reload()
 
-  await expect(strippedPage.locator('text=Start')).not.toBeVisible()
+  await expect(strippedPage.getByRole('button', { name: 'DIM THE LIGHTS' })).not.toBeVisible()
   await browser.close()
 })
 
@@ -69,8 +69,8 @@ test('host status survives a page reload (hostToken persisted in localStorage)',
   // and playwright.config.ts's own note on Next dev-mode cold-compile cost)
   // rather than the 5s default: this join round-trip can legitimately take
   // longer than that on a first hit to a not-yet-compiled route.
-  await expect(hostPage.locator('text=Start')).toBeVisible({ timeout: 15000 })
+  await expect(hostPage.getByRole('button', { name: 'DIM THE LIGHTS' })).toBeVisible({ timeout: 15000 })
   await hostPage.reload()
-  await expect(hostPage.locator('text=Start')).toBeVisible({ timeout: 15000 }) // still recognized as host after the refresh
+  await expect(hostPage.getByRole('button', { name: 'DIM THE LIGHTS' })).toBeVisible({ timeout: 15000 }) // still recognized as host after the refresh
   await browser.close()
 })

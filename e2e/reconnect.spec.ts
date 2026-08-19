@@ -34,7 +34,7 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   // wait doesn't work here because the host's own default display name is
   // also "Guest".
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   const titleBeforeDisconnect = await guestPage.locator('[data-testid="swipe-card"] h2').textContent()

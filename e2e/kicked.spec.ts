@@ -67,7 +67,7 @@ test('remaining participants see the terminal screen when the host ends the sess
   await guestPage.waitForURL(/\/room\//)
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   await hostPage.click('text=End session')

@@ -30,7 +30,7 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   // host's own default display name is also "Guest" — wait for both
   // participants' "Remove" buttons instead.
   await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
-  await hostPage.click('text=Start')
+  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 
   for (const page of [hostPage, guestPage]) {
