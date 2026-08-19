@@ -1,6 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
@@ -20,6 +21,7 @@ type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } 
 const MATCH_REVEAL_MS = 4000
 
 export default function RoomPage({ params }: { params: { code: string } }) {
+  const router = useRouter()
   const t = useTranslations('room')
   const tErrors = useTranslations('errors')
   const tKicked = useTranslations('kicked')
@@ -195,9 +197,24 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     return (
       <main
         data-testid="terminal-screen"
-        className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-4 px-4 py-10 text-center"
+        className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-5 px-4 py-10 text-center"
       >
-        <p className="font-display text-2xl text-ticket">{message}</p>
+        <p className="font-mono text-[11px] uppercase tracking-[.45em] text-brass">{t('houseLightsUp')}</p>
+        <h2
+          className="font-display text-5xl leading-none text-ticket sm:text-7xl"
+          style={{ animation: 'glitchShift 5s steps(1) infinite' }}
+        >
+          {t('endOfShowTitle')}
+        </h2>
+        <p className="font-display text-xl text-ticket">{message}</p>
+        <button
+          type="button"
+          onClick={() => router.push('/')}
+          className="mt-2 bg-marquee px-6 py-3.5 font-display text-base text-ink hover:bg-marquee/90"
+        >
+          {t('backToBoxOffice')}
+        </button>
+        <p className="mt-4 font-mono text-[10px] uppercase tracking-widest text-brass/70">{t('reelChangeFooter')}</p>
       </main>
     )
   }
