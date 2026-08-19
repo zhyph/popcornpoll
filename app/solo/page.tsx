@@ -42,6 +42,7 @@ export default function SoloPage() {
 
   const [pickedCard, setPickedCard] = useState<PoolEntry | null>(null)
   const [roomCode, setRoomCode] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
 
   useSetRoomStep(screen === 'filters' ? 'soloFilters' : screen === 'shortlist' ? 'soloShortlist' : 'soloPick')
 
@@ -112,10 +113,13 @@ export default function SoloPage() {
   }
 
   async function confirmPick(entry: PoolEntry) {
+    if (picking) return
+    setPicking(true)
     const res = await fetch('/api/solo/pick', {
       method: 'POST',
       body: JSON.stringify({ movieId: entry.movieId }),
     })
+    setPicking(false)
     if (!res.ok) {
       const code = await res
         .json()
@@ -281,7 +285,7 @@ export default function SoloPage() {
           <button
             type="button"
             onClick={submitSolo}
-            disabled={submitting || eligibleCount === null || blocked}
+            disabled={submitting || eligibleCount === null}
             data-testid="submit-solo"
             className="relative h-[62px] w-full overflow-hidden border-none font-display text-[clamp(17px,2vw,22px)] tracking-wide disabled:cursor-not-allowed"
             style={{
@@ -379,7 +383,8 @@ export default function SoloPage() {
               <button
                 type="button"
                 onClick={() => confirmPick(entry)}
-                className="mx-3 mb-3 border border-brass/55 py-2.5 font-mono text-[10px] uppercase tracking-[.2em] text-ticket transition-colors hover:border-marquee hover:bg-marquee hover:text-ink"
+                disabled={picking}
+                className="mx-3 mb-3 border border-brass/55 py-2.5 font-mono text-[10px] uppercase tracking-[.2em] text-ticket transition-colors hover:border-marquee hover:bg-marquee hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t('pickThisButton')}
               </button>
