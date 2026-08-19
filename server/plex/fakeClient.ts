@@ -29,12 +29,40 @@ export function createFakePlexClient(): PlexClient {
       return { authToken: 'fake-token' }
     },
     async getResources() {
+      // Two resources (one owned, with both a local and a remote connection;
+      // one shared) so the setup screen's owner/shared badges and "local" vs
+      // "remote" meta line are all visually exercised without real Plex —
+      // matches the shape of Screen13-ProjectionBooth.dc.html's SERVERS demo
+      // data (owned-local, owned-remote, shared-remote).
       return [
-        { name: 'Fake Server', clientIdentifier: 'fake-client', connections: [{ uri: 'http://fake-plex.local' }] },
+        {
+          name: 'Fake Media Vault',
+          clientIdentifier: 'fake-client-1',
+          owned: true,
+          product: 'Plex Media Server',
+          productVersion: '1.41.3',
+          connections: [
+            { uri: 'http://fake-plex-local.local:32400', local: true },
+            { uri: 'https://fake-plex-remote.example.net:32400', local: false },
+          ],
+        },
+        {
+          name: 'fake-shared-backup-node',
+          clientIdentifier: 'fake-client-2',
+          owned: false,
+          product: 'Plex Media Server',
+          productVersion: '1.40.2',
+          connections: [{ uri: 'https://fake-plex-shared.example.net:32400', local: false }],
+        },
       ]
     },
     async getLibrarySections() {
-      return [{ id: '1', title: 'Movies', type: 'movie' }]
+      // Matches Screen13-ProjectionBooth.dc.html's libraries demo data exactly.
+      return [
+        { id: '1', title: 'Movies', type: 'movie', count: 412 },
+        { id: '2', title: 'Classics', type: 'movie', count: 88 },
+        { id: '3', title: 'Kids', type: 'movie', count: 54 },
+      ]
     },
     async getLibraryItems() {
       return FAKE_LIBRARY

@@ -13,7 +13,7 @@ import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
 // AtmosphereLayer bakes in Aurora's colorStops/amplitude/speed.
 //
 // ClickSpark draws a canvas burst on every click anywhere in the app; unlike
-// AtmosphereLayer/PlexPinReveal it never checked prefers-reduced-motion at
+// AtmosphereLayer it never checked prefers-reduced-motion at
 // all, so reduced-motion users got it regardless. Skip mounting it under
 // reduced motion rather than passing it a "disabled" prop, for the same
 // reason AtmosphereLayer unmounts Aurora/LightRays instead of zeroing their

@@ -7,20 +7,36 @@ export interface PlexItem extends PlexGuidSource {
   genres: string[]
 }
 
+export interface PlexResourceConnection {
+  uri: string
+  // Plex marks each connection as reachable over the LAN or not — the setup
+  // screen's "Owned · local · v1.41.3" meta line reads straight off this.
+  local: boolean
+}
+
 export interface PlexResource {
   name: string
   clientIdentifier: string
-  connections: { uri: string }[]
+  // Whether this Plex account owns the server vs. it being shared with them
+  // — drives the owner/shared badge next to each server row.
+  owned: boolean
+  product: string
+  productVersion: string
+  connections: PlexResourceConnection[]
+}
+
+export interface PlexLibrarySection {
+  id: string
+  title: string
+  type: string
+  count: number
 }
 
 export interface PlexClient {
   createPin(): Promise<{ id: number; code: string }>
   checkPin(pinId: number, clientIdentifier: string): Promise<{ authToken: string | null }>
   getResources(authToken: string): Promise<PlexResource[]>
-  getLibrarySections(
-    serverUrl: string,
-    authToken: string,
-  ): Promise<{ id: string; title: string; type: string }[]>
+  getLibrarySections(serverUrl: string, authToken: string): Promise<PlexLibrarySection[]>
   getLibraryItems(serverUrl: string, authToken: string, sectionId: string): Promise<PlexItem[]>
   getThumb(
     serverUrl: string,
@@ -77,11 +93,40 @@ export function createPlexClient(clientIdentifier: string): PlexClient {
       const body = (await res.json()) as {
         MediaContainer: { Directory: { key: string; title: string; type: string }[] }
       }
-      return body.MediaContainer.Directory.filter((d) => d.type === 'movie').map((d) => ({
-        id: d.key,
-        title: d.title,
-        type: d.type,
-      }))
+      const movieSections = body.MediaContainer.Directory.filter((d) => d.type === 'movie')
+      // Plex's /library/sections listing doesn't carry a per-section item
+      // count, so the setup screen's "412 titles" line needs one extra call
+      // per section — X-Plex-Container-Size=0 asks for zero rows and just
+      // reads the container's totalSize header back.
+      return Promise.all(
+        movieSections.map(async (d) => {
+          // One section's count request failing (network error, non-2xx,
+          // malformed JSON) must not take the whole sections list down with
+          // it via Promise.all rejection — that would block the setup UI's
+          // library-picker step, and abort background librarySync's whole
+          // run, over what's ultimately just a cosmetic "X titles" figure.
+          // Degrade that one section's count to 0 and keep going.
+          try {
+            const countRes = await fetch(
+              `${serverUrl}/library/sections/${d.key}/all?X-Plex-Container-Start=0&X-Plex-Container-Size=0`,
+              { headers: { ...headers(clientIdentifier), 'X-Plex-Token': authToken } },
+            )
+            if (!countRes.ok) throw new Error(`count request failed with status ${countRes.status}`)
+            const countBody = (await countRes.json()) as {
+              MediaContainer: { totalSize?: number; size?: number }
+            }
+            return {
+              id: d.key,
+              title: d.title,
+              type: d.type,
+              count: countBody.MediaContainer.totalSize ?? countBody.MediaContainer.size ?? 0,
+            }
+          } catch (err) {
+            console.error(`getLibrarySections: count fetch failed for section ${d.key}`, err)
+            return { id: d.key, title: d.title, type: d.type, count: 0 }
+          }
+        }),
+      )
     },
 
     async getLibraryItems(serverUrl, authToken, sectionId) {

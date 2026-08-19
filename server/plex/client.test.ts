@@ -66,6 +66,93 @@ describe('createPlexClient', () => {
     expect(resources[0]!.connections[0]!.uri).toBe('http://192.168.1.10:32400')
   })
 
+  it('getResources passes through owned/product/local instead of discarding them', async () => {
+    mockFetchOnce([
+      {
+        name: 'Shared Vault',
+        clientIdentifier: 'server-1',
+        provides: 'server',
+        owned: false,
+        product: 'Plex Media Server',
+        productVersion: '1.40.2',
+        connections: [{ uri: 'https://shared.example.net:32400', local: false }],
+      },
+    ])
+    const client = createPlexClient('client-id')
+    const resources = await client.getResources('token')
+    expect(resources[0]).toMatchObject({
+      owned: false,
+      product: 'Plex Media Server',
+      productVersion: '1.40.2',
+    })
+    expect(resources[0]!.connections[0]!.local).toBe(false)
+  })
+
+  it('getLibrarySections fetches each movie section\'s item count with a zero-size page request', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/library/sections')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            MediaContainer: {
+              Directory: [
+                { key: '1', title: 'Movies', type: 'movie' },
+                { key: '2', title: 'TV Shows', type: 'show' },
+              ],
+            },
+          }),
+        }
+      }
+      if (url.includes('/library/sections/1/all')) {
+        return { ok: true, status: 200, json: async () => ({ MediaContainer: { totalSize: 412 } }) }
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const client = createPlexClient('client-id')
+    const sections = await client.getLibrarySections('http://192.168.1.10:32400', 'token')
+    expect(sections).toEqual([{ id: '1', title: 'Movies', type: 'movie', count: 412 }])
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('X-Plex-Container-Size=0'),
+      expect.anything(),
+    )
+  })
+
+  it('getLibrarySections degrades a single section to count 0 instead of failing the whole list', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/library/sections')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            MediaContainer: {
+              Directory: [
+                { key: '1', title: 'Movies', type: 'movie' },
+                { key: '2', title: 'Classics', type: 'movie' },
+              ],
+            },
+          }),
+        }
+      }
+      if (url.includes('/library/sections/1/all')) {
+        return { ok: true, status: 200, json: async () => ({ MediaContainer: { totalSize: 412 } }) }
+      }
+      if (url.includes('/library/sections/2/all')) {
+        // Simulates a transient network failure on just this section's count request.
+        throw new Error('network error')
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const client = createPlexClient('client-id')
+    const sections = await client.getLibrarySections('http://192.168.1.10:32400', 'token')
+    expect(sections).toEqual([
+      { id: '1', title: 'Movies', type: 'movie', count: 412 },
+      { id: '2', title: 'Classics', type: 'movie', count: 0 },
+    ])
+  })
+
   it('getLibraryItems requests with includeGuids=1 and maps fields', async () => {
     mockFetchOnce({
       MediaContainer: {

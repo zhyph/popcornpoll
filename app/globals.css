@@ -11,6 +11,8 @@
   --brass: 33 30% 46%;
   --exit-red: 5 60% 51%;
   --admit-teal: 180 46% 45%;
+  /* #1C6666 — the setup step tracker's "done" fill, distinct from --admit-teal */
+  --setup-done: 180 57% 25%;
 
   --background: var(--ink);
   --foreground: var(--ticket);
@@ -120,6 +122,12 @@ body {
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* mockup's "now"/current-step pulsing bulb, used by SetupStepTracker */
+@keyframes bulb {
+  0%, 100% { opacity: 0.28; box-shadow: 0 0 0 rgba(245, 166, 35, 0); }
+  50% { opacity: 1; box-shadow: 0 0 12px 3px rgba(245, 166, 35, 0.55); }
 }
 
 @media (prefers-reduced-motion: reduce) {
