@@ -300,6 +300,89 @@ describe('attachWebSocketServer', () => {
     hostWs.close()
   })
 
+  it('broadcasts host_disconnected to the room when the host drops, and host_reconnected when they return in time', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs) // joined
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    // Host drops. The guest should see host_disconnected land alongside (not
+    // instead of) the usual state_update.
+    const guestMessages = collectMessages(guestWs, 2)
+    hostWs.close()
+    const [first, second] = await guestMessages
+    const types = [first?.type, second?.type].sort()
+    expect(types).toEqual(['host_disconnected', 'state_update'].sort())
+
+    // Host reconnects well within the grace period using the same session.
+    const hostWs2 = await connect()
+    const guestReconnectMessage = nextMessage(guestWs)
+    hostWs2.send(
+      JSON.stringify({
+        type: 'reconnect',
+        roomCode: code,
+        sessionToken: hostJoined.sessionToken as string,
+        hostToken: hostJoined.hostToken as string,
+      }),
+    )
+    await nextMessage(hostWs2) // joined
+    const reconnectBroadcast = await guestReconnectMessage
+    expect(reconnectBroadcast.type === 'host_reconnected' || reconnectBroadcast.type === 'state_update').toBe(true)
+
+    hostWs2.close()
+    guestWs.close()
+  })
+
+  it('closes the room with reason host_disconnected_timeout if the host never returns within the grace period', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    seedPlexRows(db, 5)
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    await nextMessage(hostWs)
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    await nextMessage(guestWs)
+    await nextMessage(hostWs) // state_update for the guest's join
+
+    vi.useFakeTimers()
+    try {
+      const hostGoneMessage = nextMessage(guestWs)
+      hostWs.close()
+      await vi.advanceTimersByTimeAsync(0)
+      await hostGoneMessage
+
+      // broadcastRoomEnded sends its state_update and room_ended together in
+      // one batch (same seq, same broadcastToRoom call), which can arrive as
+      // a single synchronous burst of 'message' events — a lone
+      // nextMessage() registered beforehand only ever catches the first of
+      // the two (state_update). Collect both and find room_ended among
+      // them, same pattern already used above for the
+      // host_disconnected/state_update burst.
+      const roomEndedMessages = collectMessages(guestWs, 2)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS)
+      const messages = await roomEndedMessages
+      const roomEnded = messages.find((m) => m.type === 'room_ended')
+      expect(roomEnded).toBeDefined()
+      expect((roomEnded as { reason: string }).reason).toBe('host_disconnected_timeout')
+      expect(store.get(code)!.status).toBe('ended')
+    } finally {
+      vi.useRealTimers()
+    }
+
+    guestWs.close()
+  })
+
   it("closes a kicked participant's socket with the terminal close code", async () => {
     const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})

@@ -90,6 +90,15 @@ export function attachWebSocketServer(
     broadcastToRoom(roomCode, toRoom)
   }
 
+  function finalizeHostDisconnect(roomCode: string, participantId: string): void {
+    const room = store.get(roomCode)
+    if (!room || room.status === 'ended') return
+    if (room.hostParticipantId !== participantId) return
+    const participant = room.participants.get(participantId)
+    if (!participant || participant.connectionStatus !== 'disconnected') return
+    broadcastRoomEnded(roomCode, 'host_disconnected_timeout')
+  }
+
   function markDisconnected(state: ConnectionState): void {
     if (!state.roomCode || !state.participantId) return
     const roomCode = state.roomCode
@@ -99,8 +108,12 @@ export function attachWebSocketServer(
     if (!room || !participant || participant.connectionStatus === 'disconnected') return
     participant.connectionStatus = 'disconnected'
     participant.disconnectedAt = Date.now()
-    broadcastToRoom(roomCode, [stateUpdate(room)])
+    const isHost = room.hostParticipantId === participantId
+    const toRoom: ServerMessage[] = [stateUpdate(room)]
+    if (isHost) toRoom.push({ type: 'host_disconnected' })
+    broadcastToRoom(roomCode, toRoom)
     setTimeout(() => finalizeDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
+    if (isHost) setTimeout(() => finalizeHostDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
   }
 
   httpServer.on('upgrade', (req, socket, head) => {
