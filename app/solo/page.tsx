@@ -115,24 +115,29 @@ export default function SoloPage() {
   async function confirmPick(entry: PoolEntry) {
     if (picking) return
     setPicking(true)
-    const res = await fetch('/api/solo/pick', {
-      method: 'POST',
-      body: JSON.stringify({ movieId: entry.movieId }),
-    })
-    setPicking(false)
-    if (!res.ok) {
-      const code = await res
-        .json()
-        .then((b) => b?.error?.code as string | undefined)
-        .catch(() => undefined)
-      toast(code && tErrors.has(code) ? tErrors(code) : tErrors('generic'))
-      return
+    try {
+      const res = await fetch('/api/solo/pick', {
+        method: 'POST',
+        body: JSON.stringify({ movieId: entry.movieId }),
+      })
+      if (!res.ok) {
+        const code = await res
+          .json()
+          .then((b) => b?.error?.code as string | undefined)
+          .catch(() => undefined)
+        toast(code && tErrors.has(code) ? tErrors(code) : tErrors('generic'))
+        return
+      }
+      const body = await res.json()
+      setPickedCard(entry)
+      setRoomCode(body.roomCode)
+      setSurpriseVisible(false)
+      setScreen('pick')
+    } catch {
+      toast(tErrors('generic'))
+    } finally {
+      setPicking(false)
     }
-    const body = await res.json()
-    setPickedCard(entry)
-    setRoomCode(body.roomCode)
-    setSurpriseVisible(false)
-    setScreen('pick')
   }
 
   async function surpriseMe() {
