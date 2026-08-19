@@ -90,12 +90,13 @@ export function attachWebSocketServer(
     broadcastToRoom(roomCode, toRoom)
   }
 
-  function finalizeHostDisconnect(roomCode: string, participantId: string): void {
+  function finalizeHostDisconnect(roomCode: string, participantId: string, disconnectedAt: number): void {
     const room = store.get(roomCode)
     if (!room || room.status === 'ended') return
     if (room.hostParticipantId !== participantId) return
     const participant = room.participants.get(participantId)
     if (!participant || participant.connectionStatus !== 'disconnected') return
+    if (participant.disconnectedAt !== disconnectedAt) return // stale timer from an earlier disconnect — a later disconnect (and its own timer) supersedes this one
     broadcastRoomEnded(roomCode, 'host_disconnected_timeout')
   }
 
@@ -107,13 +108,24 @@ export function attachWebSocketServer(
     const participant = room?.participants.get(participantId)
     if (!room || !participant || participant.connectionStatus === 'disconnected') return
     participant.connectionStatus = 'disconnected'
-    participant.disconnectedAt = Date.now()
+    const disconnectedAt = Date.now()
+    participant.disconnectedAt = disconnectedAt
     const isHost = room.hostParticipantId === participantId
     const toRoom: ServerMessage[] = [stateUpdate(room)]
     if (isHost) toRoom.push({ type: 'host_disconnected' })
     broadcastToRoom(roomCode, toRoom)
     setTimeout(() => finalizeDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
-    if (isHost) setTimeout(() => finalizeHostDisconnect(roomCode, participantId), RECONNECT_GRACE_MS).unref()
+    if (isHost) {
+      // Capture disconnectedAt as a local value now, not a lazy
+      // `participant.disconnectedAt` read inside the closure — `participant`
+      // is the same mutable object across reconnect/disconnect cycles, so a
+      // property read deferred to fire-time would always see whatever the
+      // *current* value is (defeating the staleness check in
+      // finalizeHostDisconnect, which compares against that same live
+      // object). This local const freezes the value this specific
+      // disconnect actually happened at.
+      setTimeout(() => finalizeHostDisconnect(roomCode, participantId, disconnectedAt), RECONNECT_GRACE_MS).unref()
+    }
   }
 
   httpServer.on('upgrade', (req, socket, head) => {
