@@ -65,10 +65,12 @@ export function SwipeDeck({
         className="flex h-32 w-16 flex-col items-center justify-center gap-1 border border-exit-red text-exit-red hover:bg-exit-red/10 sm:h-44 sm:w-20"
       >
         <span className="font-display text-base tracking-widest sm:text-lg">{t('passLabel')}</span>
+        <span className="font-mono text-[9px] uppercase tracking-widest opacity-70 sm:hidden">{t('passHintMobile')}</span>
+        <span className="hidden font-mono text-[9px] uppercase tracking-widest opacity-70 sm:inline">{t('passHintDesktop')}</span>
       </button>
 
       <motion.div
-        className="ticket-edge relative w-64 origin-bottom rounded bg-velvet shadow-xl sm:w-80"
+        className="ticket-edge relative w-64 origin-bottom overflow-hidden rounded bg-velvet shadow-xl sm:w-80"
         style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 12px 100%, 0 calc(100% - 12px))' }}
         drag="x"
         animate={controls}
@@ -77,17 +79,51 @@ export function SwipeDeck({
         data-drag-direction={dragDirection ?? undefined}
         data-testid="swipe-card"
       >
+        {/* Ink-stamp overlays that fade in once the drag crosses into a
+            direction — real interaction feedback the mockup calls out
+            explicitly, not one of its decorative-stub elements. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-4 top-4 -rotate-12 border-2 border-admit-teal px-2 py-0.5 font-display text-lg tracking-wider text-admit-teal transition-opacity"
+          style={{ opacity: dragDirection === 'yes' ? 1 : 0 }}
+        >
+          {t('admitLabel')}
+        </span>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute right-4 top-4 rotate-12 border-2 border-exit-red px-2 py-0.5 font-display text-lg tracking-wider text-exit-red transition-opacity"
+          style={{ opacity: dragDirection === 'no' ? 1 : 0 }}
+        >
+          {t('voidStampLabel')}
+        </span>
         <div className="p-4">
           {(card.posterSource === 'plex' || card.posterPath) && (
-            <img
-              className="mb-3 aspect-[2/3] w-full rounded object-cover"
-              src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `https://image.tmdb.org/t/p/w342${card.posterPath}`}
-              alt={card.title}
-            />
+            <div className="relative mb-3">
+              <img
+                className="aspect-[2/3] w-full rounded object-cover"
+                src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `https://image.tmdb.org/t/p/w342${card.posterPath}`}
+                alt={card.title}
+              />
+              {card.inLibrary && (
+                <span className="absolute left-3 top-3 bg-marquee px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-widest text-ink">
+                  {t('inLibrary')}
+                </span>
+              )}
+            </div>
           )}
-          <h2 className="font-display text-2xl text-ticket">{card.title}</h2>
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="font-display text-2xl text-ticket">{card.title}</h2>
+            {card.year !== null && <span className="font-mono text-sm text-brass">{card.year}</span>}
+          </div>
+          {(card.genres.length > 0 || card.rating !== null) && (
+            <p className="mt-1 font-mono text-xs uppercase tracking-wider text-exit-red">
+              {[card.genres.join(' · '), card.rating !== null ? `★ ${card.rating.toFixed(1)}` : null]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          )}
           <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{card.overview}</p>
-          {card.inLibrary && (
+          {card.inLibrary && !(card.posterSource === 'plex' || card.posterPath) && (
             <span className="mt-2 inline-block bg-marquee px-2 py-0.5 font-mono text-xs text-ink">{t('inLibrary')}</span>
           )}
         </div>
@@ -100,6 +136,8 @@ export function SwipeDeck({
         className="flex h-32 w-16 flex-col items-center justify-center gap-1 border border-admit-teal text-admit-teal hover:bg-admit-teal/10 sm:h-44 sm:w-20"
       >
         <span className="font-display text-base tracking-widest sm:text-lg">{t('admitLabel')}</span>
+        <span className="font-mono text-[9px] uppercase tracking-widest opacity-70 sm:hidden">{t('admitHintMobile')}</span>
+        <span className="hidden font-mono text-[9px] uppercase tracking-widest opacity-70 sm:inline">{t('admitHintDesktop')}</span>
       </button>
     </div>
   )

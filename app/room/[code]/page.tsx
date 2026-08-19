@@ -21,6 +21,12 @@ type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } 
 // block swiping on whatever remains unmatched.
 const MATCH_REVEAL_MS = 4000
 
+// Mirrors server/room/actions.ts's MAX_PARTICIPANTS_PER_ROOM — duplicated
+// rather than imported since that module pulls in server-only code
+// (token generation, node:crypto) that shouldn't end up in the client
+// bundle for the sake of one display number.
+const SEATS_CAP = 20
+
 export default function RoomPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params)
   const router = useRouter()
@@ -29,6 +35,8 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const tKicked = useTranslations('kicked')
   const tRoomEnded = useTranslations('roomEnded')
   const tEdge = useTranslations('edgeState')
+  const tMarquee = useTranslations('marqueeReveal')
+  const tCreateRoom = useTranslations('createRoom')
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null)
   const [participants, setParticipants] = useState<ParticipantView[]>([])
   const [pool, setPool] = useState<PoolEntry[]>([])
@@ -212,10 +220,16 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   }, [code])
 
   const latestMatchId = snapshot && snapshot.matches.length > 0 ? snapshot.matches[snapshot.matches.length - 1]! : null
+  const [matchSecondsLeft, setMatchSecondsLeft] = useState(Math.ceil(MATCH_REVEAL_MS / 1000))
   useEffect(() => {
     if (latestMatchId === null || latestMatchId === dismissedMatchId) return
+    setMatchSecondsLeft(Math.ceil(MATCH_REVEAL_MS / 1000))
     const timer = setTimeout(() => setDismissedMatchId(latestMatchId), MATCH_REVEAL_MS)
-    return () => clearTimeout(timer)
+    const ticker = setInterval(() => setMatchSecondsLeft((s) => Math.max(0, s - 1)), 1000)
+    return () => {
+      clearTimeout(timer)
+      clearInterval(ticker)
+    }
   }, [latestMatchId, dismissedMatchId])
 
   // Computed before any early return (Rules of Hooks: useSetRoomStep must
@@ -324,6 +338,14 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   }
 
   if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
+    const ruleLabel =
+      snapshot.matchThreshold.kind === 'all'
+        ? tCreateRoom('matchRuleAll')
+        : snapshot.matchThreshold.kind === 'majority'
+          ? tCreateRoom('matchRuleMajority')
+          : tCreateRoom('matchRuleAtLeast')
+    const sourceLabel =
+      snapshot.candidateSource === 'plex' ? t('infoStripSourcePlex') : t('infoStripSourceTmdb')
     return (
       <main className="mx-auto flex flex-1 max-w-md flex-col items-center gap-6 px-4 py-10">
         <RoomShare code={code} />
@@ -331,10 +353,13 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           <p className="border-b border-brass/30 px-4 py-3 font-mono text-xs uppercase tracking-widest text-brass">
             {t('admitted')}
           </p>
-          <div className="flex flex-col gap-2 p-4">
+          <p className="border-b border-brass/30 px-4 py-3 font-display text-3xl text-marquee">
+            {t('admittedOfSeats', { count: participants.length, cap: SEATS_CAP })}
+          </p>
+          <div className="flex gap-2.5 overflow-x-auto border-y border-dashed border-brass/30 p-4">
             {participants.map((p) => (
-              <div key={p.id} className="flex items-center justify-between">
-                <TicketAvatar participant={p} />
+              <div key={p.id} className="flex flex-none items-center gap-1.5">
+                <TicketAvatar participant={p} lobbyStatus />
                 {isHost && (
                   <button
                     type="button"
@@ -347,6 +372,10 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               </div>
             ))}
           </div>
+        </div>
+        <div className="flex w-full items-center gap-2.5 border border-dashed border-brass/45 px-4 py-3 font-mono text-[11px] uppercase tracking-widest text-ticket/70">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-marquee" />
+          {ruleLabel} · {sourceLabel}
         </div>
         {isHost && snapshot.status === 'lobby' && (
           <button
@@ -372,6 +401,11 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         {snapshot.status === 'starting' && (
           <p className="font-mono text-sm text-brass">{t('buildingPool')}</p>
         )}
+        {snapshot.status === 'lobby' && (
+          <p className="text-center font-mono text-[10px] uppercase tracking-widest text-brass/60">
+            {isHost ? t('lobbyFootnoteHost') : t('lobbyFootnoteGuest')}
+          </p>
+        )}
       </main>
     )
   }
@@ -394,7 +428,13 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
             {(snapshot.topCandidates ?? []).map((entry, i) => (
               <div key={entry.movieId} className="flex items-center gap-3.5 border-b border-dashed border-brass/25 py-4">
                 <span className="min-w-[34px] font-display text-xl text-brass">{i + 1}</span>
-                <span className="flex-1 font-display text-lg text-ticket sm:text-xl">{entry.title}</span>
+                <span className="flex-1 font-display text-lg text-ticket sm:text-xl">
+                  {entry.title}
+                  {entry.year !== null && <span className="ml-2 font-mono text-sm text-brass/70">{entry.year}</span>}
+                </span>
+                <span className="font-mono text-[11px] uppercase tracking-wider text-brass">
+                  {t('votesTally', { yes: entry.yesCount, total: participants.length })}
+                </span>
               </div>
             ))}
           </div>
@@ -423,14 +463,55 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     )
   }
 
+  const matchRuleLabel =
+    snapshot.matchThreshold.kind === 'all'
+      ? tMarquee('matchRuleAllLabel')
+      : snapshot.matchThreshold.kind === 'majority'
+        ? tMarquee('matchRuleMajorityLabel')
+        : tMarquee('matchRuleAtLeastLabel', { n: snapshot.matchThreshold.n })
+
   return (
     <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center justify-center gap-6 px-4 py-10">
       {latestMatch && (
         <div data-testid="match-banner">
-          <MarqueeReveal movie={latestMatch} />
+          <MarqueeReveal
+            movie={latestMatch}
+            matchRuleLabel={matchRuleLabel}
+            secondsLeft={matchSecondsLeft}
+            isHost={isHost}
+            onDismiss={() => setDismissedMatchId(latestMatchId)}
+            onEndSession={() => client?.send({ type: 'end_room' })}
+          />
         </div>
       )}
+      {(() => {
+        // Approximate card position within the pool as it stands right now —
+        // the pool can still grow mid-reel (plex+tmdb rooms discover more
+        // candidates as cards are swiped), so this is a "how far in" read,
+        // not an exact total the mockup's static demo data implies.
+        const cardIndex = currentCard ? pool.findIndex((e) => e.movieId === currentCard.movieId) : -1
+        const cardNo = cardIndex >= 0 ? cardIndex + 1 : pool.length
+        const frameCount = 8
+        const filledFrames = Math.min(frameCount, cardNo)
+        return (
+          <div className="flex w-full flex-col items-center gap-2">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-brass">
+              {t('reelCardOf', { cardNo, cardTotal: pool.length })}
+            </p>
+            <div className="flex gap-1">
+              {Array.from({ length: frameCount }, (_, i) => (
+                <span
+                  key={i}
+                  aria-hidden
+                  className={`h-1.5 w-5 ${i < filledFrames ? 'bg-marquee' : 'bg-brass/25'}`}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })()}
       <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
+      <p className="text-center font-mono text-[10px] uppercase tracking-widest text-brass/60">{t('deckFooterHint')}</p>
       <div className="flex w-full flex-wrap items-center gap-3 border border-brass/35 bg-ink/70 px-4 py-3">
         <span className="font-mono text-[10px] uppercase tracking-widest text-brass">{t('admitted')}</span>
         {participants.map((p) => (

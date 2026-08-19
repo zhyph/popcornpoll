@@ -85,6 +85,17 @@ export function PictureBoothHeader() {
                     color: isCurrent ? '#F5A623' : isPast ? 'rgba(243,233,210,.75)' : 'rgba(154,122,83,.55)',
                   }}
                 >
+                  <span
+                    aria-hidden
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px]"
+                    style={{
+                      background: isCurrent ? '#F5A623' : 'transparent',
+                      color: isCurrent ? '#100C09' : isPast ? 'rgba(243,233,210,.75)' : 'rgba(154,122,83,.55)',
+                      border: isCurrent ? 'none' : '1px solid currentColor',
+                    }}
+                  >
+                    {isPast ? '✓' : i + 1}
+                  </span>
                   {labels[step]}
                 </span>
                 {i < STEPS.length - 1 && (

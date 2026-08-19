@@ -65,11 +65,18 @@
     "joinButton": "TAKE MY SEAT",
     "noPasswordNote": "No password, no account. The room closes when the host says so.",
     "admitOneLabel": "ADMIT ONE",
-    "seatLabel": "Row C · Seat 14"
+    "seatLabel": "ROW C · SEAT 14"
   },
   "room": {
     "connecting": "Connecting…",
     "admitted": "Admitted",
+    "admittedOfSeats": "{count} of {cap} seats",
+    "infoStripSourcePlex": "Plex library only",
+    "infoStripSourceTmdb": "Plex + TMDB",
+    "lobbyFootnoteHost": "Host only · anyone disconnected now sits this one out",
+    "lobbyFootnoteGuest": "The host starts the reel · you can leave any time before it rolls",
+    "reelCardOf": "Card {cardNo} of {cardTotal}",
+    "deckFooterHint": "Swipe the card, use the rails, or press ← / → · the house calls a match the moment the rule is met",
     "removeButton": "Remove",
     "startButton": "DIM THE LIGHTS",
     "buildingPool": "Building your pool…",
@@ -79,7 +86,8 @@
     "restartReelDiscardLabel": "Discard {count} votes?",
     "noUnanimousPick": "NO UNANIMOUS PICK",
     "closestThreeLabel": "closest three",
-    "runnersUpExplainer": "The house suggests the top line. Host can start a second reel, or put it to a show of hands.",
+    "runnersUpExplainer": "The house suggests the top line. Host can start a second reel with looser filters, or put it to a show of hands.",
+    "votesTally": "{yes} of {total} yes",
     "secondReelLabel": "SECOND REEL",
     "closeTheHouseLabel": "Close the house",
     "endSession": "End session",
@@ -94,11 +102,22 @@
     "yesAriaLabel": "Yes",
     "noAriaLabel": "No",
     "passLabel": "PASS",
-    "admitLabel": "ADMIT"
+    "admitLabel": "ADMIT",
+    "voidStampLabel": "VOID",
+    "passHintDesktop": "← arrow",
+    "passHintMobile": "swipe left",
+    "admitHintDesktop": "arrow →",
+    "admitHintMobile": "swipe right"
   },
   "marqueeReveal": {
-    "matchLabel": "It's a match",
-    "readyInLibrary": "Ready to watch in your library"
+    "kicker": "Tonight's feature",
+    "readyInLibrary": "Ready to watch in your library",
+    "backToDeckIn": "Back to the deck in {seconds}s",
+    "rollItEndSession": "ROLL IT · END SESSION",
+    "keepSwiping": "Keep swiping",
+    "matchRuleAllLabel": "unanimous",
+    "matchRuleMajorityLabel": "majority",
+    "matchRuleAtLeastLabel": "{n} said yes"
   },
   "roomShare": {
     "copyLink": "Copy link",
@@ -109,7 +128,9 @@
   },
   "ticketAvatar": {
     "away": "away",
-    "done": "done"
+    "done": "done",
+    "host": "host",
+    "ready": "ready"
   },
   "errors": {
     "room_not_found": "Room not found.",
@@ -136,10 +157,10 @@
     "excluded_at_start": "You were excluded because you were disconnected when the session started."
   },
   "roomEnded": {
-    "host_ended": "The host ended this session.",
-    "inactivity_timeout": "This session ended after a period of inactivity.",
-    "server_restarting": "The server is restarting. Please rejoin in a moment.",
-    "host_disconnected_timeout": "The host disconnected and didn't return in time."
+    "host_ended": "The host ended this session. Your ticket stub is still good — start a new room whenever the popcorn's ready.",
+    "inactivity_timeout": "This session ended after a period of inactivity. Your ticket stub is still good — start a new room whenever the popcorn's ready.",
+    "server_restarting": "The server is restarting. Please rejoin in a moment. Your ticket stub is still good — start a new room whenever the popcorn's ready.",
+    "host_disconnected_timeout": "The host disconnected and didn't return in time. Your ticket stub is still good — start a new room whenever the popcorn's ready."
   },
   "localeSwitcher": {
     "english": "English",
@@ -189,7 +210,7 @@
     "hostGoneTitle": "THE HOST DROPPED OUT",
     "hostGoneBody": "We lost the host's connection. The room stays open for two minutes in case they come straight back.",
     "hostGoneDetail": "Reconnecting… your votes are held. If they do not return, the room closes on its own.",
-    "hostGonePrimary": "Back to the room",
+    "hostGonePrimary": "Keep waiting",
     "hostGoneSecondary": "Leave the room",
     "poolFailKicker": "Reel jammed",
     "poolFailTitle": "COULD NOT BUILD THE POOL",
