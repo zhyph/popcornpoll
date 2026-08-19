@@ -10,18 +10,22 @@ test('solo: box office links to /solo, filters produce a shortlist, and a direct
   await page.getByTestId('flying-solo').click()
   await page.waitForURL('/solo')
 
-  await expect(page.getByTestId('chapter-indicator')).toContainText("Trim the bill")
+  // aria-current="step" marks the active chip specifically — the header
+  // renders all three step labels at once regardless of screen (only
+  // styling differs), so asserting on plain text-contains would pass
+  // trivially on any solo screen; this actually verifies progression.
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText('Trim the bill')
 
   await expect(page.getByTestId('solo-eligible-count')).not.toHaveText('—', { timeout: 15000 })
   await page.getByTestId('submit-solo').click()
 
-  await expect(page.getByTestId('chapter-indicator')).toContainText("Tonight's bill")
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText("Tonight's bill")
   const cards = page.getByTestId('shortlist-card')
   await expect(cards.first()).toBeVisible({ timeout: 15000 })
 
   await cards.first().getByRole('button', { name: 'Pick this' }).click()
 
-  await expect(page.getByTestId('chapter-indicator')).toContainText('Your pick')
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText('Your pick')
   await expect(page.getByTestId('solo-room-code')).toContainText('solo-')
 })
 

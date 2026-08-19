@@ -324,7 +324,7 @@ export default function CreateRoomPage() {
             </a>
           </div>
         </div>
-        <div className="grid-column relative col-span-full flex flex-wrap items-center gap-5 border border-brass/40 bg-gradient-to-br from-ticket to-ticket/85 px-5 py-5 text-ink shadow-[0_18px_44px_-24px_rgba(0,0,0,.85)] sm:px-7">
+        <div className="relative col-span-full flex flex-wrap items-center gap-5 border border-brass/40 bg-gradient-to-br from-ticket to-ticket/85 px-5 py-5 text-ink shadow-[0_18px_44px_-24px_rgba(0,0,0,.85)] sm:px-7">
           <div className="flex min-w-[220px] flex-1 flex-col gap-1.5">
             <p className="font-mono text-[10px] uppercase tracking-[.24em] text-ink/60">{t('flyingSoloKicker')}</p>
             <p className="font-display text-xl tracking-wide sm:text-2xl">{t('flyingSoloTitle')}</p>

@@ -132,6 +132,18 @@ describe('surprise', () => {
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_body')
   })
+
+  it('returns 422 pool_too_small when none of the given movieIds resolve to a real row', async () => {
+    const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
+    const res = await handlers.surprise(
+      new Request('http://localhost/api/solo/surprise', {
+        method: 'POST',
+        body: JSON.stringify({ movieIds: [999999] }),
+      }),
+    )
+    expect(res.status).toBe(422)
+    expect((await res.json()).error.code).toBe('pool_too_small')
+  })
 })
 
 describe('pick', () => {
@@ -182,5 +194,18 @@ describe('pick', () => {
     )
     expect(res.status).toBe(403)
     expect((await res.json()).error.code).toBe('forbidden_origin')
+  })
+
+  it('rejects a malformed body with 400 invalid_body', async () => {
+    const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
+    const res = await handlers.pick(
+      new Request('http://localhost/api/solo/pick', {
+        method: 'POST',
+        headers: { origin: config.appOrigin },
+        body: 'not json',
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect((await res.json()).error.code).toBe('invalid_body')
   })
 })

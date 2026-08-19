@@ -128,6 +128,7 @@
     "room_not_active": "This room isn't active right now.",
     "library_empty": "This library doesn't have any movies yet. Pick a different library or run a sync.",
     "movie_not_found": "That movie could not be found.",
+    "rate_limited": "Too many requests. Wait a moment and try again.",
     "generic": "Something went wrong."
   },
   "kicked": {

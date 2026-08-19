@@ -19,7 +19,7 @@ function stepFromPath(pathname: string, pushedStep: ChapterStep | null): Chapter
   if (pathname === '/') return 'entry'
   if (pathname.startsWith('/join/')) return 'entry'
   if (pathname.startsWith('/room/')) return pushedStep ?? 'lobby'
-  if (pathname === '/solo') return pushedStep ?? 'soloFilters'
+  if (pathname.startsWith('/solo')) return pushedStep ?? 'soloFilters'
   return null
 }
 
@@ -53,7 +53,7 @@ export function PictureBoothHeader() {
     soloShortlist: tChrome('soloStepShortlist'),
     soloPick: tChrome('soloStepPick'),
   }
-  const labels: Record<string, string> = isSoloFlow ? soloLabels : isGuestFlow ? guestLabels : hostLabels
+  const labels: Partial<Record<ChapterStep, string>> = isSoloFlow ? soloLabels : isGuestFlow ? guestLabels : hostLabels
 
   return (
     <header className="relative z-20 flex flex-wrap items-center justify-between gap-4 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-3.5 backdrop-blur-sm sm:px-10">
@@ -77,6 +77,7 @@ export function PictureBoothHeader() {
             return (
               <span key={step} className="flex items-center gap-0">
                 <span
+                  aria-current={isCurrent ? 'step' : undefined}
                   className="flex items-center gap-1.5 border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-widest transition-all"
                   style={{
                     background: isCurrent ? 'rgba(245,166,35,.14)' : 'transparent',
