@@ -12,9 +12,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"

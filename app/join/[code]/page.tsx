@@ -3,10 +3,11 @@
 
 import { useTranslations } from 'next-intl'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { use, useState } from 'react'
 import CodeSlats from '../../../components/CodeSlats'
 
-export default function JoinRoomPage({ params }: { params: { code: string } }) {
+export default function JoinRoomPage({ params }: { params: Promise<{ code: string }> }) {
+  const { code } = use(params)
   const t = useTranslations('joinRoom')
   const router = useRouter()
   const [displayName, setDisplayName] = useState('')
@@ -14,7 +15,7 @@ export default function JoinRoomPage({ params }: { params: { code: string } }) {
   return (
     <main className="mx-auto flex max-w-[640px] flex-1 flex-col items-center justify-center gap-6 px-4">
       <p className="font-mono text-[11px] uppercase tracking-[.4em] text-brass">{t('invitedTo')}</p>
-      <CodeSlats code={params.code} />
+      <CodeSlats code={code} />
       <div
         className="flex w-full flex-wrap overflow-hidden border-2 border-brass/60 bg-gradient-to-br from-ticket to-ticket/80 text-ink shadow-[0_30px_80px_-30px_rgba(0,0,0,.9)]"
         style={{ animation: 'revealUp .6s ease-out both' }}
@@ -41,7 +42,7 @@ export default function JoinRoomPage({ params }: { params: { code: string } }) {
             disabled={displayName.length === 0}
             onClick={() => {
               sessionStorage.setItem('pendingDisplayName', displayName)
-              router.push(`/room/${params.code}`)
+              router.push(`/room/${code}`)
             }}
             className="h-[62px] font-display text-xl tracking-wide text-ticket disabled:cursor-not-allowed disabled:bg-ink/20 disabled:text-ink/45 enabled:cursor-pointer enabled:bg-exit-red"
           >
