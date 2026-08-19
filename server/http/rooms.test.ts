@@ -165,7 +165,13 @@ describe('createRoomsHandler', () => {
       responseResolved = true
       return res
     })
-    for (let i = 0; i < 5; i++) await Promise.resolve()
+    // How many microtask ticks `await req.json()` takes before reaching the
+    // librarySync.run() call varies by Node version (observed: 5 ticks on
+    // Node 24, more on Node 22, the version this project and its CI/Docker
+    // image actually target) — poll until run() fires instead of asserting
+    // a fixed tick count, bounded so a genuine regression (run() never
+    // called) still fails fast.
+    for (let i = 0; i < 50 && run.mock.calls.length === 0; i++) await Promise.resolve()
     expect(responseResolved).toBe(false)
     expect(run).toHaveBeenCalledTimes(1)
 

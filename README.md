@@ -15,6 +15,20 @@ threshold of yes-votes is reached.
 
 ## Running it
 
+Prebuilt multi-arch images (amd64/arm64) are published to
+`ghcr.io/zhyph/popcornpoll` on every release — you don't need to build
+anything yourself.
+
+### docker compose (recommended)
+
+```bash
+curl -O https://raw.githubusercontent.com/zhyph/popcornpoll/master/docker-compose.yml
+cp .env.example .env   # fill in TMDB_API_KEY, AUTH_ENCRYPTION_KEY, ADMIN_SETUP_TOKEN, APP_ORIGIN
+docker compose up -d
+```
+
+### docker run
+
 ```bash
 docker run -d --name popcornpoll \
   -e TMDB_API_KEY=<your key> \
@@ -23,7 +37,7 @@ docker run -d --name popcornpoll \
   -e APP_ORIGIN=http://<your-host>:3000 \
   -p 3000:3000 \
   -v popcornpoll-data:/data \
-  popcornpoll:latest
+  ghcr.io/zhyph/popcornpoll:latest
 ```
 
 Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>`
@@ -56,6 +70,36 @@ you expose it beyond that, put it behind your own access control (a
 reverse-proxy with basic auth, an authenticating gateway, etc.) — this is
 your responsibility, not something the app does for you.
 
+Room creation and the WebSocket connection are rate-limited **per client
+IP**. If your whole group joins from behind the same NAT (one home
+network, campus wifi, a shared office), they share one bucket — expect a
+group of many people on one IP to hit the limit sooner than the same
+number of people spread across different networks. This is deliberate
+(it's what stops one bad actor from spamming rooms) but worth knowing
+before you assume a 429 means something is broken.
+
+## Backups and upgrades
+
+Everything the app needs to remember lives in one SQLite file under
+`DATA_DIR` (the `popcornpoll-data` volume in the examples above) — back
+that up and you've backed up your whole instance (linked Plex server,
+synced library, match history). Stop the container before copying the
+file to get a consistent snapshot:
+
+```bash
+docker compose stop
+cp /var/lib/docker/volumes/<project>_popcornpoll-data/_data/popcornpoll.db ./popcornpoll.db.bak
+docker compose start
+```
+
+To upgrade, pull the new image and recreate the container
+(`docker compose pull && docker compose up -d`, or the equivalent
+`docker pull` + `docker run` if you're not using compose) — schema
+migrations in `server/db/migrations` run automatically against the
+existing database on startup. Take a backup first; if a migration ever
+misbehaves, restoring the pre-upgrade `.db` file and pinning the previous
+image tag rolls you back completely.
+
 ## Reverse proxy notes
 
 If you put this behind nginx/Caddy/Apache, you must:
@@ -80,3 +124,9 @@ npm run dev
 npm test                # unit tests (Vitest)
 npm run test:e2e        # end-to-end tests (Playwright, runs against FAKE_EXTERNAL_APIS)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+
+## License
+
+[MIT](LICENSE)

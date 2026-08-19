@@ -1,6 +1,13 @@
 # Dockerfile
 FROM node:22-slim AS builder
 WORKDIR /app
+# better-sqlite3 has no prebuilt binary for every platform npm ci might
+# target here (notably linux/arm64 under buildx/qemu emulation) and falls
+# back to compiling its native addon via node-gyp, which needs Python and a
+# C++ toolchain — node:22-slim ships neither.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
