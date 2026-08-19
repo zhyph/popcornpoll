@@ -55,3 +55,11 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          # Same GHA cache docker-publish.yml writes to on every push to
+          # master — GitHub Actions cache lets a PR read its base branch's
+          # cache entries (but only write its own), so this job reuses
+          # whatever master's last publish run already compiled instead of
+          # rebuilding from scratch (the slow part is better-sqlite3's
+          # node-gyp compile under arm64/qemu emulation) on every PR.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

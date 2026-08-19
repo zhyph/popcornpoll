@@ -16,6 +16,12 @@ export default defineConfig({
   // second full `next build`) per project instead.
   workers: 1,
   timeout: 60_000,
+  // exhaustion.spec.ts's fallback-screen wait has twice needed a bigger
+  // fixed timeout to pass under CI-runner load (15s -> 20s, still not
+  // always enough with other CI jobs contending for the same runner pool).
+  // Retrying under load is the standard fix for that kind of timing
+  // sensitivity, rather than guessing at a third timeout constant.
+  retries: process.env.CI ? 2 : 0,
   webServer: {
     // Run against a production build, not `next dev`. Root-caused via
     // systematic-debugging: in this environment, Next.js dev mode's client
