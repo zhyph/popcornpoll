@@ -205,6 +205,23 @@ export function stampLastUsed(db: Database.Database, ids: number[], when: string
   stampAll()
 }
 
+// The Box Office screen's genre filter is a closed select, not free text —
+// its options come from whatever's actually on the linked library's shelf,
+// not a hardcoded genre list that might not match what the owner actually
+// has. `genres` is stored as a JSON array string (see upsertPlexRow), so
+// dedup/sort happens in JS after a single-column scan rather than relying on
+// SQLite JSON functions that better-sqlite3 doesn't guarantee are compiled in.
+export function findDistinctGenres(db: Database.Database): string[] {
+  const rows = db
+    .prepare(`SELECT DISTINCT genres FROM movies WHERE plex_rating_key IS NOT NULL AND in_library = 1`)
+    .all() as { genres: string }[]
+  const genres = new Set<string>()
+  for (const row of rows) {
+    for (const genre of JSON.parse(row.genres) as string[]) genres.add(genre)
+  }
+  return [...genres].sort((a, b) => a.localeCompare(b))
+}
+
 export function findEligiblePlexRows(
   db: Database.Database,
   filters: { genre?: string; yearMin?: number; yearMax?: number; ratingMin?: number },
