@@ -11,16 +11,25 @@ const SWIPE_THRESHOLD_PX = 120
 export function SwipeDeck({
   card,
   onDecide,
+  disabled = false,
 }: {
   card: PoolEntry | null
   onDecide: (vote: 'yes' | 'no') => void
+  // The Match Reveal overlay (app/room/[code]/page.tsx) sits fixed on top of
+  // this deck rather than unmounting it, so a drag/click can't reach the
+  // card underneath — but the keydown listener below is bound to `window`
+  // and isn't affected by stacking order. Without this guard, arrow keys
+  // would keep voting on cards the player can't see while the overlay is
+  // up, which is exactly the "swipe straight through" behavior the overlay
+  // is meant to prevent.
+  disabled?: boolean
 }) {
   const t = useTranslations('swipeDeck')
   const controls = useAnimation()
   const [dragDirection, setDragDirection] = useState<'yes' | 'no' | null>(null)
 
   async function animateDecision(vote: 'yes' | 'no') {
-    if (!card) return
+    if (!card || disabled) return
     if (vote === 'yes') {
       await controls.start({ x: 500, opacity: 0, rotate: 15 })
     } else {

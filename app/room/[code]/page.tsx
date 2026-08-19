@@ -510,7 +510,11 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           </div>
         )
       })()}
-      <SwipeDeck card={currentCard} onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })} />
+      <SwipeDeck
+        card={currentCard}
+        disabled={latestMatch !== null}
+        onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })}
+      />
       <p className="text-center font-mono text-[10px] uppercase tracking-widest text-brass/60">{t('deckFooterHint')}</p>
       <div className="flex w-full flex-wrap items-center gap-3 border border-brass/35 bg-ink/70 px-4 py-3">
         <span className="font-mono text-[10px] uppercase tracking-widest text-brass">{t('admitted')}</span>
