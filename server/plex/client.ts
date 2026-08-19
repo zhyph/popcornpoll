@@ -40,7 +40,13 @@ function headers(clientIdentifier: string): Record<string, string> {
 export function createPlexClient(clientIdentifier: string): PlexClient {
   return {
     async createPin() {
-      const res = await fetch('https://plex.tv/api/v2/pins', {
+      // strong=true is required for the app.plex.tv/auth#?...&code=... URL
+      // flow used below in app/setup/page.tsx. Without it Plex issues a
+      // short "weak" code meant for manual entry at plex.tv/link, which the
+      // auth page silently rejects at sign-in with a 403 "We were unable to
+      // complete this request" — the PIN itself still gets created fine, so
+      // this only surfaces once the owner actually tries to log in.
+      const res = await fetch('https://plex.tv/api/v2/pins?strong=true', {
         method: 'POST',
         headers: headers(clientIdentifier),
       })
