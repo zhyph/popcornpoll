@@ -38,6 +38,12 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [edgeOverride, setEdgeOverride] = useState<Exclude<EdgeKind, 'kicked'> | null>(null)
+  // Guards against a double-click on Start sending two {type:'start'}
+  // messages: the server rejects the second one synchronously with
+  // 'already_started', which would consume attemptingStartRef before the
+  // first one's real pool_too_small/library_empty error arrives — swallowing
+  // the edge screen entirely.
+  const [startPending, setStartPending] = useState(false)
   const lastSeqRef = useRef<number | null>(null)
   const confirmRestartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attemptingStartRef = useRef(false)
@@ -77,6 +83,24 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     const unsubJoined = ws.on('joined', (msg) => {
       setSnapshot(msg.room)
       setParticipants(msg.room.participants)
+      // A start attempt whose response was lost to a dropped socket would
+      // otherwise leave the Start button disabled forever; a `joined` means
+      // that round-trip is over either way (the room is 'lobby' and the host
+      // needs the button back, or it's 'active' and the button is gone).
+      setStartPending(false)
+      // `joined` is the one message that fires for BOTH a fresh join and
+      // every reconnect, so it's the only place a client can re-derive the
+      // truth about host connectivity. The live host_disconnected /
+      // host_reconnected broadcasts only reach clients that were connected
+      // when they fired, which leaves two bad states this fixes: a guest
+      // that reconnects after the host already came back would stay stuck
+      // on 'hostgone', and a guest that joins/reloads mid-outage would never
+      // see 'hostgone' at all before the room closes on them.
+      const host = msg.room.participants.find((p) => p.isHost)
+      if (host) {
+        const hostGone = host.connectionStatus === 'disconnected'
+        setEdgeOverride((prev) => (hostGone ? 'hostgone' : prev === 'hostgone' ? null : prev))
+      }
       if (msg.room.pool) setPool(msg.room.pool)
       if (msg.room.pendingCardId !== undefined) setPendingCardId(msg.room.pendingCardId)
       if (msg.hostToken) {
@@ -104,6 +128,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       )
     })
     const unsubStarted = ws.on('room_started', (msg) => {
+      setStartPending(false)
       attemptingStartRef.current = false
       checkSeq(ws, msg.seq)
       setPool(msg.pool)
@@ -123,6 +148,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
       setSnapshot((prev) => prev && { ...prev, topCandidates: msg.topCandidates }),
     )
     const unsubError = ws.on('error', (msg) => {
+      setStartPending(false)
       const wasAttemptingStart = attemptingStartRef.current
       attemptingStartRef.current = false
       if (wasAttemptingStart && (msg.code === 'pool_too_small' || msg.code === 'library_empty')) {
@@ -210,12 +236,17 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   if (terminal?.type === 'kicked') {
     const body = tKicked.has(terminal.reason) ? tKicked(terminal.reason) : tKicked('kicked')
+    // Same screen serves two reasons, but only one of them is anybody's
+    // fault: 'excluded_at_start' means you were simply offline when the
+    // session started, so the kicked copy's blame-shifting kicker/title
+    // would contradict its own body. Detail/primary stay shared.
+    const excluded = terminal.reason === 'excluded_at_start'
     return (
       <EdgeState
         kind="kicked"
         testId="terminal-screen"
-        kicker={tEdge('kickedKicker')}
-        title={tEdge('kickedTitle')}
+        kicker={tEdge(excluded ? 'excludedKicker' : 'kickedKicker')}
+        title={tEdge(excluded ? 'excludedTitle' : 'kickedTitle')}
         body={body}
         detail={tEdge('kickedDetail')}
         primaryLabel={tEdge('kickedPrimary')}
@@ -271,6 +302,10 @@ export default function RoomPage({ params }: { params: { code: string } }) {
 
   if (edgeOverride === 'poolfail' || edgeOverride === 'emptylib') {
     const kind = edgeOverride
+    // Both failures leave the room fully retriable server-side (status stays
+    // 'lobby', nobody is excluded, no session revoked), so the secondary
+    // action dismisses back into the lobby instead of walking the host out
+    // on guests who are still sitting there waiting.
     return (
       <EdgeState
         kind={kind}
@@ -281,8 +316,8 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         detail={tEdge(kind === 'poolfail' ? 'poolFailDetail' : 'emptyLibraryDetail')}
         primaryLabel={tEdge(kind === 'poolfail' ? 'poolFailPrimary' : 'emptyLibraryPrimary')}
         onPrimary={() => router.push(kind === 'poolfail' ? '/' : '/setup')}
-        secondaryLabel={kind === 'poolfail' ? tEdge('poolFailSecondary') : undefined}
-        onSecondary={kind === 'poolfail' ? () => router.push('/setup') : undefined}
+        secondaryLabel={tEdge(kind === 'poolfail' ? 'poolFailSecondary' : 'emptyLibraryStayLabel')}
+        onSecondary={() => setEdgeOverride(null)}
       />
     )
   }
@@ -315,11 +350,13 @@ export default function RoomPage({ params }: { params: { code: string } }) {
         {isHost && snapshot.status === 'lobby' && (
           <button
             type="button"
+            disabled={startPending}
             onClick={() => {
+              setStartPending(true)
               attemptingStartRef.current = true
               client?.send({ type: 'start' })
             }}
-            className="h-[62px] w-full bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90"
+            className="h-[62px] w-full bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90 disabled:opacity-60"
           >
             {t('startButton')}
           </button>

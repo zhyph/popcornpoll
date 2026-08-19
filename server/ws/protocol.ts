@@ -31,6 +31,12 @@ export interface ParticipantView {
   displayName: string
   connectionStatus: ConnectionStatus
   finished: boolean
+  // Lets a client derive host connectivity from any snapshot it receives —
+  // notably the `joined` response, which is the only host-state signal a
+  // client gets when it joins or reconnects *during* a host-gone window
+  // (the live host_disconnected/host_reconnected broadcasts can't reach a
+  // client that wasn't connected when they fired).
+  isHost: boolean
 }
 
 export interface RoomSnapshot {

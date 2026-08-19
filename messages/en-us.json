@@ -173,22 +173,25 @@
     "kickedTitle": "THE USHER SHOWED YOU OUT",
     "kickedDetail": "If this was a mistake, ask them to send the code again — rejoining is instant.",
     "kickedPrimary": "Enter a new code",
+    "excludedKicker": "Seat released",
+    "excludedTitle": "YOUR SEAT WAS RELEASED",
     "hostGoneKicker": "Projector stopped",
     "hostGoneTitle": "THE HOST DROPPED OUT",
     "hostGoneBody": "We lost the host's connection. The room stays open for two minutes in case they come straight back.",
     "hostGoneDetail": "Reconnecting… your votes are held. If they do not return, the room closes on its own.",
-    "hostGonePrimary": "Keep waiting",
+    "hostGonePrimary": "Back to the room",
     "hostGoneSecondary": "Leave the room",
     "poolFailKicker": "Reel jammed",
     "poolFailTitle": "COULD NOT BUILD THE POOL",
     "poolFailBody": "Your filters came back with nothing to show, or Plex did not answer in time.",
     "poolFailDetail": "Try widening the year range, dropping the minimum rating, or adding TMDB as a second source.",
     "poolFailPrimary": "Back to the filters",
-    "poolFailSecondary": "Check the booth",
+    "poolFailSecondary": "Stay and retry",
     "emptyLibraryKicker": "Nothing on the shelf",
     "emptyLibraryTitle": "THIS LIBRARY IS EMPTY",
     "emptyLibraryBody": "Plex is linked, but the libraries you picked have no movies in them yet.",
     "emptyLibraryDetail": "Pick different libraries in the booth, or run a sync if you have added titles since.",
-    "emptyLibraryPrimary": "Open the booth"
+    "emptyLibraryPrimary": "Open the booth",
+    "emptyLibraryStayLabel": "Stay and retry"
   }
 }

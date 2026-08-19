@@ -33,6 +33,7 @@ function participantViews(room: RoomState): ParticipantView[] {
     displayName: p.displayName,
     connectionStatus: p.connectionStatus,
     finished: p.finished,
+    isHost: p.id === room.hostParticipantId,
   }))
 }
 

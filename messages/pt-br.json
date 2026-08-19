@@ -173,22 +173,25 @@
     "kickedTitle": "O LANTERNISTA TE PÔS PRA FORA",
     "kickedDetail": "Se foi engano, peça o código de novo — entrar de novo é instantâneo.",
     "kickedPrimary": "Digitar um novo código",
+    "excludedKicker": "Assento liberado",
+    "excludedTitle": "SEU ASSENTO FOI LIBERADO",
     "hostGoneKicker": "Projetor parou",
     "hostGoneTitle": "O ANFITRIÃO CAIU DA SESSÃO",
     "hostGoneBody": "Perdemos a conexão do anfitrião. A sala continua aberta por dois minutos, caso ele volte rapidinho.",
     "hostGoneDetail": "Reconectando… seus votos estão guardados. Se ele não voltar, a sala se fecha sozinha.",
-    "hostGonePrimary": "Continuar esperando",
+    "hostGonePrimary": "Voltar para a sala",
     "hostGoneSecondary": "Sair da sala",
     "poolFailKicker": "Rolo emperrou",
     "poolFailTitle": "NÃO FOI POSSÍVEL MONTAR O CATÁLOGO",
     "poolFailBody": "Seus filtros não trouxeram nada para mostrar, ou o Plex não respondeu a tempo.",
     "poolFailDetail": "Tente ampliar o intervalo de anos, reduzir a nota mínima, ou adicionar o TMDB como segunda fonte.",
     "poolFailPrimary": "Voltar aos filtros",
-    "poolFailSecondary": "Ver a cabine",
+    "poolFailSecondary": "Ficar e tentar de novo",
     "emptyLibraryKicker": "Nada na prateleira",
     "emptyLibraryTitle": "ESSA BIBLIOTECA ESTÁ VAZIA",
     "emptyLibraryBody": "O Plex está vinculado, mas as bibliotecas escolhidas ainda não têm filmes.",
     "emptyLibraryDetail": "Escolha outras bibliotecas na cabine, ou rode uma sincronização se você adicionou títulos desde então.",
-    "emptyLibraryPrimary": "Abrir a cabine"
+    "emptyLibraryPrimary": "Abrir a cabine",
+    "emptyLibraryStayLabel": "Ficar e tentar de novo"
   }
 }

@@ -46,28 +46,38 @@ function markPlexLibraryEmpty(): void {
 test('Start shows the empty-library edge screen when the plex library has no movies', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
   markPlexLibraryEmpty()
-  const browser = await chromium.launch()
-  const hostContext = await browser.newContext()
-  await pinEnglishLocale(hostContext, baseURL!)
-  const hostPage = await hostContext.newPage()
-  await hostPage.goto('/')
-  await hostPage.getByTestId('create-room').click()
-  await hostPage.waitForURL(/\/room\//)
-  const roomCode = hostPage.url().split('/room/')[1]
+  // markPlexLibraryEmpty() writes straight to the on-disk SQLite file that
+  // every spec in this suite shares (one server process, one DB — see
+  // playwright.config.ts's webServer comment), so it has to be undone here
+  // rather than relying on whatever runs next happening to re-seed. Running
+  // the fake resync again is the faithful undo: it re-upserts the same 10
+  // fixture titles with in_library = 1, exactly as the initial seed did.
+  try {
+    const browser = await chromium.launch()
+    const hostContext = await browser.newContext()
+    await pinEnglishLocale(hostContext, baseURL!)
+    const hostPage = await hostContext.newPage()
+    await hostPage.goto('/')
+    await hostPage.getByTestId('create-room').click()
+    await hostPage.waitForURL(/\/room\//)
+    const roomCode = hostPage.url().split('/room/')[1]
 
-  const guestContext = await browser.newContext()
-  await pinEnglishLocale(guestContext, baseURL!)
-  const guestPage = await guestContext.newPage()
-  await guestPage.goto(`/join/${roomCode}`)
-  await guestPage.getByTestId('join-name-input').fill('Guest')
-  await guestPage.getByTestId('join-submit').click()
-  await guestPage.waitForURL(/\/room\//)
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+    const guestContext = await browser.newContext()
+    await pinEnglishLocale(guestContext, baseURL!)
+    const guestPage = await guestContext.newPage()
+    await guestPage.goto(`/join/${roomCode}`)
+    await guestPage.getByTestId('join-name-input').fill('Guest')
+    await guestPage.getByTestId('join-submit').click()
+    await guestPage.waitForURL(/\/room\//)
+    await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
 
-  await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
-  await expect(hostPage.getByTestId('edge-emptylib')).toBeVisible({ timeout: 15000 })
+    await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
+    await expect(hostPage.getByTestId('edge-emptylib')).toBeVisible({ timeout: 15000 })
 
-  await browser.close()
+    await browser.close()
+  } finally {
+    await seedFakeLibrary(baseURL!)
+  }
 })
 
 test('Start shows the pool-fail edge screen when filters exclude every movie in a non-empty library', async ({

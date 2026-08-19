@@ -11,6 +11,7 @@ import { upsertPlexRow } from '../db/movies'
 import { createRoomStore } from '../room/roomStore'
 import { attachWebSocketServer, MAX_FAILED_JOINS, RECONNECT_GRACE_MS } from './server'
 import { WS_CLOSE_TERMINAL } from './protocol'
+import type { ParticipantView } from './protocol'
 import type { Server } from 'node:http'
 import type Database from 'better-sqlite3'
 import type { SyncWaiter } from '../room/activeActions'
@@ -338,6 +339,37 @@ describe('attachWebSocketServer', () => {
     expect(reconnectBroadcast.type === 'host_reconnected' || reconnectBroadcast.type === 'state_update').toBe(true)
 
     hostWs2.close()
+    guestWs.close()
+  })
+
+  it('flags the host in every joined snapshot so a client arriving mid-outage can derive host-gone itself', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+
+    const hostWs = await connect()
+    hostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Host', hostClaimToken }))
+    const hostJoined = await nextMessage(hostWs)
+
+    // The host drops with nobody else in the room, so the host_disconnected
+    // broadcast reaches no one. For a client that joins (or reconnects)
+    // afterwards, the joined snapshot is the *only* signal that the host is
+    // gone — without isHost it can't tell which of the listed participants'
+    // connectionStatus to look at.
+    hostWs.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(store.get(code)!.participants.get(hostJoined.participantId as string)!.connectionStatus).toBe('disconnected')
+
+    const guestWs = await connect()
+    guestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Guest' }))
+    const guestJoined = await nextMessage(guestWs)
+    const participants = (guestJoined.room as { participants: ParticipantView[] }).participants
+
+    const flagged = participants.filter((p) => p.isHost)
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0]!.displayName).toBe('Host')
+    expect(flagged[0]!.connectionStatus).toBe('disconnected')
+    expect(participants.find((p) => p.displayName === 'Guest')!.isHost).toBe(false)
+
     guestWs.close()
   })
 

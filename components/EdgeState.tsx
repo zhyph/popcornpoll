@@ -19,7 +19,7 @@ const ACCENT: Record<EdgeKind, { text: string; border: string; bg: string }> = {
   kicked: { text: 'text-exit-red', border: 'border-exit-red/60', bg: 'bg-exit-red' },
   poolfail: { text: 'text-exit-red', border: 'border-exit-red/60', bg: 'bg-exit-red' },
   hostgone: { text: 'text-marquee', border: 'border-marquee/50', bg: 'bg-marquee' },
-  emptylib: { text: 'text-brass', border: 'border-brass/[0.55]', bg: 'bg-brass' },
+  emptylib: { text: 'text-brass', border: 'border-brass/55', bg: 'bg-brass' },
 }
 
 export function edgeAccentClasses(kind: EdgeKind): { text: string; border: string; bg: string } {
@@ -58,6 +58,7 @@ export function EdgeState({
         className={`flex w-full flex-col items-center gap-4 border-2 ${accent.border} bg-gradient-to-b from-velvet/70 to-ink/95 px-6 py-10 text-center sm:px-10`}
       >
         <span
+          aria-hidden="true"
           className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border-2 ${accent.border} font-display text-2xl ${accent.text}`}
         >
           {ICON[kind]}
