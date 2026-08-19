@@ -40,6 +40,10 @@ docker run -d --name popcornpoll \
   ghcr.io/zhyph/popcornpoll:latest
 ```
 
+Prefer a specific host path over the named volume (e.g. `-v /path/on/host:/data`)?
+Add `-e PUID=$(id -u) -e PGID=$(id -g)` and the container will chown that
+path to match on startup — no manual `chown` needed first.
+
 Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>`
 once to link your Plex server — the token pre-fills the admin-token field
 (you can also paste it in by hand instead of using the URL). The page
@@ -60,6 +64,7 @@ wait for the periodic library sync) to pull your library in.
 | `TRUSTED_PROXY_HOPS` | no (default `0`) | If you run this behind a reverse proxy, set this to the number of proxy hops so rate limiting reads the real client IP from `X-Forwarded-For` instead of the proxy's own. |
 | `PORT` | no (default `3000`) | |
 | `DATA_DIR` | no (default `./data`, `/data` in the Docker image) | Where the SQLite file lives — mount a volume here. |
+| `PUID` / `PGID` | no (default `999`/`999`) | Docker only. The container starts as root, aligns the `popcornpoll` user to this uid/gid, chowns `DATA_DIR` to match, then drops to it before running the app. Only matters if you bind-mount `DATA_DIR` to a host path (instead of the default named volume) — set these to the uid/gid you want to own that file on the host. |
 
 ## Network exposure
 

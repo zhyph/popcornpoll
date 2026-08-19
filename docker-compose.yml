@@ -13,8 +13,15 @@ services:
       ADMIN_SETUP_TOKEN: ${ADMIN_SETUP_TOKEN:?set ADMIN_SETUP_TOKEN in .env, e.g. openssl rand -hex 16}
       APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN in .env, e.g. http://localhost:3000}
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+      # Only relevant if you swap the named volume below for a bind mount to
+      # a host path: set these to the uid/gid you want to own the SQLite
+      # file on the host, and the container aligns itself to match on start.
+      PUID: ${PUID:-999}
+      PGID: ${PGID:-999}
     volumes:
       - popcornpoll-data:/data
+      # Bind mount to a host path instead, e.g.:
+      #   - ${DOCKERCONFDIR}/popcornpoll:/data
 
 volumes:
   popcornpoll-data:
