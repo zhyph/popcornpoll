@@ -39,7 +39,7 @@ export default function CodeSlats({
   const innerGap = size === 'small' ? 'gap-0.5' : 'gap-1 sm:gap-1.5'
 
   return (
-    <div className={`flex items-center ${gap}`} role="img" aria-label={code}>
+    <div className={`flex flex-wrap items-center justify-center ${gap}`} role="img" aria-label={code}>
       {groups.map((letters, gi) => (
         <div key={gi} className={`flex ${innerGap}`}>
           {letters.map(({ letter, delay }, li) => (

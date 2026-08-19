@@ -33,7 +33,7 @@ export function MarqueeReveal({ movie }: { movie: PoolEntry }) {
         />
       ))}
       <p className="font-mono text-xs uppercase tracking-widest text-brass">{t('matchLabel')}</p>
-      <div className="my-3 flex flex-wrap justify-center">
+      <div className="my-3">
         <CodeSlats code={movie.title.toUpperCase()} splitOn="space" />
       </div>
       {metaParts.length > 0 && (
