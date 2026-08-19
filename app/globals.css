@@ -104,6 +104,13 @@ body {
   97% { transform: translate(-1px, 0); }
 }
 
+@keyframes flicker {
+  0%, 100% { opacity: .9 }
+  43% { opacity: .82 }
+  47% { opacity: 1 }
+  62% { opacity: .86 }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

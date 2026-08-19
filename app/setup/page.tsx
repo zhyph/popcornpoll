@@ -1,17 +1,13 @@
 // app/setup/page.tsx
 'use client'
 
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Badge } from '../../components/ui/badge'
-import { Button } from '../../components/ui/button'
-import { Card, CardContent, CardHeader } from '../../components/ui/card'
-import { Input } from '../../components/ui/input'
-import { Label } from '../../components/ui/label'
-import { Separator } from '../../components/ui/separator'
-import { Skeleton } from '../../components/ui/skeleton'
+import { PlexPinReveal } from '../../components/PlexPinReveal'
+import { SetupStepTracker, type Step } from '../../components/SetupStepTracker'
 
 interface PinResponse {
   id: number
@@ -30,8 +26,6 @@ interface LibrarySection {
   title: string
   type: string
 }
-
-type Step = 'token' | 'pin' | 'polling' | 'servers' | 'sections' | 'done'
 
 const POLL_INTERVAL_MS = 2000
 // Plex PINs are valid for roughly 15 minutes server-side; 5 minutes of
@@ -201,149 +195,160 @@ function SetupFlow() {
   }
 
   return (
-    <main className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-6 px-4 py-10">
-      <h1 className="font-display text-4xl text-marquee">{t('title')}</h1>
+    <main className="mx-auto grid max-w-4xl flex-1 grid-cols-1 gap-8 px-4 py-10 sm:grid-cols-2 sm:items-start">
+      <div className="flex flex-col gap-4">
+        <p className="font-mono text-[10.5px] uppercase tracking-[.3em] text-brass">{t('kickerLabel')}</p>
+        <h1 className="font-display text-4xl text-ticket sm:text-5xl">{t('title')}</h1>
+        <SetupStepTracker step={step} />
+      </div>
 
-      {step === 'token' && (
-        <Card className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-            {t('boxOffice')}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">{t('tokenExplainer')}</p>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="adminToken">{t('tokenLabel')}</Label>
-              <Input
-                id="adminToken"
+      <div className="flex flex-col gap-5">
+        {step === 'token' && (
+          <div className="border-2 border-brass/60 bg-gradient-to-b from-velvet/80 to-ink/90 p-6 sm:p-8">
+            <p className="mb-4 font-mono text-xs uppercase tracking-widest text-brass">{t('boxOffice')}</p>
+            <p className="mb-4 text-sm text-ticket/70">{t('tokenExplainer')}</p>
+            <label className="mb-4 flex flex-col gap-1.5">
+              <span className="font-mono text-xs uppercase tracking-wide text-brass/80">{t('tokenLabel')}</span>
+              <input
                 type="password"
                 value={adminToken}
                 onChange={(e) => setAdminToken(e.target.value)}
                 placeholder={t('tokenPlaceholder')}
                 autoComplete="off"
+                className="h-12 border-0 border-b-2 border-brass/40 bg-transparent font-mono text-ticket outline-none focus:border-exit-red"
               />
-            </div>
-            <Button
-              className="bg-marquee text-ink hover:bg-marquee/90"
+            </label>
+            <button
+              type="button"
               disabled={adminToken.length === 0 || busy}
               onClick={() => {
                 setStep('pin')
                 void requestPin()
               }}
+              className="h-[52px] w-full bg-marquee font-display text-lg text-ink hover:bg-marquee/90 disabled:cursor-not-allowed disabled:bg-brass/20 disabled:text-ticket/40"
             >
               {t('startButton')}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+          </div>
+        )}
 
-      {(step === 'pin' || step === 'polling') && pin && (
-        <Card className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-            {t('linkPlexTitle')}
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-4">
-            <p className="font-mono text-3xl tracking-widest text-marquee">{pin.code}</p>
+        {(step === 'pin' || step === 'polling') && pin && (
+          <div className="border-2 border-brass/60 bg-gradient-to-b from-velvet/80 to-ink/90 p-6 sm:p-8">
+            <p className="mb-4 font-mono text-xs uppercase tracking-widest text-brass">{t('linkPlexTitle')}</p>
+            <PlexPinReveal code={pin.code} />
             <a
               href={`https://app.plex.tv/auth#?clientID=${encodeURIComponent(pin.clientIdentifier)}&code=${encodeURIComponent(pin.code)}&context%5Bdevice%5D%5Bproduct%5D=PopcornPoll`}
               target="_blank"
               rel="noreferrer"
-              className="w-full"
+              className="mt-5 block"
             >
-              <Button className="w-full bg-marquee text-ink hover:bg-marquee/90">{t('openPlexButton')}</Button>
+              <span className="block h-[52px] w-full bg-marquee text-center font-display text-lg leading-[52px] text-ink hover:bg-marquee/90">
+                {t('openPlexButton')}
+              </span>
             </a>
             {step === 'polling' && (
-              <Badge variant="outline" className="animate-pulse border-brass text-brass">
+              <p
+                className="mt-4 text-center font-mono text-xs uppercase tracking-widest text-brass"
+                style={{ animation: 'flicker 2.4s ease-in-out infinite' }}
+              >
                 {t('waitingForApproval')}
-              </Badge>
+              </p>
             )}
             {step === 'polling' && (
-              <Button variant="ghost" className="text-exit-red hover:bg-exit-red/10" onClick={cancelPolling}>
+              <button
+                type="button"
+                onClick={cancelPolling}
+                className="mt-2 w-full font-mono text-xs uppercase tracking-widest text-exit-red hover:underline"
+              >
                 {t('cancelButton')}
-              </Button>
+              </button>
             )}
             {step === 'pin' && (
-              <Button
-                variant="outline"
-                className="border-brass text-ticket"
+              <button
+                type="button"
                 disabled={busy}
                 onClick={() => void requestPin()}
+                className="mt-2 w-full border border-brass/50 py-3 font-mono text-xs uppercase tracking-widest text-ticket hover:border-marquee hover:text-marquee"
               >
                 {t('newCodeButton')}
-              </Button>
+              </button>
             )}
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {step === 'servers' && (
-        <Card className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-            {t('chooseServerTitle')}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {busy && <Skeleton className="h-10 w-full" />}
-            {!busy && resources.length === 0 && (
-              <p className="text-sm text-muted-foreground">{t('noServersFound')}</p>
-            )}
-            {resources.flatMap((resource) =>
-              resource.connections.map((connection) => (
-                <Button
-                  key={connection.uri}
-                  variant="outline"
-                  className="justify-between border-brass text-ticket"
-                  disabled={busy}
-                  onClick={() => pickServer(connection.uri)}
-                >
-                  <span>{resource.name}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{connection.uri}</span>
-                </Button>
-              )),
-            )}
-          </CardContent>
-        </Card>
-      )}
+        {step === 'servers' && (
+          <div className="border border-brass/40 p-5">
+            <p className="mb-4 font-mono text-xs uppercase tracking-widest text-brass">{t('chooseServerTitle')}</p>
+            {busy && <div className="h-10 w-full animate-pulse bg-brass/10" />}
+            {!busy && resources.length === 0 && <p className="text-sm text-ticket/60">{t('noServersFound')}</p>}
+            <div className="flex flex-col gap-2">
+              {resources.flatMap((resource) =>
+                resource.connections.map((connection) => (
+                  <button
+                    key={connection.uri}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => pickServer(connection.uri)}
+                    className="flex items-center justify-between border border-brass/40 px-4 py-3 text-left text-ticket hover:border-marquee"
+                  >
+                    <span>{resource.name}</span>
+                    <span className="font-mono text-xs text-ticket/50">{connection.uri}</span>
+                  </button>
+                )),
+              )}
+            </div>
+          </div>
+        )}
 
-      {step === 'sections' && (
-        <Card className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
-            {t('chooseLibrariesTitle')}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {sections.length === 0 && <p className="text-sm text-muted-foreground">{t('noMovieLibraries')}</p>}
-            {sections.map((section) => (
-              <label key={section.id} className="flex items-center gap-2 text-ticket">
-                <input
-                  type="checkbox"
-                  checked={selectedSectionIds.includes(section.id)}
-                  onChange={() => toggleSection(section.id)}
-                  className="h-4 w-4 accent-marquee"
-                />
-                {section.title}
-              </label>
-            ))}
-            <Separator className="bg-brass/40" />
-            <Button
-              className="bg-marquee text-ink hover:bg-marquee/90"
+        {step === 'sections' && (
+          <div className="border border-brass/40 p-5">
+            <p className="mb-4 font-mono text-xs uppercase tracking-widest text-brass">{t('chooseLibrariesTitle')}</p>
+            {sections.length === 0 && <p className="text-sm text-ticket/60">{t('noMovieLibraries')}</p>}
+            <div className="flex flex-col gap-3">
+              {sections.map((section) => (
+                <label key={section.id} className="flex items-center gap-2.5 text-ticket">
+                  <input
+                    type="checkbox"
+                    checked={selectedSectionIds.includes(section.id)}
+                    onChange={() => toggleSection(section.id)}
+                    className="h-4 w-4 accent-marquee"
+                  />
+                  {section.title}
+                </label>
+              ))}
+            </div>
+            <div className="my-4 h-px bg-brass/30" />
+            <button
+              type="button"
               disabled={selectedSectionIds.length === 0 || busy}
               onClick={submitLink}
+              className="min-h-[52px] w-full bg-marquee font-display text-lg text-ink hover:bg-marquee/90 disabled:cursor-not-allowed disabled:bg-brass/20 disabled:text-ticket/40 py-3"
             >
               {t('finishButton')}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+          </div>
+        )}
 
-      {step === 'done' && (
-        <Card className="w-full border-2 border-brass bg-velvet">
-          <CardHeader className="font-display text-2xl text-marquee">{t('successTitle')}</CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-sm text-ticket">{t('successMessage')}</p>
-            <Button className="bg-marquee text-ink hover:bg-marquee/90" disabled={syncing} onClick={syncNow}>
+        {step === 'done' && (
+          <div className="border-2 border-brass/60 bg-gradient-to-b from-velvet/80 to-ink/90 p-6 sm:p-8">
+            <p className="mb-4 font-display text-2xl text-marquee">{t('successTitle')}</p>
+            <p className="mb-5 text-sm text-ticket/80">{t('successMessage')}</p>
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={syncNow}
+              className="h-[52px] w-full bg-marquee font-display text-lg text-ink hover:bg-marquee/90 disabled:cursor-not-allowed disabled:bg-brass/20"
+            >
               {syncing ? t('syncingButton') : t('syncNowButton')}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+            <Link href="/">
+              <span className="mt-4 block w-full text-center font-mono text-xs uppercase tracking-widest text-ticket hover:text-marquee hover:underline">
+                {t('boxOffice')}
+              </span>
+            </Link>
+          </div>
+        )}
+      </div>
     </main>
   )
 }
