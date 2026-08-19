@@ -80,9 +80,30 @@ export function attachWebSocketServer(
 
   function finalizeDisconnect(roomCode: string, participantId: string): void {
     const room = store.get(roomCode)
-    if (!room || room.status !== 'active') return
+    if (!room) return
     const participant = room.participants.get(participantId)
     if (!participant || participant.connectionStatus !== 'disconnected') return
+
+    if (room.status === 'lobby') {
+      // joinRoom rejects new joins once the room leaves 'lobby', so this is
+      // the only place a lobby-phase disconnect ever gets cleaned up. Without
+      // this, ordinary pre-Start join/leave churn (someone joins, closes
+      // their tab, never comes back) permanently occupies a seat in
+      // room.participants forever, and MAX_PARTICIPANTS_PER_ROOM's raw
+      // Map.size check eventually rejects everyone even though nobody is
+      // actually still there. The host is exempt — their lobby-disconnect
+      // timeout is handled by finalizeHostDisconnect, which ends the room
+      // instead and needs the participant record to still exist when its own
+      // timer (scheduled alongside this one) fires.
+      if (room.hostParticipantId !== participantId) {
+        room.participants.delete(participantId)
+        room.lastActivityAt = Date.now()
+        broadcastToRoom(roomCode, [stateUpdate(room)])
+      }
+      return
+    }
+
+    if (room.status !== 'active') return
     const exhaustedNow = recomputeExhaustion(room)
     const toRoom: ServerMessage[] = [stateUpdate(room)]
     if (exhaustedNow && room.matches.length === 0) {

@@ -65,6 +65,36 @@ describe('createLibrarySync', () => {
     expect(row).toBeDefined()
   })
 
+  it('only syncs library sections the user selected in setup, not every movie section on the server', async () => {
+    const plex: Partial<PlexClient> = {
+      getLibraryItems: vi.fn((_serverUrl: string, _authToken: string, sectionId: string) =>
+        Promise.resolve(
+          sectionId === '1'
+            ? [fakePlexItem({ ratingKey: 'selected-1' })]
+            : [fakePlexItem({ ratingKey: 'excluded-1' })],
+        ),
+      ),
+      getLibrarySections: vi.fn().mockResolvedValue([
+        { id: '1', title: 'Movies', type: 'movie' },
+        { id: '2', title: 'Kids Movies', type: 'movie' }, // not in librarySectionIds (only '1' was selected in setup)
+      ]),
+    }
+    const tmdb: Partial<TmdbClient> = {
+      findByImdbId: vi.fn(),
+      getMovieDetails: vi.fn(),
+    }
+    const sync = createLibrarySync({
+      db,
+      plex: plex as PlexClient,
+      tmdb: tmdb as TmdbClient,
+      encryptionKey: KEY,
+    })
+    const result = await sync.run()
+    expect(result.itemCount).toBe(1)
+    expect(db.prepare('SELECT * FROM movies WHERE plex_rating_key = ?').get('selected-1')).toBeDefined()
+    expect(db.prepare('SELECT * FROM movies WHERE plex_rating_key = ?').get('excluded-1')).toBeUndefined()
+  })
+
   it('upserts every item in a chunk, not just the first — regression test for a real dropped-items bug', async () => {
     const plex: Partial<PlexClient> = {
       getLibraryItems: vi.fn().mockResolvedValue([

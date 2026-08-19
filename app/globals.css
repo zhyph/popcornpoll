@@ -10,6 +10,7 @@
   --ticket: 42 47% 90%;
   --brass: 33 30% 46%;
   --exit-red: 5 60% 51%;
+  --admit-teal: 180 46% 45%;
 
   --background: var(--ink);
   --foreground: var(--ticket);
@@ -110,6 +111,11 @@ body {
   43% { opacity: .82 }
   47% { opacity: 1 }
   62% { opacity: .86 }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

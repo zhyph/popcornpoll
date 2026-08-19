@@ -39,8 +39,13 @@ export function createLibrarySync(deps: SyncDeps) {
 
     const runId = ++runIdCounter
     const sections = await deps.plex.getLibrarySections(link.serverUrl, link.authToken)
+    // Setup lets the user pick which movie library sections to draw from
+    // (app/setup/page.tsx, saved as link.librarySectionIds) — sync must
+    // honor that, or "in library" silently counts every movie section on
+    // the server regardless of what the user actually selected.
+    const selectedSections = sections.filter((section) => link.librarySectionIds.includes(section.id))
     const allItems: PlexItem[] = []
-    for (const section of sections) {
+    for (const section of selectedSections) {
       const items = await deps.plex.getLibraryItems(link.serverUrl, link.authToken, section.id)
       allItems.push(...items)
     }

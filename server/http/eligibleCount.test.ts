@@ -41,6 +41,24 @@ describe('createEligibleCountHandler', () => {
     expect(await res.json()).toEqual({ count: 2 })
   })
 
+  it('caps the count at the pool cap — this endpoint reports "in the pool" (the capped session pool), not the raw eligible-row count', async () => {
+    const insert = db.prepare(
+      `INSERT INTO movies (plex_rating_key, title, poster_source, in_library, year, rating, genres, cached_at)
+       VALUES (@key, @title, 'plex', 1, 2000, 7, '["Drama"]', '2026-01-01T00:00:00.000Z')`,
+    )
+    for (let i = 0; i < 101; i++) {
+      insert.run({ key: `cap-${i}`, title: `Movie ${i}` })
+    }
+    const handler = createEligibleCountHandler(db)
+    const res = await handler(new Request('http://localhost/api/eligible-count?genre=Drama'))
+    // 101 rows match the filter, but the real session pool this count
+    // represents is capped at 100 (server/pool/buildPool.ts getPoolCap()) —
+    // an uncapped count here would make "in the pool" indistinguishable
+    // from "in library" for any library smaller than the cap, and wrong
+    // (overstated) for any library larger than it.
+    expect(await res.json()).toEqual({ count: 100 })
+  })
+
   it('rejects yearMin > yearMax with 400 invalid_filters', async () => {
     const handler = createEligibleCountHandler(db)
     const res = await handler(new Request('http://localhost/api/eligible-count?yearMin=2000&yearMax=1990'))

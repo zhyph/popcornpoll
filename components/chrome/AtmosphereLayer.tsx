@@ -7,17 +7,24 @@ import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
 // Three stacked ambient layers behind every screen: Aurora (existing colour wash),
 // LightRays (the mockup's beam-sway), and a hand-authored film-grain layer
 // (the mockup's own grainShift keyframe/repeating-radial-gradient recipe —
-// Dither was dropped, see Task 2). All freeze to a static frame under
-// prefers-reduced-motion instead of animating — this is the one app-wide
-// motion gate, not a per-screen or per-user toggle.
+// Dither was dropped, see Task 2). All stop animating under
+// prefers-reduced-motion instead — this is the one app-wide motion gate, not
+// a per-screen or per-user toggle. Aurora and LightRays are unmounted rather
+// than merely told to stop (passing speed:0 to Aurora doesn't stop its
+// requestAnimationFrame loop — it keeps rendering a static frame every tick
+// at full GPU cost, just with uTime frozen), since a mounted-but-frozen
+// WebGL canvas is not actually reduced motion's point (less CPU/GPU work),
+// only reduced visual motion.
 export function AtmosphereLayer() {
   const reducedMotion = usePrefersReducedMotion()
 
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      <div className="absolute inset-0 opacity-30">
-        <Aurora colorStops={['#2C1116', '#F5A623', '#17110E']} amplitude={0.6} speed={reducedMotion ? 0 : 0.3} />
-      </div>
+      {!reducedMotion && (
+        <div className="absolute inset-0 opacity-30">
+          <Aurora colorStops={['#2C1116', '#F5A623', '#17110E']} amplitude={0.6} speed={0.3} />
+        </div>
+      )}
       {!reducedMotion && (
         <div className="absolute inset-0 opacity-40">
           <LightRays raysOrigin="top-center" raysColor="#F5A623" raysSpeed={0.6} lightSpread={1.4} rayLength={1.6} followMouse={false} />

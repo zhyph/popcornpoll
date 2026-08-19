@@ -152,7 +152,7 @@ describe('attachWebSocketServer', () => {
     ws.close()
   })
 
-  it('flips a participant to disconnected when the socket closes, without deleting them', async () => {
+  it('flips a participant to disconnected when the socket closes, without deleting them immediately (only after the grace period — see the eviction test below)', async () => {
     const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
     const { code } = store.create({ kind: 'all' }, 'plex', {})
     const ws = await connect()
@@ -163,6 +163,55 @@ describe('attachWebSocketServer', () => {
     const room = store.get(code)!
     const participant = room.participants.get(joined.participantId as string)!
     expect(participant.connectionStatus).toBe('disconnected')
+  })
+
+  it('evicts a guest who never returns from a lobby disconnect after the grace period, freeing their seat', async () => {
+    const store = (globalThis as { __testStore?: ReturnType<typeof createRoomStore> }).__testStore!
+    const { code } = store.create({ kind: 'all' }, 'plex', {})
+
+    // A second, staying-connected participant is needed to synchronize on —
+    // otherwise there's no way to know the real 'close' event (and the
+    // markDisconnected/finalizeDisconnect it triggers) has actually run
+    // before asserting on room state, since it completes on real network I/O
+    // that fake timers don't control. Same pattern as the existing
+    // host-disconnect tests above.
+    const witnessWs = await connect()
+    witnessWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Witness' }))
+    await nextMessage(witnessWs) // joined
+
+    const ghostWs = await connect()
+    ghostWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Ghost' }))
+    const ghostJoined = await nextMessage(ghostWs) // joined
+    await nextMessage(witnessWs) // state_update for Ghost's join
+    expect(store.get(code)!.participants.size).toBe(2)
+
+    vi.useFakeTimers()
+    try {
+      const immediateUpdate = nextMessage(witnessWs)
+      ghostWs.close()
+      await vi.advanceTimersByTimeAsync(0)
+      await immediateUpdate
+      expect(store.get(code)!.participants.get(ghostJoined.participantId as string)?.connectionStatus).toBe(
+        'disconnected',
+      )
+
+      const evictedUpdate = nextMessage(witnessWs)
+      await vi.advanceTimersByTimeAsync(RECONNECT_GRACE_MS)
+      await evictedUpdate
+      expect(store.get(code)!.participants.size).toBe(1)
+      expect(store.get(code)!.participants.has(ghostJoined.participantId as string)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    witnessWs.close()
+
+    // The freed seat is usable by a new join, not just structurally empty.
+    const newGuestWs = await connect()
+    newGuestWs.send(JSON.stringify({ type: 'join', roomCode: code, displayName: 'Newcomer' }))
+    const rejoin = await nextMessage(newGuestWs)
+    expect(rejoin.type).toBe('joined')
+    newGuestWs.close()
   })
 
   it('closes the connection after MAX_FAILED_JOINS consecutive failed joins', async () => {
