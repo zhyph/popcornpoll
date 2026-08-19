@@ -1,6 +1,7 @@
 // app/setup/page.tsx
 'use client'
 
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Suspense, useEffect, useRef, useState } from 'react'
@@ -321,7 +322,7 @@ function SetupFlow() {
               type="button"
               disabled={selectedSectionIds.length === 0 || busy}
               onClick={submitLink}
-              className="h-[52px] w-full bg-marquee font-display text-lg text-ink hover:bg-marquee/90 disabled:cursor-not-allowed disabled:bg-brass/20 disabled:text-ticket/40"
+              className="min-h-[52px] w-full bg-marquee font-display text-lg text-ink hover:bg-marquee/90 disabled:cursor-not-allowed disabled:bg-brass/20 disabled:text-ticket/40 py-3"
             >
               {t('finishButton')}
             </button>
@@ -340,6 +341,11 @@ function SetupFlow() {
             >
               {syncing ? t('syncingButton') : t('syncNowButton')}
             </button>
+            <Link href="/">
+              <span className="mt-4 block w-full text-center font-mono text-xs uppercase tracking-widest text-ticket hover:text-marquee hover:underline">
+                {t('boxOffice')}
+              </span>
+            </Link>
           </div>
         )}
       </div>
