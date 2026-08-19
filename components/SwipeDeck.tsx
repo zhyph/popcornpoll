@@ -27,6 +27,12 @@ export function SwipeDeck({
   const t = useTranslations('swipeDeck')
   const controls = useAnimation()
   const [dragDirection, setDragDirection] = useState<'yes' | 'no' | null>(null)
+  // Tracks which card's poster has actually finished loading, so a card
+  // change shows a skeleton instead of the *previous* card's poster —
+  // <img> keeps painting its last decoded frame while a new src is still
+  // in flight, which otherwise looks like the swipe didn't do anything for
+  // the 1-2s it takes the next poster to load.
+  const [loadedMovieId, setLoadedMovieId] = useState<number | null>(null)
 
   async function animateDecision(vote: 'yes' | 'no') {
     if (!card || disabled) return
@@ -90,31 +96,38 @@ export function SwipeDeck({
       >
         {/* Ink-stamp overlays that fade in once the drag crosses into a
             direction — real interaction feedback the mockup calls out
-            explicitly, not one of its decorative-stub elements. */}
+            explicitly, not one of its decorative-stub elements. z-20 because
+            the poster wrapper below is also `relative` (for its own library
+            badge) and, being later in DOM order, would otherwise win the
+            default stacking-order tie against these — painting the poster
+            over the stamps instead of under them. */}
         <span
           aria-hidden
-          className="pointer-events-none absolute left-4 top-4 -rotate-12 border-2 border-admit-teal px-2 py-0.5 font-display text-lg tracking-wider text-admit-teal transition-opacity"
+          className="pointer-events-none absolute left-4 top-4 z-20 -rotate-12 border-2 border-admit-teal px-2 py-0.5 font-display text-lg tracking-wider text-admit-teal transition-opacity"
           style={{ opacity: dragDirection === 'yes' ? 1 : 0 }}
         >
           {t('admitLabel')}
         </span>
         <span
           aria-hidden
-          className="pointer-events-none absolute right-4 top-4 rotate-12 border-2 border-exit-red px-2 py-0.5 font-display text-lg tracking-wider text-exit-red transition-opacity"
+          className="pointer-events-none absolute right-4 top-4 z-20 rotate-12 border-2 border-exit-red px-2 py-0.5 font-display text-lg tracking-wider text-exit-red transition-opacity"
           style={{ opacity: dragDirection === 'no' ? 1 : 0 }}
         >
           {t('voidStampLabel')}
         </span>
         <div className="p-4">
           {(card.posterSource === 'plex' || card.posterPath) && (
-            <div className="relative mb-3">
+            <div className="relative mb-3 aspect-[2/3] w-full overflow-hidden rounded bg-brass/10">
+              {loadedMovieId !== card.movieId && <div className="absolute inset-0 animate-pulse bg-brass/15" />}
               <img
+                key={card.movieId}
                 className="aspect-[2/3] w-full rounded object-cover"
                 src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `https://image.tmdb.org/t/p/w342${card.posterPath}`}
                 alt={card.title}
+                onLoad={() => setLoadedMovieId(card.movieId)}
               />
               {card.inLibrary && (
-                <span className="absolute left-3 top-3 bg-marquee px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-widest text-ink">
+                <span className="absolute left-3 top-3 z-10 bg-marquee px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-widest text-ink">
                   {t('inLibrary')}
                 </span>
               )}

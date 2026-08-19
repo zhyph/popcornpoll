@@ -76,14 +76,19 @@
   "room": {
     "connecting": "Conectando…",
     "admitted": "Admitidos",
-    "admittedOfSeats": "{count} de {cap} lugares",
+    "ofSeatsLabel": "de {cap} lugares",
     "infoStripSourcePlex": "Somente a biblioteca do Plex",
     "infoStripSourceTmdb": "Plex + TMDB",
     "lobbyFootnoteHost": "Só o anfitrião · quem estiver desconectado fica de fora desta sessão",
     "lobbyFootnoteGuest": "O anfitrião inicia a sessão · você pode sair a qualquer momento antes disso",
+    "poolBuiltLabel": "Catálogo pronto",
+    "poolBuiltUnknown": "—",
+    "runtimeTonightLabel": "Duração de hoje",
+    "runtimeTonightValue": "~4 min",
+    "concessionsLabel": "Pipoca",
+    "concessionsValue": "Pronta",
     "reelCardOf": "Filme {cardNo} de {cardTotal}",
     "deckFooterHint": "Deslize o card, use os botões, ou aperte ← / → · a casa anuncia o match assim que a regra é cumprida",
-    "removeButton": "Remover",
     "startButton": "APAGAR AS LUZES",
     "buildingPool": "Montando seu catálogo…",
     "waitingForHost": "Esperando o anfitrião apagar as luzes",
@@ -136,7 +141,8 @@
     "away": "ausente",
     "done": "pronto",
     "host": "anfitrião",
-    "ready": "pronto"
+    "ready": "pronto",
+    "remove": "Remover"
   },
   "errors": {
     "room_not_found": "Sala não encontrada.",

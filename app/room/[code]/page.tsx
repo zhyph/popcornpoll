@@ -17,9 +17,13 @@ import type { PoolEntry } from '../../../server/pool/buildPool'
 type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } | { type: 'room_ended'; reason: string }
 
 // How long a match reveal stays on screen before it's dismissed and the
-// swipe deck resumes — long enough to read the title, short enough not to
-// block swiping on whatever remains unmatched.
-const MATCH_REVEAL_MS = 4000
+// swipe deck resumes. Was 4000 (and briefly, per the mockup's own demo
+// value, 6000) — real usage showed both were too fast to actually read the
+// title/genres/rating before it vanished. The overlay is also no longer a
+// swipe-through inline banner (it fully blocks the deck) and now has a
+// manual "Keep swiping" dismiss and a live countdown, so there's no longer
+// a swiping-momentum cost to letting it sit for a while.
+const MATCH_REVEAL_MS = 8000
 
 // Mirrors server/room/actions.ts's MAX_PARTICIPANTS_PER_ROOM — duplicated
 // rather than imported since that module pulls in server-only code
@@ -347,65 +351,96 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     const sourceLabel =
       snapshot.candidateSource === 'plex' ? t('infoStripSourcePlex') : t('infoStripSourceTmdb')
     return (
-      <main className="mx-auto flex flex-1 max-w-md flex-col items-center gap-6 px-4 py-10">
-        <RoomShare code={code} />
-        <div className="w-full border border-brass/50 bg-velvet">
-          <p className="border-b border-brass/30 px-4 py-3 font-mono text-xs uppercase tracking-widest text-brass">
-            {t('admitted')}
-          </p>
-          <p className="border-b border-brass/30 px-4 py-3 font-display text-3xl text-marquee">
-            {t('admittedOfSeats', { count: participants.length, cap: SEATS_CAP })}
-          </p>
-          <div className="flex gap-2.5 overflow-x-auto border-y border-dashed border-brass/30 p-4">
-            {participants.map((p) => (
-              <div key={p.id} className="flex flex-none items-center gap-1.5">
-                <TicketAvatar participant={p} lobbyStatus />
-                {isHost && (
-                  <button
-                    type="button"
-                    onClick={() => client?.send({ type: 'kick', participantId: p.id })}
-                    className="px-2 py-1 font-mono text-xs uppercase tracking-wide text-exit-red hover:bg-exit-red/10"
-                  >
-                    {t('removeButton')}
-                  </button>
-                )}
+      <main className="mx-auto max-w-5xl flex-1 px-4 py-10">
+        {/* The mockup's Lobby is a genuine 2-column grid (door code + info
+            strip on the left, admitted-count/strip/stats/CTA on the right),
+            not a single stacked column — a prior pass here missed that
+            structural shape entirely and just stacked everything narrow. */}
+        <div className="grid grid-cols-1 items-start gap-8 sm:grid-cols-2">
+          <div className="flex flex-col gap-4">
+            <RoomShare code={code} />
+            <div className="flex items-center gap-2.5 border border-dashed border-brass/45 px-4 py-3.5 font-mono text-[11px] text-ticket/70">
+              <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-marquee" />
+              {ruleLabel} · {sourceLabel}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-5">
+            <div>
+              <p className="font-mono text-[10.5px] uppercase tracking-[.3em] text-brass">{t('admitted')}</p>
+              <p className="mt-1 font-display text-[clamp(34px,5vw,56px)] leading-none text-ticket">
+                {participants.length}{' '}
+                <span className="text-[.4em] tracking-[.1em] text-brass">{t('ofSeatsLabel', { cap: SEATS_CAP })}</span>
+              </p>
+            </div>
+
+            <div className="relative border-y border-brass/35 bg-[#17110E] py-3">
+              <div
+                aria-hidden
+                className="absolute inset-x-0 top-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.2)_0_10px,transparent_10px_26px)]"
+              />
+              <div
+                aria-hidden
+                className="absolute inset-x-0 bottom-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.2)_0_10px,transparent_10px_26px)]"
+              />
+              <div className="flex gap-3 overflow-x-auto px-3.5 py-1.5 sm:px-5">
+                {participants.map((p) => (
+                  <TicketAvatar
+                    key={p.id}
+                    participant={p}
+                    lobbyStatus
+                    onRemove={isHost && !p.isHost ? () => client?.send({ type: 'kick', participantId: p.id }) : undefined}
+                  />
+                ))}
               </div>
-            ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="border border-brass/35 bg-velvet/45 p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('poolBuiltLabel')}</p>
+                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('poolBuiltUnknown')}</p>
+              </div>
+              <div className="border border-brass/35 bg-velvet/45 p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('runtimeTonightLabel')}</p>
+                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('runtimeTonightValue')}</p>
+              </div>
+              <div className="border border-brass/35 bg-velvet/45 p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('concessionsLabel')}</p>
+                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('concessionsValue')}</p>
+              </div>
+            </div>
+
+            {isHost && snapshot.status === 'lobby' && (
+              <button
+                type="button"
+                disabled={startPending}
+                onClick={() => {
+                  setStartPending(true)
+                  attemptingStartRef.current = true
+                  client?.send({ type: 'start' })
+                }}
+                className="relative h-[62px] w-full overflow-hidden bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90 disabled:opacity-60"
+              >
+                {t('startButton')}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_35%,rgba(255,255,255,.5)_50%,transparent_65%)] bg-[length:200%_100%] [animation:shimmer_2.6s_linear_infinite]"
+                />
+              </button>
+            )}
+            {snapshot.status === 'lobby' && !isHost && (
+              <p className="font-mono text-sm text-brass">{t('waitingForHost')}</p>
+            )}
+            {snapshot.status === 'starting' && (
+              <p className="font-mono text-sm text-brass">{t('buildingPool')}</p>
+            )}
+            {snapshot.status === 'lobby' && (
+              <p className="text-center font-mono text-[10px] uppercase tracking-widest text-brass/60">
+                {isHost ? t('lobbyFootnoteHost') : t('lobbyFootnoteGuest')}
+              </p>
+            )}
           </div>
         </div>
-        <div className="flex w-full items-center gap-2.5 border border-dashed border-brass/45 px-4 py-3 font-mono text-[11px] uppercase tracking-widest text-ticket/70">
-          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-marquee" />
-          {ruleLabel} · {sourceLabel}
-        </div>
-        {isHost && snapshot.status === 'lobby' && (
-          <button
-            type="button"
-            disabled={startPending}
-            onClick={() => {
-              setStartPending(true)
-              attemptingStartRef.current = true
-              client?.send({ type: 'start' })
-            }}
-            className="relative h-[62px] w-full overflow-hidden bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90 disabled:opacity-60"
-          >
-            {t('startButton')}
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_35%,rgba(255,255,255,.5)_50%,transparent_65%)] bg-[length:200%_100%] [animation:shimmer_2.6s_linear_infinite]"
-            />
-          </button>
-        )}
-        {snapshot.status === 'lobby' && !isHost && (
-          <p className="font-mono text-sm text-brass">{t('waitingForHost')}</p>
-        )}
-        {snapshot.status === 'starting' && (
-          <p className="font-mono text-sm text-brass">{t('buildingPool')}</p>
-        )}
-        {snapshot.status === 'lobby' && (
-          <p className="text-center font-mono text-[10px] uppercase tracking-widest text-brass/60">
-            {isHost ? t('lobbyFootnoteHost') : t('lobbyFootnoteGuest')}
-          </p>
-        )}
       </main>
     )
   }

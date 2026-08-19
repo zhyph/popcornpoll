@@ -54,7 +54,9 @@ describe('insertMatch + recentMatches + nightsSettled', () => {
     const rows = recentMatches(db, 12)
     expect(rows).toHaveLength(2)
     expect(rows[0]!.title).toBe('Vertigo') // inserted second, so newest
+    expect(rows[0]!.movieId).toBe(2)
     expect(rows[1]!.title).toBe('Rear Window')
+    expect(rows[1]!.movieId).toBe(1)
   })
 
   it('caps recentMatches at the given limit', () => {
