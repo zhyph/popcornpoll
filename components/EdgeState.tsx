@@ -6,13 +6,21 @@
 // stays visually consistent; copy and actions are the caller's job (i18n).
 'use client'
 
+import { CircleAlert, PackageOpen, PowerOff, X, type LucideIcon } from 'lucide-react'
+
 export type EdgeKind = 'kicked' | 'hostgone' | 'poolfail' | 'emptylib'
 
-const ICON: Record<EdgeKind, string> = {
-  kicked: '✕',
-  hostgone: '⏻',
-  poolfail: '!',
-  emptylib: '□',
+// SVG icons, not font glyphs — the original glyph set (✕/⏻/!/□) relied on
+// font fallback coverage for less-common Unicode symbols, which can render
+// as a "tofu" box on systems missing that glyph, indistinguishable from the
+// intended emptylib square. lucide-react is already a project dependency
+// (see components/ui/select.tsx, dialog.tsx), so this is a zero-new-install
+// swap.
+const ICON: Record<EdgeKind, LucideIcon> = {
+  kicked: X,
+  hostgone: PowerOff,
+  poolfail: CircleAlert,
+  emptylib: PackageOpen,
 }
 
 const ACCENT: Record<EdgeKind, { text: string; border: string; bg: string }> = {
@@ -52,16 +60,16 @@ export function EdgeState({
   testId,
 }: EdgeStateProps) {
   const accent = edgeAccentClasses(kind)
+  const Icon = ICON[kind]
   return (
     <main data-testid={testId} className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center px-4 py-10">
       <div
         className={`flex w-full flex-col items-center gap-4 border-2 ${accent.border} bg-gradient-to-b from-velvet/70 to-ink/95 px-6 py-10 text-center sm:px-10`}
       >
         <span
-          aria-hidden="true"
-          className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border-2 ${accent.border} font-display text-2xl ${accent.text}`}
+          className={`flex h-[52px] w-[52px] items-center justify-center rounded-full border-2 ${accent.border} ${accent.text}`}
         >
-          {ICON[kind]}
+          <Icon aria-hidden="true" size={24} strokeWidth={1.75} />
         </span>
         <p className={`font-mono text-[10.5px] uppercase tracking-[.34em] ${accent.text}`}>{kicker}</p>
         <h2 className="font-display text-3xl leading-tight text-ticket sm:text-4xl">{title}</h2>
