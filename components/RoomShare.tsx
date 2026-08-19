@@ -11,13 +11,8 @@ export function RoomShare({ code }: { code: string }) {
   const t = useTranslations('roomShare')
   const tRoom = useTranslations('room')
   const [copied, setCopied] = useState(false)
-  const [canShare, setCanShare] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const joinUrl = typeof window !== 'undefined' ? `${window.location.origin}/join/${code}` : ''
-
-  useEffect(() => {
-    setCanShare(typeof navigator !== 'undefined' && 'share' in navigator)
-  }, [])
 
   useEffect(() => {
     if (!joinUrl || !canvasRef.current) return
@@ -57,15 +52,26 @@ export function RoomShare({ code }: { code: string }) {
         >
           {copied ? t('copied') : t('copyLink')}
         </button>
-        {canShare && (
-          <button
-            type="button"
-            onClick={() => navigator.share({ title: t('shareTitle'), url: joinUrl })}
-            className="bg-marquee px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink hover:bg-marquee/90"
-          >
-            {t('share')}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            // The mockup always shows Share, but the Web Share API is
+            // unavailable on most desktop browsers (Chrome/Firefox desktop)
+            // — rather than hide the button there (which is what a render-
+            // time `'share' in navigator` check produced, and made the
+            // lobby's left column look like it was missing a whole button
+            // on desktop), fall back to the same copy-link behavior at
+            // click time so the button is always present and always works.
+            if (typeof navigator !== 'undefined' && navigator.share) {
+              navigator.share({ title: t('shareTitle'), url: joinUrl }).catch(() => {})
+            } else {
+              void copyLink()
+            }
+          }}
+          className="bg-marquee px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink hover:bg-marquee/90"
+        >
+          {t('share')}
+        </button>
       </div>
     </div>
   )

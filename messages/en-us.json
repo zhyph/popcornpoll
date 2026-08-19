@@ -76,14 +76,19 @@
   "room": {
     "connecting": "Connecting…",
     "admitted": "Admitted",
-    "admittedOfSeats": "{count} of {cap} seats",
+    "ofSeatsLabel": "of {cap} seats",
     "infoStripSourcePlex": "Plex library only",
     "infoStripSourceTmdb": "Plex + TMDB",
     "lobbyFootnoteHost": "Host only · anyone disconnected now sits this one out",
     "lobbyFootnoteGuest": "The host starts the reel · you can leave any time before it rolls",
+    "poolBuiltLabel": "Pool built",
+    "poolBuiltUnknown": "—",
+    "runtimeTonightLabel": "Runtime tonight",
+    "runtimeTonightValue": "~4 min",
+    "concessionsLabel": "Concessions",
+    "concessionsValue": "Popped",
     "reelCardOf": "Card {cardNo} of {cardTotal}",
     "deckFooterHint": "Swipe the card, use the rails, or press ← / → · the house calls a match the moment the rule is met",
-    "removeButton": "Remove",
     "startButton": "DIM THE LIGHTS",
     "buildingPool": "Building your pool…",
     "waitingForHost": "Waiting for the host to dim the lights",
@@ -136,7 +141,8 @@
     "away": "away",
     "done": "done",
     "host": "host",
-    "ready": "ready"
+    "ready": "ready",
+    "remove": "Remove"
   },
   "errors": {
     "room_not_found": "Room not found.",

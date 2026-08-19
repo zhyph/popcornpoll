@@ -44,7 +44,9 @@ describe('createStatsHandler', () => {
     const body = await res.json()
     expect(body.libraryCount).toBe(1)
     expect(body.nightsSettled).toBe(1)
-    expect(body.recentMatches).toEqual([{ title: 'Rear Window', posterPath: null, posterSource: 'plex', year: 1954 }])
+    expect(body.recentMatches).toEqual([
+      { movieId: 1, title: 'Rear Window', posterPath: null, posterSource: 'plex', year: 1954 },
+    ])
     expect(body.plexLinked).toBe(true)
     expect(body.lastSyncAt).toBe(1_700_000_000_000)
   })

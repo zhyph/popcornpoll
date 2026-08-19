@@ -27,11 +27,22 @@ export default function CreateRoomPage() {
   const [stats, setStats] = useState<{
     libraryCount: number
     nightsSettled: number
-    recentMatches: { title: string; posterPath: string | null; posterSource: 'plex' | 'tmdb'; year: number | null }[]
+    recentMatches: {
+      movieId: number
+      title: string
+      posterPath: string | null
+      posterSource: 'plex' | 'tmdb'
+      year: number | null
+    }[]
     plexLinked: boolean
     lastSyncAt: number | null
   } | null>(null)
   const [eligibleCount, setEligibleCount] = useState<number | null>(null)
+  // Real posters that fail to load (removed from Plex since the match,
+  // network hiccup) fall back to the striped placeholder rather than a
+  // permanently broken <img> — tracked by movieId since the "last week"
+  // strip renders the same list twice back-to-back for its seamless loop.
+  const [failedPosterIds, setFailedPosterIds] = useState<Set<number>>(new Set())
   // The mockup's genre field is a closed select, not free text — its
   // options come from whatever's actually on the linked library's shelf.
   const [genreOptions, setGenreOptions] = useState<string[]>([])
@@ -352,17 +363,43 @@ export default function CreateRoomPage() {
             <div className="relative overflow-hidden border border-brass/40 bg-[#17110E] py-4">
               <p className="mb-3 px-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass sm:px-6">{t('lastWeekLabel')}</p>
               <div
-                className="flex w-max gap-3.5"
+                className="flex w-max"
                 style={{ animation: 'marqueeSlide 32s linear infinite' }}
               >
-                {[...stats.recentMatches, ...stats.recentMatches].map((m, i) => (
-                  <div key={i} className="flex w-[104px] flex-none flex-col gap-1.5">
-                    <div className="flex h-[150px] w-[104px] items-end border border-brass/35 bg-[repeating-linear-gradient(135deg,#241A15_0_7px,#2E211A_7px_14px)] p-1.5">
-                      <span className="font-mono text-[8.5px] leading-tight tracking-wider text-ticket/50">{m.title}</span>
+                {/* Trailing pr-3.5 on every item (not a container `gap`) is
+                    deliberate: a CSS `gap` only puts space *between* items,
+                    so the doubled list below has one gap fewer than a true
+                    "one period" width — translateX(-50%) then lands half a
+                    gap short of the second copy's start, which reads as the
+                    strip stuttering/resetting at each loop. Padding on every
+                    item (including the last of each copy) makes both halves
+                    exactly periodic, so -50% is a seamless cut. */}
+                {[...stats.recentMatches, ...stats.recentMatches].map((m, i) => {
+                  const hasRealImage =
+                    (m.posterSource === 'plex' || (m.posterSource === 'tmdb' && m.posterPath !== null)) &&
+                    !failedPosterIds.has(m.movieId)
+                  return (
+                    <div key={i} className="flex w-[104px] flex-none flex-col gap-1.5 pr-3.5">
+                      {hasRealImage ? (
+                        <img
+                          src={
+                            m.posterSource === 'plex'
+                              ? `/api/plex-image?movieId=${m.movieId}`
+                              : `https://image.tmdb.org/t/p/w185${m.posterPath}`
+                          }
+                          alt={m.title}
+                          className="h-[150px] w-[104px] border border-brass/35 object-cover"
+                          onError={() => setFailedPosterIds((prev) => new Set(prev).add(m.movieId))}
+                        />
+                      ) : (
+                        <div className="flex h-[150px] w-[104px] items-end border border-brass/35 bg-[repeating-linear-gradient(135deg,#241A15_0_7px,#2E211A_7px_14px)] p-1.5">
+                          <span className="font-mono text-[8.5px] leading-tight tracking-wider text-ticket/50">{m.title}</span>
+                        </div>
+                      )}
+                      <span className="font-mono text-[9px] tracking-wider text-brass">{m.year ?? ''}</span>
                     </div>
-                    <span className="font-mono text-[9px] tracking-wider text-brass">{m.year ?? ''}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               <div
                 className="absolute inset-x-0 top-0 h-3 bg-[repeating-linear-gradient(90deg,rgba(243,233,210,.22)_0_10px,transparent_10px_26px)]"
