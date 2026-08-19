@@ -357,9 +357,13 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               attemptingStartRef.current = true
               client?.send({ type: 'start' })
             }}
-            className="h-[62px] w-full bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90 disabled:opacity-60"
+            className="relative h-[62px] w-full overflow-hidden bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90 disabled:opacity-60"
           >
             {t('startButton')}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_35%,rgba(255,255,255,.5)_50%,transparent_65%)] bg-[length:200%_100%] [animation:shimmer_2.6s_linear_infinite]"
+            />
           </button>
         )}
         {snapshot.status === 'lobby' && !isHost && (

@@ -110,6 +110,14 @@ export default function CreateRoomPage() {
           className="relative bg-gradient-to-br from-ticket to-ticket/80 p-6 text-ink shadow-[0_30px_60px_-25px_rgba(0,0,0,.9)] sm:p-8"
           style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%)' }}
         >
+          {Array.from({ length: 9 }, (_, i) => (
+            <span
+              key={i}
+              aria-hidden
+              className="absolute left-[-7px] h-3.5 w-3.5 rounded-full bg-ink"
+              style={{ top: `${10 + i * 10}%` }}
+            />
+          ))}
           <div className="mb-5 flex items-baseline justify-between gap-3 border-b-2 border-dashed border-ink/35 pb-3">
             <p className="font-display text-2xl tracking-wide sm:text-[28px]">{t('tonightsShowingLabel')}</p>
             <p className="font-mono text-[11px] uppercase tracking-widest text-ink/60">{t('ticketNoLabel')}</p>
@@ -231,9 +239,21 @@ export default function CreateRoomPage() {
             data-testid="create-room"
             color="#F3E9D2"
             speed="3.2s"
-            className="w-full [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket"
+            // StarBorder's own inner div ships `bg-gradient-to-b from-black
+            // to-gray-900` — an opaque `background-image` layer that paints
+            // over `background-color`, so `bg-exit-red` alone (which only
+            // sets background-color) was silently invisible underneath it.
+            // `bg-none` clears that gradient so the red is what actually
+            // renders — this is the create-room button ("PRINT THE
+            // TICKETS") always rendering the vendored component's default
+            // black instead of the mockup's brick red.
+            className="w-full [&>div:last-child]:relative [&>div:last-child]:w-full [&>div:last-child]:rounded-none [&>div:last-child]:border-0 [&>div:last-child]:bg-none [&>div:last-child]:bg-exit-red [&>div:last-child]:py-4 [&>div:last-child]:font-display [&>div:last-child]:text-lg [&>div:last-child]:tracking-wider [&>div:last-child]:text-ticket"
           >
             {t('createButton')}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_30%,rgba(243,233,210,.35)_50%,transparent_70%)] bg-[length:200%_100%] [animation:shimmer_3.2s_linear_infinite]"
+            />
           </StarBorder>
           <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-wider text-ink/50">{t('tearHereLabel')}</p>
 

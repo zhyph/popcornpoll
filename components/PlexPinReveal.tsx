@@ -23,16 +23,20 @@ export function PlexPinReveal({ code }: { code: string }) {
         </div>
       )}
       <div className="relative z-10">
-        <DecryptedText
-          text={code}
-          sequential
-          revealDirection="center"
-          animateOn="view"
-          speed={40}
-          parentClassName="tracking-[.2em]"
-          className="font-display text-4xl text-marquee"
-          encryptedClassName="font-display text-4xl text-brass/70"
-        />
+        {reducedMotion ? (
+          <span className="font-display tracking-[.2em] text-4xl text-marquee">{code}</span>
+        ) : (
+          <DecryptedText
+            text={code}
+            sequential
+            revealDirection="center"
+            animateOn="view"
+            speed={40}
+            parentClassName="tracking-[.2em]"
+            className="font-display text-4xl text-marquee"
+            encryptedClassName="font-display text-4xl text-brass/70"
+          />
+        )}
       </div>
     </div>
   )

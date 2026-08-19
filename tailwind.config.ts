@@ -46,6 +46,7 @@ const config: Config = {
   			ticket: 'hsl(var(--ticket))',
   			brass: 'hsl(var(--brass))',
   			'exit-red': 'hsl(var(--exit-red))',
+  			'admit-teal': 'hsl(var(--admit-teal))',
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',

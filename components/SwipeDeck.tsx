@@ -78,7 +78,7 @@ export function SwipeDeck({
         data-testid="swipe-card"
       >
         <div className="p-4">
-          {card.posterPath && (
+          {(card.posterSource === 'plex' || card.posterPath) && (
             <img
               className="mb-3 aspect-[2/3] w-full rounded object-cover"
               src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `https://image.tmdb.org/t/p/w342${card.posterPath}`}
@@ -97,7 +97,7 @@ export function SwipeDeck({
         type="button"
         onClick={() => animateDecision('yes')}
         aria-label={t('yesAriaLabel')}
-        className="flex h-32 w-16 flex-col items-center justify-center gap-1 bg-marquee text-ink hover:bg-marquee/90 sm:h-44 sm:w-20"
+        className="flex h-32 w-16 flex-col items-center justify-center gap-1 border border-admit-teal text-admit-teal hover:bg-admit-teal/10 sm:h-44 sm:w-20"
       >
         <span className="font-display text-base tracking-widest sm:text-lg">{t('admitLabel')}</span>
       </button>
