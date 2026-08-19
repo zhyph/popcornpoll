@@ -190,36 +190,38 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     return (
       <main className="mx-auto flex flex-1 max-w-md flex-col items-center gap-6 px-4 py-10">
         <RoomShare code={params.code} />
-        <Card className="w-full border border-brass/50 bg-velvet">
-          <CardHeader className="font-mono text-xs uppercase tracking-widest text-brass">
+        <div className="w-full border border-brass/50 bg-velvet">
+          <p className="border-b border-brass/30 px-4 py-3 font-mono text-xs uppercase tracking-widest text-brass">
             {t('admitted')}
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
+          </p>
+          <div className="flex flex-col gap-2 p-4">
             {participants.map((p) => (
               <div key={p.id} className="flex items-center justify-between">
                 <TicketAvatar participant={p} />
                 {isHost && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-exit-red hover:bg-exit-red/10"
+                  <button
+                    type="button"
                     onClick={() => client?.send({ type: 'kick', participantId: p.id })}
+                    className="px-2 py-1 font-mono text-xs uppercase tracking-wide text-exit-red hover:bg-exit-red/10"
                   >
                     {t('removeButton')}
-                  </Button>
+                  </button>
                 )}
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
         {isHost && snapshot.status === 'lobby' && (
-          <Button
-            size="lg"
-            className="bg-marquee text-ink hover:bg-marquee/90"
+          <button
+            type="button"
             onClick={() => client?.send({ type: 'start' })}
+            className="h-[62px] w-full bg-marquee font-display text-xl tracking-wide text-ink hover:bg-marquee/90"
           >
             {t('startButton')}
-          </Button>
+          </button>
+        )}
+        {snapshot.status === 'lobby' && !isHost && (
+          <p className="font-mono text-sm text-brass">{t('waitingForHost')}</p>
         )}
         {snapshot.status === 'starting' && (
           <p className="font-mono text-sm text-brass">{t('buildingPool')}</p>

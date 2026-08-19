@@ -8,9 +8,9 @@ export function TicketAvatar({ participant }: { participant: ParticipantView }) 
   const t = useTranslations('ticketAvatar')
   const initials = participant.displayName.slice(0, 2).toUpperCase()
   return (
-    <div className="flex items-center gap-2 rounded border border-brass/50 bg-velvet px-3 py-1.5">
-      <Avatar className="h-6 w-6">
-        <AvatarFallback className="bg-marquee text-xs text-ink">{initials}</AvatarFallback>
+    <div className="flex items-center gap-2.5 border border-brass/40 bg-velvet/60 px-3 py-2">
+      <Avatar className="h-7 w-7">
+        <AvatarFallback className="bg-marquee font-mono text-xs text-ink">{initials}</AvatarFallback>
       </Avatar>
       <span className="font-mono text-sm text-ticket">{participant.displayName}</span>
       {participant.connectionStatus === 'disconnected' && (
