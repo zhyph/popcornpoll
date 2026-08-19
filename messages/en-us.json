@@ -14,7 +14,10 @@
     "guestStepDeck": "Now showing",
     "guestStepWrapup": "Wrap-up",
     "footerTagline": "Self-hosted · your library, your rules",
-    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB"
+    "tmdbAttribution": "This product uses the TMDB API but is not endorsed or certified by TMDB",
+    "soloStepFilters": "Trim the bill",
+    "soloStepShortlist": "Tonight's bill",
+    "soloStepPick": "Your pick"
   },
   "createRoom": {
     "houseTonightLabel": "The house tonight",
@@ -48,7 +51,11 @@
     "yesVotesNeededLabel": "Yes votes needed",
     "trimTheBillLabel": "Trim the bill",
     "tearHereLabel": "Tear here · admit up to 12",
-    "tonightsShowingLabel": "TONIGHT'S SHOWING"
+    "tonightsShowingLabel": "TONIGHT'S SHOWING",
+    "flyingSoloKicker": "Single admission · no room needed",
+    "flyingSoloTitle": "FLYING SOLO?",
+    "flyingSoloBody": "Same filters, no votes to wait on. The house trims your shelf and hands you a shortlist — or picks one for you.",
+    "flyingSoloButton": "TRIM THE BILL, SOLO →"
   },
   "joinRoom": {
     "invitedTo": "You're invited to",
@@ -120,6 +127,7 @@
     "excluded_at_start": "You were excluded because you were disconnected when the session started.",
     "room_not_active": "This room isn't active right now.",
     "library_empty": "This library doesn't have any movies yet. Pick a different library or run a sync.",
+    "movie_not_found": "That movie could not be found.",
     "generic": "Something went wrong."
   },
   "kicked": {
@@ -194,5 +202,38 @@
     "emptyLibraryDetail": "Pick different libraries in the booth, or run a sync if you have added titles since.",
     "emptyLibraryPrimary": "Open the booth",
     "emptyLibraryStayLabel": "Stay and retry"
+  },
+  "solo": {
+    "kicker": "One seat · one picture · /solo",
+    "title": "TRIM THE BILL, SOLO",
+    "subhead": "No room, no house rule, nobody to out-vote you. Narrow the shelf and the house lays out a ranked bill — or picks one for you.",
+    "singleAdmissionLabel": "SINGLE ADMISSION",
+    "seatLabel": "Row A · Seat 01",
+    "eligibleLabel": "Eligible on your shelf",
+    "titlesLabel": "titles",
+    "tooFewWarning": "Only {count} clear these filters. The house needs {min} to shuffle a fair bill — loosen the rating or widen the years.",
+    "submitLabel": "ROLL THE REEL",
+    "submittingLabel": "ROLLING THE REEL…",
+    "noThresholdNote": "No threshold, no tally · this ticket admits one",
+    "backToBoxOfficeLink": "Rather host a room? Back to the box office",
+    "shortlistKicker": "Solo · ranked by house reputation",
+    "shortlistTitle": "TONIGHT'S BILL",
+    "shortlistCountLabel": "{count} titles cleared your filters · best first",
+    "adjustFiltersButton": "Adjust filters",
+    "surpriseMeButton": "SURPRISE ME",
+    "degradedNotice": "TMDB did not answer in time. This bill is your Plex shelf only — still perfectly watchable.",
+    "pickThisButton": "Pick this",
+    "onShelfBadge": "ON SHELF",
+    "footerNote": "Pick one outright, or let the house shuffle · nothing is saved until you confirm",
+    "housePicksLabel": "The house picks",
+    "shufflingLabel": "Shuffling {count} titles…",
+    "watchThisButton": "WATCH THIS",
+    "rerollButton": "Re-roll",
+    "seenNote": "Seen {seen} of {total} this session · a re-roll will not repeat them",
+    "backToBillButton": "Back to the bill",
+    "pickDimLabel": "The house lights dim · just for you",
+    "writtenToHistory": "Written to your history · {code} · one seat",
+    "pickAgainButton": "PICK AGAIN",
+    "enjoyFooter": "enjoy the picture · the projector is yours alone tonight"
   }
 }

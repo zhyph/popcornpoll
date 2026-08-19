@@ -14,7 +14,10 @@
     "guestStepDeck": "Em cartaz",
     "guestStepWrapup": "Encerramento",
     "footerTagline": "Auto-hospedado · sua biblioteca, suas regras",
-    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB"
+    "tmdbAttribution": "Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB",
+    "soloStepFilters": "Ajustar filtros",
+    "soloStepShortlist": "A lista de hoje",
+    "soloStepPick": "Sua escolha"
   },
   "createRoom": {
     "houseTonightLabel": "A casa hoje",
@@ -48,7 +51,11 @@
     "yesVotesNeededLabel": "Votos a favor necessários",
     "trimTheBillLabel": "Ajuste a sessão",
     "tearHereLabel": "Destaque aqui · admite até 12",
-    "tonightsShowingLabel": "SESSÃO DE HOJE"
+    "tonightsShowingLabel": "SESSÃO DE HOJE",
+    "flyingSoloKicker": "Entrada única · sem sala necessária",
+    "flyingSoloTitle": "SOZINHO HOJE?",
+    "flyingSoloBody": "Os mesmos filtros, sem votos para esperar. A casa reduz sua prateleira e te dá uma lista — ou escolhe por você.",
+    "flyingSoloButton": "AJUSTAR SOZINHO →"
   },
   "joinRoom": {
     "invitedTo": "Você foi convidado para",
@@ -120,6 +127,7 @@
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou.",
     "room_not_active": "Esta sala não está ativa no momento.",
     "library_empty": "Essa biblioteca ainda não tem filmes. Escolha outra biblioteca ou rode uma sincronização.",
+    "movie_not_found": "Esse filme não foi encontrado.",
     "generic": "Algo deu errado."
   },
   "kicked": {
@@ -194,5 +202,38 @@
     "emptyLibraryDetail": "Escolha outras bibliotecas na cabine, ou rode uma sincronização se você adicionou títulos desde então.",
     "emptyLibraryPrimary": "Abrir a cabine",
     "emptyLibraryStayLabel": "Ficar e tentar de novo"
+  },
+  "solo": {
+    "kicker": "Um assento · um filme · /solo",
+    "title": "AJUSTE A SESSÃO, SOZINHO",
+    "subhead": "Sem sala, sem regra da casa, ninguém pra te vencer no voto. Reduza a prateleira e a casa monta uma lista classificada — ou escolhe por você.",
+    "singleAdmissionLabel": "ENTRADA ÚNICA",
+    "seatLabel": "Fileira A · Assento 01",
+    "eligibleLabel": "Elegíveis na sua prateleira",
+    "titlesLabel": "títulos",
+    "tooFewWarning": "Só {count} passam por esses filtros. A casa precisa de {min} para montar uma lista justa — reduza a nota ou amplie os anos.",
+    "submitLabel": "GIRAR O ROLO",
+    "submittingLabel": "GIRANDO O ROLO…",
+    "noThresholdNote": "Sem regra, sem contagem · este ingresso vale para um",
+    "backToBoxOfficeLink": "Prefere reunir um grupo? Voltar para a bilheteria",
+    "shortlistKicker": "Sozinho · classificado pela reputação da casa",
+    "shortlistTitle": "A LISTA DE HOJE",
+    "shortlistCountLabel": "{count} títulos passaram pelos seus filtros · melhores primeiro",
+    "adjustFiltersButton": "Ajustar filtros",
+    "surpriseMeButton": "SURPREENDA-ME",
+    "degradedNotice": "O TMDB não respondeu a tempo. Esta lista é só da sua prateleira do Plex — ainda ótima para assistir.",
+    "pickThisButton": "Escolher este",
+    "onShelfBadge": "NA PRATELEIRA",
+    "footerNote": "Escolha um diretamente, ou deixe a casa sortear · nada é salvo até você confirmar",
+    "housePicksLabel": "A casa escolhe",
+    "shufflingLabel": "Sorteando {count} títulos…",
+    "watchThisButton": "ASSISTIR ESTE",
+    "rerollButton": "Sortear de novo",
+    "seenNote": "Visto {seen} de {total} nesta sessão · um novo sorteio não vai repeti-los",
+    "backToBillButton": "Voltar para a lista",
+    "pickDimLabel": "As luzes da casa diminuem · só para você",
+    "writtenToHistory": "Registrado no seu histórico · {code} · um assento",
+    "pickAgainButton": "ESCOLHER DE NOVO",
+    "enjoyFooter": "aproveite o filme · o projetor é só seu hoje"
   }
 }
