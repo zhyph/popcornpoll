@@ -85,7 +85,9 @@
     "inLibrary": "Na sua biblioteca",
     "noMoreCards": "Não há mais filmes",
     "yesAriaLabel": "Sim",
-    "noAriaLabel": "Não"
+    "noAriaLabel": "Não",
+    "passLabel": "PASSAR",
+    "admitLabel": "ADMITIR"
   },
   "marqueeReveal": {
     "matchLabel": "Deu match",

@@ -102,6 +102,12 @@ export default function RoomPage({ params }: { params: { code: string } }) {
     const unsubStarted = ws.on('room_started', (msg) => {
       checkSeq(ws, msg.seq)
       setPool(msg.pool)
+      // room_started fires for both 'start' and 'restart_reel' — the latter
+      // rebuilds the pool and clears server-side matches, so a movie that
+      // was previously matched (and dismissed) can legitimately match again.
+      // Without this reset, latestMatchId === dismissedMatchId would still
+      // hold for that id and the reveal would never show for the new match.
+      setDismissedMatchId(null)
     })
     const unsubNextCard = ws.on('next_card', (msg) => setPendingCardId(msg.movieId))
     const unsubMatch = ws.on('match', (msg) => {
@@ -272,7 +278,7 @@ export default function RoomPage({ params }: { params: { code: string } }) {
   if (snapshot.exhausted && snapshot.matches.length === 0) {
     return (
       <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10">
-        <div data-testid="fallback" className="w-full border-2 border-brass/60 bg-[#141313] p-6 sm:p-9">
+        <div data-testid="fallback" className="w-full border-2 border-brass/60 bg-ink p-6 sm:p-9">
           <div className="mb-5 flex items-baseline justify-between gap-3 border-b border-brass/40 pb-3.5">
             <p className="font-display text-2xl text-ticket sm:text-3xl">{t('noUnanimousPick')}</p>
             <p className="font-mono text-[10.5px] uppercase tracking-wider text-brass">{t('closestThreeLabel')}</p>

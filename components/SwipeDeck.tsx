@@ -64,7 +64,7 @@ export function SwipeDeck({
         aria-label={t('noAriaLabel')}
         className="flex h-32 w-16 flex-col items-center justify-center gap-1 border border-exit-red text-exit-red hover:bg-exit-red/10 sm:h-44 sm:w-20"
       >
-        <span className="font-display text-base tracking-widest sm:text-lg">PASS</span>
+        <span className="font-display text-base tracking-widest sm:text-lg">{t('passLabel')}</span>
       </button>
 
       <motion.div
@@ -99,7 +99,7 @@ export function SwipeDeck({
         aria-label={t('yesAriaLabel')}
         className="flex h-32 w-16 flex-col items-center justify-center gap-1 bg-marquee text-ink hover:bg-marquee/90 sm:h-44 sm:w-20"
       >
-        <span className="font-display text-base tracking-widest sm:text-lg">ADMIT</span>
+        <span className="font-display text-base tracking-widest sm:text-lg">{t('admitLabel')}</span>
       </button>
     </div>
   )

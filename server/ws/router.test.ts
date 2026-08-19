@@ -158,6 +158,95 @@ describe('handleMessage: start + room_started', () => {
   })
 })
 
+describe('handleMessage: restart_reel', () => {
+  it('a successful restart_reel emits room_started to the whole room, accompanied by a same-seq state_update', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const started = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, { type: 'start' })
+    state = started.newState
+
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, { type: 'restart_reel' })
+    const roomStarted = result.toRoom.find((m) => m.type === 'room_started')
+    const stateUpdate = result.toRoom.find((m) => m.type === 'state_update' && m.status === 'active')
+    expect(roomStarted).toBeDefined()
+    expect(stateUpdate).toBeDefined()
+    if (roomStarted?.type === 'room_started' && stateUpdate?.type === 'state_update') {
+      expect(roomStarted.seq).toBe(stateUpdate.seq)
+    }
+
+    const room = store.get(code)!
+    expect(room.status).toBe('active')
+    const hostId = state.participantId!
+    const otherId = Array.from(room.participants.keys()).find((id) => id !== hostId)!
+    const hostCard = result.toParticipant.find((t) => t.participantId === hostId)
+    const otherCard = result.toParticipant.find((t) => t.participantId === otherId)
+    expect(hostCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(hostId)!.pendingCardId }])
+    expect(otherCard?.messages).toEqual([{ type: 'next_card', movieId: room.participants.get(otherId)!.pendingCardId }])
+  })
+
+  it('emits a degraded_to_plex_only notice to the room when TMDB fails during restart_reel', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex+tmdb', {})
+    let state = freshState()
+    const joined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    state = joined.newState
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), { type: 'join', roomCode: code, displayName: 'Other' })
+    seedPlexRows(20)
+
+    const started = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, state, { type: 'start' })
+    state = started.newState
+
+    const failingTmdb: TmdbClient = {
+      discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
+      getMovieDetails: vi.fn(),
+      findByImdbId: vi.fn(),
+    }
+    const result = await handleMessage(store, db, failingTmdb, noOpLibrarySync, state, { type: 'restart_reel' })
+    const notice = result.toRoom.find((m) => m.type === 'notice')
+    expect(notice).toEqual({
+      type: 'notice',
+      level: 'warning',
+      code: 'degraded_to_plex_only',
+      message: expect.any(String),
+    })
+  })
+
+  it('a non-host restart_reel attempt returns not_host and does not change room status', async () => {
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    const hostJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Host',
+      hostClaimToken,
+    })
+    const otherJoined = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, freshState(), {
+      type: 'join',
+      roomCode: code,
+      displayName: 'Other',
+    })
+    seedPlexRows(20)
+    await handleMessage(store, db, noOpTmdb, noOpLibrarySync, hostJoined.newState, { type: 'start' })
+
+    const result = await handleMessage(store, db, noOpTmdb, noOpLibrarySync, otherJoined.newState, { type: 'restart_reel' })
+    expect(result.toSender).toEqual([{ type: 'error', code: 'not_host', message: expect.any(String) }])
+    expect(store.get(code)!.status).toBe('active')
+  })
+})
+
 describe('handleMessage: swipe -> next_card', () => {
   it('a consumed swipe sends next_card only to the swiping participant, not the whole room', async () => {
     const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})

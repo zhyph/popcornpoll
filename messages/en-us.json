@@ -85,7 +85,9 @@
     "inLibrary": "In your library",
     "noMoreCards": "No more cards",
     "yesAriaLabel": "Yes",
-    "noAriaLabel": "No"
+    "noAriaLabel": "No",
+    "passLabel": "PASS",
+    "admitLabel": "ADMIT"
   },
   "marqueeReveal": {
     "matchLabel": "It's a match",
