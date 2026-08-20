@@ -101,7 +101,37 @@ describe('createTmdbImageProxyHandler', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('image/jpeg')
     expect(res.headers.get('cache-control')).toContain('max-age=86400')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('content-security-policy')).toContain('sandbox')
     expect(fetchSpy).toHaveBeenCalledWith('https://image.tmdb.org/t/p/w342/vertigo.jpg')
+  })
+
+  // Same check as imageProxy.test.ts's SVG case — both proxies now share
+  // imageResponse(), and this pins the behaviour on this side too so the two
+  // can't drift apart again.
+  it('refuses to proxy a scriptable image type (SVG) as a same-origin document', async () => {
+    const row = upsertTmdbOnlyRow(db, {
+      tmdbId: 2,
+      imdbId: null,
+      title: 'Scriptable',
+      posterPath: '/evil.svg',
+      posterSource: 'tmdb',
+      overview: null,
+      year: null,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      lastUsedAt: null,
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(new ReadableStream(), { status: 200, headers: { 'content-type': 'image/svg+xml' } }),
+      ),
+    )
+    const handler = createTmdbImageProxyHandler(db)
+    const res = await handler(new Request(`http://localhost/api/tmdb-image?movieId=${row.id}`))
+    expect(res.status).toBe(502)
   })
 
   it('falls back to w185 for an unrecognized size param instead of passing it through', async () => {

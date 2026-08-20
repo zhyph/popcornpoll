@@ -1,24 +1,8 @@
 import type Database from 'better-sqlite3'
 import { findById } from '../db/movies'
+import { imageResponse } from './imageResponse'
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const ALLOWED_SIZES = new Set(['w185', 'w342'])
-
-function capStreamSize(stream: ReadableStream<Uint8Array>, maxBytes: number): ReadableStream<Uint8Array> {
-  let total = 0
-  return stream.pipeThrough(
-    new TransformStream({
-      transform(chunk: Uint8Array, controller) {
-        total += chunk.byteLength
-        if (total > maxBytes) {
-          controller.error(new Error('Image exceeds size cap'))
-          return
-        }
-        controller.enqueue(chunk)
-      },
-    }),
-  )
-}
 
 // Posters used to be fetched by the browser directly from image.tmdb.org.
 // From some client networks that path is slow or unreachable (DNS/firewall
@@ -47,16 +31,10 @@ export function createTmdbImageProxyHandler(db: Database.Database): (req: Reques
     } catch {
       return new Response(null, { status: 502 })
     }
-    if (upstream.status !== 200 || !upstream.body || !upstream.headers.get('content-type')?.startsWith('image/')) {
-      return new Response(null, { status: 502 })
-    }
-
-    return new Response(capStreamSize(upstream.body, MAX_IMAGE_BYTES), {
-      status: 200,
-      headers: {
-        'Content-Type': upstream.headers.get('content-type') as string,
-        'Cache-Control': 'public, max-age=86400, immutable',
-      },
+    return imageResponse({
+      body: upstream.body,
+      contentType: upstream.headers.get('content-type'),
+      status: upstream.status,
     })
   }
 }
