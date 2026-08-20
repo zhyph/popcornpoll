@@ -19,6 +19,14 @@ export interface TmdbClient {
   ): Promise<TmdbMovie[]>
   getMovieDetails(tmdbId: number): Promise<{ rating: number; voteCount: number } | null>
   findByImdbId(imdbId: string): Promise<number | null>
+  // Fetched server-side rather than letting the browser hit image.tmdb.org
+  // directly: participants' networks routinely can't reach the public TMDB
+  // CDN (DNS/firewall/IPv6-only resolution), which left posters spinning
+  // forever, while this server reaches it fine. See http/imageProxy.ts.
+  getPosterImage(
+    posterPath: string,
+    width: number,
+  ): Promise<{ body: ReadableStream | null; contentType: string | null; status: number }>
 }
 
 interface TmdbDiscoverResult {
@@ -93,6 +101,26 @@ export function createTmdbClient(apiKey: string): TmdbClient {
       }
       const body = (await res.json()) as { movie_results: { id: number }[] }
       return body.movie_results[0]?.id ?? null
+    },
+
+    async getPosterImage(posterPath, width) {
+      // The image CDN is a different host from the JSON API and takes no
+      // api_key. posterPath is interpolated straight into the URL, so it is
+      // shape-checked here rather than trusted: it reaches this method from a
+      // DB row, and the caller only asserts it is non-null. A stored value
+      // carrying `?` or `#` would silently change what the CDN is asked for.
+      // TMDB's own poster_path is always /<base62>.<ext>.
+      if (!/^\/[A-Za-z0-9._-]+$/.test(posterPath)) {
+        return { body: null, contentType: null, status: 400 }
+      }
+      const res = await fetch(`https://image.tmdb.org/t/p/w${width}${posterPath}`, {
+        signal: AbortSignal.timeout(10_000),
+      })
+      return {
+        body: res.body,
+        contentType: res.headers.get('content-type'),
+        status: res.status,
+      }
     },
   }
 }

@@ -20,6 +20,7 @@ const noOpTmdb: TmdbClient = {
   discoverMovies: vi.fn().mockResolvedValue([]),
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
+  getPosterImage: vi.fn(),
 }
 const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 
@@ -133,6 +134,7 @@ describe('handleMessage: start + room_started', () => {
       discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await handleMessage(store, db, failingTmdb, noOpLibrarySync, state, { type: 'start' })
     const notice = result.toRoom.find((m) => m.type === 'notice')
@@ -214,6 +216,7 @@ describe('handleMessage: restart_reel', () => {
       discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await handleMessage(store, db, failingTmdb, noOpLibrarySync, state, { type: 'restart_reel' })
     const notice = result.toRoom.find((m) => m.type === 'notice')

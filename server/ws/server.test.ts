@@ -35,6 +35,7 @@ const noOpTmdb: TmdbClient = {
   discoverMovies: vi.fn().mockResolvedValue([]),
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
+  getPosterImage: vi.fn(),
 }
 const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 

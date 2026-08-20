@@ -20,6 +20,28 @@ const FAKE_LIBRARY: PlexItem[] = [
   { ratingKey: '10', title: 'Reel to Reel', year: 2006, genres: ['Documentary'], guid: 'plex://movie/fake-10' },
 ]
 
+// A 1x1 transparent PNG. Fixture mode is network-free, but a poster
+// endpoint that can only ever 502 means dev and e2e runs render zero
+// posters — every poster-related bug is then invisible until someone
+// points the app at a real Plex server. Real bytes, no network.
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+function onePixelImage() {
+  return {
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(ONE_PIXEL_PNG))
+        controller.close()
+      },
+    }),
+    contentType: 'image/png',
+    status: 200,
+  }
+}
+
 export function createFakePlexClient(): PlexClient {
   return {
     async createPin() {
@@ -68,7 +90,7 @@ export function createFakePlexClient(): PlexClient {
       return FAKE_LIBRARY
     },
     async getThumb() {
-      return { body: null, contentType: null, status: 404 }
+      return onePixelImage()
     },
   }
 }

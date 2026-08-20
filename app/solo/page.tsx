@@ -393,7 +393,7 @@ export default function SoloPage() {
                 {(entry.posterSource === 'plex' || entry.posterPath) && (
                   <img
                     className="absolute inset-0 h-full w-full object-cover"
-                    src={entry.posterSource === 'plex' ? `/api/plex-image?movieId=${entry.movieId}` : `/api/tmdb-image?movieId=${entry.movieId}&size=w342`}
+                    src={`/api/poster?movieId=${entry.movieId}&w=342`}
                     alt={entry.title}
                     loading="lazy"
                   />
@@ -462,7 +462,7 @@ export default function SoloPage() {
           {(picked.posterSource === 'plex' || picked.posterPath) && (
             <img
               className="h-full w-full object-cover"
-              src={picked.posterSource === 'plex' ? `/api/plex-image?movieId=${picked.movieId}` : `/api/tmdb-image?movieId=${picked.movieId}&size=w342`}
+              src={`/api/poster?movieId=${picked.movieId}&w=342`}
               alt={picked.title}
             />
           )}

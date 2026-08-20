@@ -7,6 +7,7 @@ import WebSocket from 'ws'
 import { createApp } from './index'
 import { openDb } from './db'
 import { savePlexLink } from './plex/link'
+import { upsertPlexRow } from './db/movies'
 import type { AppConfig } from './config'
 
 let dir: string
@@ -81,6 +82,60 @@ describe('createApp', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     expect(res.headers.get('x-frame-options')).toBe('DENY')
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+  })
+
+  // The assertion above uses toContain, which still passes when the default
+  // and a handler's own value are BOTH emitted — Headers.get joins duplicates
+  // with ", ". They were: SECURITY_HEADERS used Title-Case keys while
+  // Headers.forEach yields lowercase, so the two spellings were distinct
+  // properties and Node sent both. Assert exact equality on a route that sets
+  // its own value, which is the only shape that catches it.
+  it('lets a handler replace a shared security header rather than emitting both', async () => {
+    process.env.FAKE_EXTERNAL_APIS = 'true'
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'popcornpoll-poster-'))
+    const fixtureApp = await createApp(
+      {
+        tmdbApiKey: 'x',
+        authEncryptionKey: 'a'.repeat(32),
+        adminSetupToken: 'admin',
+        appOrigin: '',
+        trustedProxyHops: 0,
+        port: 0,
+        dataDir: fixtureDir,
+      },
+      { skipFrontend: true },
+    )
+    try {
+      const row = upsertPlexRow(fixtureApp.db, 1, {
+        plexRatingKey: 'pk-1',
+        tmdbId: null,
+        imdbId: null,
+        title: 'Fixture',
+        posterPath: null,
+        posterSource: 'plex',
+        overview: null,
+        year: null,
+        genres: [],
+        rating: null,
+        voteCount: null,
+        inLibrary: true,
+        lastUsedAt: null,
+      })
+      await new Promise<void>((resolve) => fixtureApp.httpServer.listen(0, resolve))
+      const port = (fixtureApp.httpServer.address() as { port: number }).port
+      const res = await fetch(`http://localhost:${port}/api/poster?movieId=${row.id}&w=185`)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-security-policy')).toBe(
+        "sandbox; default-src 'none'; frame-ancestors 'none'",
+      )
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+      // The shared headers a poster response does NOT override still apply.
+      expect(res.headers.get('x-frame-options')).toBe('DENY')
+    } finally {
+      await fixtureApp.shutdown()
+      rmSync(fixtureDir, { recursive: true, force: true })
+      delete process.env.FAKE_EXTERNAL_APIS
+    }
   })
 
   it('rejects /api/setup/plex/pin without the admin token', async () => {

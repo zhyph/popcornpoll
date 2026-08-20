@@ -22,9 +22,6 @@ const SECURITY_HEADERS = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    remotePatterns: [{ protocol: 'https', hostname: 'image.tmdb.org' }],
-  },
   async headers() {
     return [{ source: '/:path*', headers: SECURITY_HEADERS }]
   },

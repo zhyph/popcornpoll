@@ -2,10 +2,10 @@
 import type Database from 'better-sqlite3'
 
 export interface MatchHistoryEntry {
-  // The Box Office "last week at this house" strip needs this to build a
-  // /api/plex-image?movieId= URL for plex-sourced entries (which, like the
-  // swipe deck's cards, carry no posterPath of their own) — without it the
-  // strip can only ever show its striped placeholder, never a real poster.
+  // The Box Office "last week at this house" strip needs this to build its
+  // /api/poster?movieId= URL — every poster, whatever its source, is served
+  // through that proxy, and plex-sourced entries (like the swipe deck's
+  // cards) carry no posterPath of their own to fall back on.
   movieId: number
   title: string
   posterPath: string | null
