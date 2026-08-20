@@ -170,8 +170,15 @@ export function attachWebSocketServer(
       // WebSocket failure itself. Hand those requests to Next instead when a
       // delegate is supplied (dev only; `next start`'s handleUpgrade is a
       // no-op that would leak the socket open, so production still destroys).
+      //
+      // Matched against /_next/hmr specifically, not all of /_next/: that one
+      // path is the only upgrade Next's dev handler claims, and for anything
+      // else it returns without ending the socket on purpose ("user's custom
+      // WS server may be listening on the same path" — router-server.js). As
+      // the only 'upgrade' listener here, we'd be that custom server, so a
+      // broader match would hand Next sockets nobody ever closes.
       const foreign = options.handleForeignUpgrade
-      if (foreign && req.url?.startsWith('/_next/')) foreign(req, socket, head)
+      if (foreign && req.url?.startsWith('/_next/hmr')) foreign(req, socket, head)
       else socket.destroy()
       return
     }

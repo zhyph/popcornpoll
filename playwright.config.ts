@@ -5,16 +5,16 @@ import { E2E_DATA_DIR } from './e2e/dataDir'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false, // each test starts its own server on a fresh port; keep simple, no port contention
-  // All projects share the one webServer above — and that server's ./data
-  // (server/config.ts's DATA_DIR default) isn't isolated per project, so
-  // concurrent chromium/mobile-chrome workers race on the same SQLite state
-  // (movies table, room store, rate-limit buckets). fullyParallel:false only
+  // All projects share the one webServer above — one process, one SQLite
+  // file (DATA_DIR below), one room store, one set of rate-limit buckets —
+  // so concurrent chromium/mobile-chrome workers would race on all of it.
+  // Per-project isolation isn't a matter of pointing DATA_DIR somewhere
+  // else: it would need a separate webServer (and a second full `next
+  // build`) per project. fullyParallel:false only
   // serializes tests *within* a file; workers still run different files (or
   // different projects covering the same file) concurrently by default.
   // Force one worker so the whole suite — every project, every file — runs
-  // strictly serially against that one shared server. Slower, but correct;
-  // isolating ./data per project would need a separate webServer (and a
-  // second full `next build`) per project instead.
+  // strictly serially against that one shared server. Slower, but correct.
   workers: 1,
   timeout: 60_000,
   // exhaustion.spec.ts's fallback-screen wait has twice needed a bigger
@@ -30,7 +30,7 @@ export default defineConfig({
     // Next's dev HMR socket (/_next/hmr), and without that socket Turbopack's
     // dev client never boots — pages render server-side but never hydrate, so
     // clicks reach no React handler and no effect ever runs. server/index.ts
-    // now hands /_next/* upgrades to Next's own handler in dev. The
+    // now hands /_next/hmr upgrades to Next's own handler in dev. The
     // production build stays the target here anyway: it is what actually gets
     // deployed, and it avoids dev mode's on-demand per-route compile cost and
     // HMR-socket churn inside a timing-sensitive suite.
@@ -39,7 +39,7 @@ export default defineConfig({
     // default — i.e. the developer's own instance — which both made results
     // depend on whatever library happened to be synced locally and let the
     // fake-Plex resync overwrite that real library's in_library flags.
-    command: `rm -rf ${E2E_DATA_DIR} && npm run build && npm run start`,
+    command: `rm -rf "${E2E_DATA_DIR}" && npm run build && npm run start`,
     port: 3100,
     reuseExistingServer: false,
     timeout: 120_000, // `next build` runs before the server starts listening

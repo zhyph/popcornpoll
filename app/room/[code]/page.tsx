@@ -51,6 +51,9 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const [client, setClient] = useState<WsClient | null>(null)
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
   const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
+  // Bumped on every room_started (start and restart_reel alike) purely to
+  // key SwipeDeck — see the room_started handler below.
+  const [reelId, setReelId] = useState(0)
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [edgeOverride, setEdgeOverride] = useState<Exclude<EdgeKind, 'kicked'> | null>(null)
   // Guards against a double-click on Start sending two {type:'start'}
@@ -160,6 +163,10 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       attemptingStartRef.current = false
       checkSeq(ws, msg.seq)
       setPool(msg.pool)
+      // Remounts SwipeDeck (see its `key` below): a fresh reel is a fresh
+      // deck, so per-card state it accumulates — notably which posters have
+      // failed to load — must not carry over from the previous one.
+      setReelId((n) => n + 1)
       // room_started fires for both 'start' and 'restart_reel' — the latter
       // rebuilds the pool and clears server-side matches, so a movie that
       // was previously matched (and dismissed) can legitimately match again.
@@ -595,6 +602,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         )
       })()}
       <SwipeDeck
+        key={reelId}
         card={currentCard}
         disabled={latestMatch !== null}
         onDecide={(vote) => client?.send({ type: 'swipe', movieId: pendingCardId!, vote })}

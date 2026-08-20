@@ -49,7 +49,9 @@ export default function SoloPage() {
   // Plex since the pool was built) fall back to the same bare frame a
   // posterless entry already gets, instead of leaving a permanently broken
   // <img> over the rank number. Keyed by movieId because the shortlist grid
-  // and the pick screen render the same movies.
+  // and the pick screen render the same movies. Cleared whenever a new
+  // shortlist is built (and on reset), so a one-off upstream hiccup doesn't
+  // keep a title posterless for the rest of the session.
   const [failedPosterIds, setFailedPosterIds] = useState<Set<number>>(new Set())
   const [roomCode, setRoomCode] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
@@ -91,6 +93,7 @@ export default function SoloPage() {
     setEligibleCount(null)
     setSubmitError(null)
     setShortlist([])
+    setFailedPosterIds(new Set())
     setSeen([])
     setSurpriseVisible(false)
     setSurpriseSpinning(false)
@@ -129,6 +132,7 @@ export default function SoloPage() {
       setShortlist(body.pool)
       setDegraded(body.degraded)
       setSeen([])
+      setFailedPosterIds(new Set())
       setScreen('shortlist')
     } catch {
       toast(tErrors('generic'))
