@@ -198,8 +198,25 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       // instead of a visible notice explaining why the round is Plex-only.
       toast(tNotices.has(msg.code) ? tNotices(msg.code) : msg.message)
     })
-    const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
-    const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
+    // Both tokens grant control of this room (hostToken especially: start,
+    // kick, end, settings). They're stored so a reload or a browser restart
+    // can reconnect mid-session — but once the room is terminal there is
+    // nothing left to reconnect to, so keeping them only leaves a live
+    // credential sitting in storage for any future XSS on this origin to
+    // read. Bound their lifetime to the room's.
+    const clearRoomTokens = () => {
+      localStorage.removeItem(`hostToken:${code}`)
+      sessionStorage.removeItem(`sessionToken:${code}`)
+      sessionStorage.removeItem(`hostClaimToken:${code}`)
+    }
+    const unsubKicked = ws.on('kicked', (msg) => {
+      clearRoomTokens()
+      setTerminal({ type: 'kicked', reason: msg.reason })
+    })
+    const unsubRoomEnded = ws.on('room_ended', (msg) => {
+      clearRoomTokens()
+      setTerminal({ type: 'room_ended', reason: msg.reason })
+    })
     const unsubSeqOnRoomEnded = ws.on('room_ended', (msg) => checkSeq(ws, msg.seq))
     const unsubHostDisconnected = ws.on('host_disconnected', () => setEdgeOverride('hostgone'))
     const unsubHostReconnected = ws.on('host_reconnected', () =>

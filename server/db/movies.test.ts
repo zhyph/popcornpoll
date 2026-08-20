@@ -364,6 +364,30 @@ describe('findEligiblePlexRows', () => {
     expect(results.map((r) => r.title)).toEqual(['Match'])
   })
 
+  it('treats LIKE wildcards in genre as literal characters, not patterns', () => {
+    const base = {
+      tmdbId: null,
+      imdbId: null,
+      posterPath: null,
+      posterSource: 'plex' as const,
+      overview: null,
+      year: 2015,
+      rating: 7.5,
+      voteCount: 500,
+      inLibrary: true,
+      lastUsedAt: null,
+    }
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-w1', title: 'Comedy One', genres: ['Comedy'] })
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-w2', title: 'Horror One', genres: ['Horror'] })
+
+    // Unescaped, `%` would make the pattern %"%"% and match every row; `_`
+    // would make Comed_ match Comedy. Both must now match nothing.
+    expect(findEligiblePlexRows(db, { genre: '%' })).toHaveLength(0)
+    expect(findEligiblePlexRows(db, { genre: 'Comed_' })).toHaveLength(0)
+    // A literal genre still matches, i.e. the escaping didn't break the filter.
+    expect(findEligiblePlexRows(db, { genre: 'Comedy' }).map((r) => r.title)).toEqual(['Comedy One'])
+  })
+
   it('excludes rows with in_library=0', () => {
     const row = upsertPlexRow(db, 1, {
       plexRatingKey: 'pk-f3',

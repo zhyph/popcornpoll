@@ -2,7 +2,6 @@
 'use client'
 
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -47,9 +46,13 @@ export default function SetupPage() {
 
 function SetupFlow() {
   const t = useTranslations('setup')
-  const searchParams = useSearchParams()
 
-  const [adminToken, setAdminToken] = useState(searchParams.get('token') ?? '')
+  // Deliberately NOT seeded from ?token=: a page navigation carrying the
+  // admin credential puts it in browser history and — because this page is
+  // served by the custom Node server, not fetched by JS — in the access log
+  // of any reverse proxy in front of it. The owner pastes it into the field
+  // below instead. See README's setup section, updated to match.
+  const [adminToken, setAdminToken] = useState('')
   // Starts at 'checking', not 'token': every previous visit to this page
   // forced the full token → Plex PIN → approve-in-Plex → pick server → pick
   // libraries flow from scratch, even for an owner who already linked and
@@ -154,8 +157,8 @@ function SetupFlow() {
   }
 
   async function loadResources(token: string) {
-    const res = await fetch(`/api/setup/plex/resources?authToken=${encodeURIComponent(token)}`, {
-      headers: authHeaders(),
+    const res = await fetch('/api/setup/plex/resources', {
+      headers: authHeaders({ 'X-Plex-Token': token }),
     })
     if (!res.ok) {
       toast(t('genericError'))
@@ -173,8 +176,8 @@ function SetupFlow() {
     setBusy(true)
     try {
       const res = await fetch(
-        `/api/setup/plex/library-sections?serverUrl=${encodeURIComponent(uri)}&authToken=${encodeURIComponent(authToken)}`,
-        { headers: authHeaders() },
+        `/api/setup/plex/library-sections?serverUrl=${encodeURIComponent(uri)}`,
+        { headers: authHeaders({ 'X-Plex-Token': authToken }) },
       )
       if (!res.ok) {
         toast(t('genericError'))

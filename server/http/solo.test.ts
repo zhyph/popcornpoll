@@ -101,8 +101,10 @@ describe('surprise', () => {
     const res = await handlers.surprise(
       new Request('http://localhost/api/solo/surprise', {
         method: 'POST',
+        headers: { origin: config.appOrigin },
         body: JSON.stringify({ movieIds: [aId, bId], exclude: [aId] }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -117,8 +119,10 @@ describe('surprise', () => {
     const res = await handlers.surprise(
       new Request('http://localhost/api/solo/surprise', {
         method: 'POST',
+        headers: { origin: config.appOrigin },
         body: JSON.stringify({ movieIds: [row.id], exclude: [row.id] }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(200)
     expect((await res.json()).entry.movieId).toBe(row.id)
@@ -127,7 +131,12 @@ describe('surprise', () => {
   it('rejects a malformed body with 400 invalid_body', async () => {
     const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
     const res = await handlers.surprise(
-      new Request('http://localhost/api/solo/surprise', { method: 'POST', body: JSON.stringify({ movieIds: 'nope' }) }),
+      new Request('http://localhost/api/solo/surprise', {
+        method: 'POST',
+        headers: { origin: config.appOrigin },
+        body: JSON.stringify({ movieIds: 'nope' }),
+      }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_body')
@@ -138,11 +147,67 @@ describe('surprise', () => {
     const res = await handlers.surprise(
       new Request('http://localhost/api/solo/surprise', {
         method: 'POST',
+        headers: { origin: config.appOrigin },
         body: JSON.stringify({ movieIds: [999999] }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(422)
     expect((await res.json()).error.code).toBe('pool_too_small')
+  })
+
+  it('rejects a cross-origin request with 403 forbidden_origin', async () => {
+    const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
+    const res = await handlers.surprise(
+      new Request('http://localhost/api/solo/surprise', {
+        method: 'POST',
+        headers: { origin: 'http://evil.example' },
+        body: JSON.stringify({ movieIds: [1] }),
+      }),
+      '127.0.0.1',
+    )
+    expect(res.status).toBe(403)
+    expect((await res.json()).error.code).toBe('forbidden_origin')
+  })
+
+  // Each id is one synchronous SELECT, so the cap is what keeps a single
+  // request from pinning the event loop. Asserted at 501 rather than some
+  // huge number so this fails if MAX_SURPRISE_MOVIE_IDS is raised without
+  // a deliberate decision.
+  it('rejects a movieIds array longer than the cap with 400 invalid_body', async () => {
+    const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
+    const res = await handlers.surprise(
+      new Request('http://localhost/api/solo/surprise', {
+        method: 'POST',
+        headers: { origin: config.appOrigin },
+        body: JSON.stringify({ movieIds: Array.from({ length: 501 }, (_, i) => i + 1) }),
+      }),
+      '127.0.0.1',
+    )
+    expect(res.status).toBe(400)
+    expect((await res.json()).error.code).toBe('invalid_body')
+  })
+
+  it('rate-limits a burst from one IP with 429', async () => {
+    insertMovie({ title: 'Burst' })
+    const row = db.prepare('SELECT id FROM movies').get() as { id: number }
+    const handlers = createSoloHandlers(db, createFakeTmdbClient(), config, fakeLibrarySync())
+    const send = () =>
+      handlers.surprise(
+        new Request('http://localhost/api/solo/surprise', {
+          method: 'POST',
+          headers: { origin: config.appOrigin },
+          body: JSON.stringify({ movieIds: [row.id] }),
+        }),
+        '10.0.0.9',
+      )
+
+    // LOCAL_RATE_LIMIT_CAPACITY is 60; the 61st in an immediate burst has no
+    // token left.
+    for (let i = 0; i < 60; i++) expect((await send()).status).toBe(200)
+    const limited = await send()
+    expect(limited.status).toBe(429)
+    expect((await limited.json()).error.code).toBe('rate_limited')
   })
 })
 
@@ -158,6 +223,7 @@ describe('pick', () => {
         headers: { origin: config.appOrigin },
         body: JSON.stringify({ movieId: row.id }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -176,6 +242,7 @@ describe('pick', () => {
         headers: { origin: config.appOrigin },
         body: JSON.stringify({ movieId: 999999 }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(404)
     expect((await res.json()).error.code).toBe('movie_not_found')
@@ -191,6 +258,7 @@ describe('pick', () => {
         headers: { origin: 'http://evil.example' },
         body: JSON.stringify({ movieId: row.id }),
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(403)
     expect((await res.json()).error.code).toBe('forbidden_origin')
@@ -204,6 +272,7 @@ describe('pick', () => {
         headers: { origin: config.appOrigin },
         body: 'not json',
       }),
+      '127.0.0.1',
     )
     expect(res.status).toBe(400)
     expect((await res.json()).error.code).toBe('invalid_body')

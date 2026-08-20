@@ -85,6 +85,60 @@ describe('createImageProxyHandler', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('image/jpeg')
     expect(res.headers.get('cache-control')).toContain('max-age=86400')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('content-security-policy')).toContain('sandbox')
+  })
+
+  it('refuses to proxy a scriptable image type (SVG) as a same-origin document', async () => {
+    const row = upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-svg',
+      tmdbId: null,
+      imdbId: null,
+      title: 'Scriptable',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: null,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    const plex: Partial<PlexClient> = {
+      getThumb: vi
+        .fn()
+        .mockResolvedValue({ body: new ReadableStream(), contentType: 'image/svg+xml', status: 200 }),
+    }
+    const handler = createImageProxyHandler(db, KEY, plex as PlexClient)
+    const res = await handler(new Request(`http://localhost/api/plex-image?movieId=${row.id}`))
+    expect(res.status).toBe(502)
+  })
+
+  it('accepts a content type carrying parameters, e.g. image/jpeg; charset=binary', async () => {
+    const row = upsertPlexRow(db, 1, {
+      plexRatingKey: 'pk-params',
+      tmdbId: null,
+      imdbId: null,
+      title: 'Parameterized',
+      posterPath: null,
+      posterSource: 'plex',
+      overview: null,
+      year: null,
+      genres: [],
+      rating: null,
+      voteCount: null,
+      inLibrary: true,
+      lastUsedAt: null,
+    })
+    const plex: Partial<PlexClient> = {
+      getThumb: vi
+        .fn()
+        .mockResolvedValue({ body: new ReadableStream(), contentType: 'image/jpeg; charset=binary', status: 200 }),
+    }
+    const handler = createImageProxyHandler(db, KEY, plex as PlexClient)
+    const res = await handler(new Request(`http://localhost/api/plex-image?movieId=${row.id}`))
+    expect(res.status).toBe(200)
   })
 
   it('errors the response stream once the proxied body exceeds the 5MB cap, and passes an under-cap body through untouched', async () => {

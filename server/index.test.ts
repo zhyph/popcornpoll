@@ -51,6 +51,38 @@ describe('createApp', () => {
     expect(body.roomCode).toBeDefined()
   })
 
+  it('rejects an over-cap request body with 413 instead of buffering it', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    // Sent to /api/health specifically: it needs no auth, no origin, and no
+    // rate-limit token, which is exactly why the cap has to bite in the data
+    // handler rather than anywhere downstream of routing.
+    const res = await fetch(`http://localhost:${port}/api/health`, {
+      method: 'POST',
+      body: 'x'.repeat(512 * 1024),
+    })
+    expect(res.status).toBe(413)
+  })
+
+  it('still accepts a body under the cap', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    const res = await fetch(`http://localhost:${port}/api/rooms`, {
+      method: 'POST',
+      body: JSON.stringify({ candidateSource: 'plex', matchThreshold: { kind: 'all' } }),
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('sets the shared security headers on /api responses', async () => {
+    await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
+    const port = (app.httpServer.address() as { port: number }).port
+    const res = await fetch(`http://localhost:${port}/api/health`)
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('x-frame-options')).toBe('DENY')
+    expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+  })
+
   it('rejects /api/setup/plex/pin without the admin token', async () => {
     await new Promise<void>((resolve) => app.httpServer.listen(0, resolve))
     const port = (app.httpServer.address() as { port: number }).port

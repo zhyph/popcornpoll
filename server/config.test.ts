@@ -5,7 +5,7 @@ const validEnv = {
   NODE_ENV: 'test' as const,
   TMDB_API_KEY: 'tmdb-key',
   AUTH_ENCRYPTION_KEY: 'a'.repeat(32),
-  ADMIN_SETUP_TOKEN: 'setup-token',
+  ADMIN_SETUP_TOKEN: 'a'.repeat(32),
   APP_ORIGIN: 'http://localhost:3000',
 }
 
@@ -37,5 +37,15 @@ describe('loadConfig', () => {
       expect(message).toContain('ADMIN_SETUP_TOKEN')
       expect(message).toContain('APP_ORIGIN')
     }
+  })
+
+  it('throws ConfigError on an ADMIN_SETUP_TOKEN below the minimum length', () => {
+    expect(() => loadConfig({ ...validEnv, ADMIN_SETUP_TOKEN: 'admin' })).toThrow(ConfigError)
+    expect(() => loadConfig({ ...validEnv, ADMIN_SETUP_TOKEN: 'a'.repeat(23) })).toThrow(ConfigError)
+  })
+
+  it('accepts an ADMIN_SETUP_TOKEN exactly at the minimum length', () => {
+    const config = loadConfig({ ...validEnv, ADMIN_SETUP_TOKEN: 'a'.repeat(24) })
+    expect(config.adminSetupToken).toBe('a'.repeat(24))
   })
 })

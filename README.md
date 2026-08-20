@@ -45,10 +45,12 @@ Prefer a specific host path over the named volume (e.g. `-v /path/on/host:/data`
 Add `-e PUID=$(id -u) -e PGID=$(id -g)` and the container will chown that
 path to match on startup — no manual `chown` needed first.
 
-Then visit `http://<your-host>:3000/setup?token=<your ADMIN_SETUP_TOKEN>`
-once to link your Plex server — the token pre-fills the admin-token field
-(you can also paste it in by hand instead of using the URL). The page
-walks you through Plex's own PIN-auth flow: it shows a one-time code and
+Then visit `http://<your-host>:3000/setup` once to link your Plex server
+and paste your `ADMIN_SETUP_TOKEN` into the admin-token field. (Passing it
+in the URL as `?token=...` used to pre-fill that field and no longer does:
+a page URL carrying the token ends up in browser history and in the access
+log of any reverse proxy in front of the app.) The page walks you through
+Plex's own PIN-auth flow: it shows a one-time code and
 a link to `app.plex.tv/auth` to approve it from your Plex account, then
 lets you pick which of your Plex servers and which of that server's
 movie libraries to use. Once linked, use the page's "Sync now" button (or
@@ -60,7 +62,7 @@ wait for the periodic library sync) to pull your library in.
 |---|---|---|
 | `TMDB_API_KEY` | yes | TMDB v3 API key — powers both the opt-in TMDB candidate source and Plex-library reputation ranking. |
 | `AUTH_ENCRYPTION_KEY` | yes | Encrypts the stored Plex token at rest. Generate with `openssl rand -hex 16`. Changing this invalidates the stored Plex link — you'll be asked to relink. |
-| `ADMIN_SETUP_TOKEN` | yes | Gates the one-time `/setup` flow that links/relinks Plex. Keep this secret — anyone with it can repoint your instance's Plex source. |
+| `ADMIN_SETUP_TOKEN` | yes | Gates the one-time `/setup` flow that links/relinks Plex. Keep this secret — anyone with it can repoint your instance's Plex source. Must be at least 24 characters; the app refuses to boot on a shorter one. Generate with `openssl rand -hex 16`. |
 | `APP_ORIGIN` | yes | The exact origin (scheme + host + port) you reach this app at. Used to reject cross-site WebSocket/API requests. |
 | `TRUSTED_PROXY_HOPS` | no (default `0`) | If you run this behind a reverse proxy, set this to the number of proxy hops so rate limiting reads the real client IP from `X-Forwarded-For` instead of the proxy's own. |
 | `PORT` | no (default `3000`) | |
