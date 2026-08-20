@@ -234,6 +234,12 @@ export function findDistinctGenres(db: Database.Database): string[] {
   return [...genres].sort((a, b) => a.localeCompare(b))
 }
 
+// Escapes LIKE's own metacharacters for use with `ESCAPE '\'`. The backslash
+// must be escaped first, or it would double-escape the sequences added after.
+function escapeLike(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+}
+
 export function findEligiblePlexRows(
   db: Database.Database,
   filters: { genre?: string; yearMin?: number; yearMax?: number; ratingMin?: number },
@@ -241,8 +247,12 @@ export function findEligiblePlexRows(
   let sql = `SELECT * FROM movies WHERE plex_rating_key IS NOT NULL AND in_library = 1`
   const params: unknown[] = []
   if (filters.genre) {
-    sql += ` AND genres LIKE ?`
-    params.push(`%"${filters.genre}"%`)
+    // Parameterized, so never SQL injection — but an unescaped `%` or `_` in a
+    // caller-supplied genre is still a wildcard to LIKE, and `?genre=%` would
+    // quietly match every row instead of filtering. escapeLike + an explicit
+    // ESCAPE clause makes the value match literally.
+    sql += ` AND genres LIKE ? ESCAPE '\\'`
+    params.push(`%"${escapeLike(filters.genre)}"%`)
   }
   if (filters.yearMin !== undefined) {
     sql += ` AND year >= ?`

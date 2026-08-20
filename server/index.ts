@@ -26,6 +26,26 @@ import { DecryptionError, getPlexLink, savePlexLink } from './plex/link'
 
 const SWEEP_INTERVAL_MS = 60_000
 
+// Every /api/* body is accumulated in memory below, and that happens *before*
+// routing, origin checks, admin auth, and rate limiting — so this cap is the
+// only thing between an unauthenticated POST of arbitrary size and this
+// single-replica process's RSS. Mirrors WS_MAX_PAYLOAD_BYTES in ws/server.ts,
+// which already caps the WebSocket half. Sized well above the largest real
+// request (a solo/surprise movieIds array, itself capped at
+// MAX_SURPRISE_MOVIE_IDS entries).
+const MAX_REQUEST_BODY_BYTES = 256 * 1024
+
+// The /api/* half of next.config.js's SECURITY_HEADERS — those routes are
+// dispatched below without ever reaching Next, so its headers() never runs for
+// them. Kept in sync by hand; both lists are short and each is commented to
+// point at the other.
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+}
+
 // getPlexLink throws DecryptionError when AUTH_ENCRYPTION_KEY has changed
 // since the stored link was encrypted. That must not take the whole
 // process down at boot — treat it the same as "not linked yet" so the
@@ -95,9 +115,26 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
       return
     }
     const chunks: Buffer[] = []
+    let received = 0
+    let aborted = false
     req.on('error', () => res.destroy())
-    req.on('data', (c) => chunks.push(c))
+    req.on('data', (c) => {
+      if (aborted) return
+      received += c.length
+      // Checked as chunks arrive, not against Content-Length: a chunked
+      // request carries no Content-Length to check, and a declared one is
+      // just a claim. Destroying the request is what stops the sender.
+      if (received > MAX_REQUEST_BODY_BYTES) {
+        aborted = true
+        if (!res.headersSent) res.writeHead(413)
+        res.end()
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', async () => {
+      if (aborted) return
       try {
         const webReq = new Request(url, {
           method: req.method,
@@ -132,13 +169,18 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         else if (url.pathname === '/api/genres' && req.method === 'GET') webRes = await genresHandler(webReq)
         else if (url.pathname === '/api/solo/pool' && req.method === 'GET')
           webRes = await soloHandlers.pool(webReq, req.socket.remoteAddress)
-        else if (url.pathname === '/api/solo/surprise' && req.method === 'POST') webRes = await soloHandlers.surprise(webReq)
-        else if (url.pathname === '/api/solo/pick' && req.method === 'POST') webRes = await soloHandlers.pick(webReq)
+        else if (url.pathname === '/api/solo/surprise' && req.method === 'POST')
+          webRes = await soloHandlers.surprise(webReq, req.socket.remoteAddress)
+        else if (url.pathname === '/api/solo/pick' && req.method === 'POST')
+          webRes = await soloHandlers.pick(webReq, req.socket.remoteAddress)
         else {
           res.writeHead(404).end()
           return
         }
-        const responseHeaders: Record<string, string> = {}
+        // /api/* never reaches Next, so next.config.js's headers() can't cover
+        // it — the same list is applied here instead. Spread first so a
+        // handler that sets its own (imageProxy's stricter CSP) wins.
+        const responseHeaders: Record<string, string> = { ...SECURITY_HEADERS }
         webRes.headers.forEach((value, key) => {
           responseHeaders[key] = value
         })

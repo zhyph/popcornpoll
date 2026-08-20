@@ -47,7 +47,9 @@ export default defineConfig({
       ROOM_RNG_SEED: '42',
       TMDB_API_KEY: 'fake',
       AUTH_ENCRYPTION_KEY: 'a'.repeat(32),
-      ADMIN_SETUP_TOKEN: 'admin',
+      // >= MIN_ADMIN_SETUP_TOKEN_LENGTH in server/config.ts, which the
+      // server now enforces at boot — a shorter one fails startup here.
+      ADMIN_SETUP_TOKEN: 'e2e-admin-token-000000000000',
       APP_ORIGIN: 'http://localhost:3100',
       PORT: '3100',
       NODE_ENV: 'production',

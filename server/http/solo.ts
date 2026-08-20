@@ -6,7 +6,7 @@ import { insertMatch } from '../db/matchHistory'
 import { buildPool, toEntry } from '../pool/buildPool'
 import { computeCAndM, reputationScore } from '../ranking/reputation'
 import { createRng, weightedSample } from '../ranking/rng'
-import { createDefaultRateLimitBucket, getClientIp } from '../rateLimit'
+import { createDefaultRateLimitBucket, createTokenBucket, getClientIp } from '../rateLimit'
 import { validateTmdbFilters } from '../room/tmdbFilters'
 import type { CandidateSource, TmdbFilters } from '../room/types'
 import type { AppConfig } from '../config'
@@ -19,11 +19,28 @@ function numOrUndefined(v: string | null): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
+// Each movieId costs one synchronous better-sqlite3 SELECT on the event loop
+// (see `surprise` below), so an unbounded array is a DoS vector on its own,
+// independent of the request-body cap in server/index.ts. The real pool is
+// capped at getPoolCap() (100), so this leaves generous headroom over any
+// array the client legitimately sends.
+const MAX_SURPRISE_MOVIE_IDS = 500
+
 function isSurpriseBody(v: unknown): v is { movieIds: number[]; exclude?: number[] } {
   if (typeof v !== 'object' || v === null) return false
   const o = v as Record<string, unknown>
-  if (!Array.isArray(o.movieIds) || o.movieIds.length === 0 || !o.movieIds.every((x) => typeof x === 'number')) return false
-  if (o.exclude !== undefined && (!Array.isArray(o.exclude) || !o.exclude.every((x) => typeof x === 'number'))) return false
+  if (
+    !Array.isArray(o.movieIds) ||
+    o.movieIds.length === 0 ||
+    o.movieIds.length > MAX_SURPRISE_MOVIE_IDS ||
+    !o.movieIds.every((x) => typeof x === 'number')
+  ) return false
+  if (
+    o.exclude !== undefined &&
+    (!Array.isArray(o.exclude) ||
+      o.exclude.length > MAX_SURPRISE_MOVIE_IDS ||
+      !o.exclude.every((x) => typeof x === 'number'))
+  ) return false
   return true
 }
 
@@ -37,18 +54,52 @@ export function createSoloHandlers(
   config: AppConfig,
   librarySync: ReturnType<typeof createLibrarySync>,
 ) {
-  // Only `pool` calls buildPool (the one call that can hit TMDB) — see
-  // Global Constraints for why surprise/pick don't get a bucket.
+  // `pool` keeps its own bucket because it's the only call that can reach
+  // TMDB, so its per-request cost is in a different class. surprise/pick were
+  // originally left unbucketed on that same "they don't hit TMDB" reasoning —
+  // but both do unbounded-in-principle synchronous SQLite work on the event
+  // loop, and `pick` writes a row, so they now share a second bucket rather
+  // than none at all.
   const poolRateLimitBucket = createDefaultRateLimitBucket()
+  // Deliberately NOT createDefaultRateLimitBucket: that bucket's 10-token /
+  // 10-per-minute shape is tuned for room creation and WS upgrades, and
+  // "Surprise me" is a button a user can reasonably hit ten times in under a
+  // minute while shuffling. 60/minute stays forgiving for that while still
+  // bounding what one IP can force the DB to do.
+  const LOCAL_RATE_LIMIT_CAPACITY = 60
+  const localRateLimitBucket = createTokenBucket(LOCAL_RATE_LIMIT_CAPACITY, 1)
 
-  async function pool(req: Request, remoteAddress: string | undefined): Promise<Response> {
+  function rateLimited(
+    bucket: typeof poolRateLimitBucket,
+    req: Request,
+    remoteAddress: string | undefined,
+  ): Response | null {
     const clientIp = getClientIp(req.headers.get('x-forwarded-for'), remoteAddress, config.trustedProxyHops)
-    if (!poolRateLimitBucket.tryConsume(clientIp)) {
+    if (bucket.tryConsume(clientIp)) return null
+    return Response.json(
+      { error: { code: 'rate_limited', message: 'too many requests, please slow down' } },
+      { status: 429 },
+    )
+  }
+
+  // Same fail-closed shape as server/http/rooms.ts: a missing Origin header is
+  // null, which never equals appOrigin, so non-browser callers are rejected
+  // too. Not a substitute for the rate limit (Origin is trivially forged
+  // outside a browser) — it's what stops a cross-origin page from driving
+  // these endpoints on a visitor's behalf.
+  function forbiddenOrigin(req: Request): Response | null {
+    if (config.appOrigin && req.headers.get('origin') !== config.appOrigin) {
       return Response.json(
-        { error: { code: 'rate_limited', message: 'too many requests, please slow down' } },
-        { status: 429 },
+        { error: { code: 'forbidden_origin', message: 'request origin not allowed' } },
+        { status: 403 },
       )
     }
+    return null
+  }
+
+  async function pool(req: Request, remoteAddress: string | undefined): Promise<Response> {
+    const limited = rateLimited(poolRateLimitBucket, req, remoteAddress)
+    if (limited) return limited
 
     const url = new URL(req.url)
     const candidateSource: CandidateSource = url.searchParams.get('candidateSource') === 'plex+tmdb' ? 'plex+tmdb' : 'plex'
@@ -78,7 +129,12 @@ export function createSoloHandlers(
     return Response.json({ pool: ranked, degraded: result.degraded })
   }
 
-  async function surprise(req: Request): Promise<Response> {
+  async function surprise(req: Request, remoteAddress: string | undefined): Promise<Response> {
+    const forbidden = forbiddenOrigin(req)
+    if (forbidden) return forbidden
+    const limited = rateLimited(localRateLimitBucket, req, remoteAddress)
+    if (limited) return limited
+
     let parsed: unknown
     try {
       parsed = await req.json()
@@ -107,10 +163,12 @@ export function createSoloHandlers(
     return Response.json({ entry: toEntry(picked) })
   }
 
-  async function pick(req: Request): Promise<Response> {
-    if (config.appOrigin && req.headers.get('origin') !== config.appOrigin) {
-      return Response.json({ error: { code: 'forbidden_origin', message: 'request origin not allowed' } }, { status: 403 })
-    }
+  async function pick(req: Request, remoteAddress: string | undefined): Promise<Response> {
+    const forbidden = forbiddenOrigin(req)
+    if (forbidden) return forbidden
+    const limited = rateLimited(localRateLimitBucket, req, remoteAddress)
+    if (limited) return limited
+
     let parsed: unknown
     try {
       parsed = await req.json()

@@ -9,7 +9,7 @@ export async function seedFakeLibrary(baseURL: string): Promise<void> {
   // fixed 10-title fixture set without needing a real Plex server reachable
   // from the test runner. The resync route awaits the sync synchronously in
   // fake mode, so by the time this resolves the pool is ready.
-  await ctx.post('/api/setup/plex/resync', { headers: { Authorization: 'Bearer admin' } })
+  await ctx.post('/api/setup/plex/resync', { headers: { Authorization: 'Bearer e2e-admin-token-000000000000' } })
   await ctx.dispose()
 }
 
