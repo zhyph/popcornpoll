@@ -1,5 +1,6 @@
 // server/ws/server.ts
-import type { Server } from 'node:http'
+import type { IncomingMessage, Server } from 'node:http'
+import type { Duplex } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import type { AppConfig } from '../config'
@@ -35,6 +36,13 @@ function send(ws: WebSocket, message: ServerMessage): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
 }
 
+export interface WsServerOptions {
+  // Called for upgrade requests this server doesn't own (i.e. anything but
+  // /ws). Only Next.js's dev HMR endpoint needs this — see the upgrade
+  // listener below for why it exists at all.
+  handleForeignUpgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => void
+}
+
 export function attachWebSocketServer(
   httpServer: Server,
   store: RoomStore,
@@ -42,6 +50,7 @@ export function attachWebSocketServer(
   tmdb: TmdbClient,
   librarySync: SyncWaiter,
   config: AppConfig,
+  options: WsServerOptions = {},
 ): WsServerHandle {
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD_BYTES })
   const sockets = new Map<WebSocket, SocketMeta>()
@@ -152,7 +161,18 @@ export function attachWebSocketServer(
 
   httpServer.on('upgrade', (req, socket, head) => {
     if (req.url !== '/ws') {
-      socket.destroy()
+      // This is the only 'upgrade' listener on the server, so destroying
+      // everything else here also killed Next.js's dev HMR socket
+      // (/_next/hmr, see node_modules/next/dist/server/lib/router-server.js).
+      // Turbopack's client treats that socket as part of its bootstrap: with
+      // it closed mid-handshake the dev client never runs, nothing hydrates,
+      // and every button on every page is inert — with no error beyond the
+      // WebSocket failure itself. Hand those requests to Next instead when a
+      // delegate is supplied (dev only; `next start`'s handleUpgrade is a
+      // no-op that would leak the socket open, so production still destroys).
+      const foreign = options.handleForeignUpgrade
+      if (foreign && req.url?.startsWith('/_next/')) foreign(req, socket, head)
+      else socket.destroy()
       return
     }
     if (config.appOrigin && req.headers.origin !== config.appOrigin) {

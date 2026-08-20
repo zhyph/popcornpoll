@@ -1,6 +1,6 @@
 // e2e/kicked.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
+import { expectRosterCount, pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('a kicked participant sees the terminal screen and does not reconnect', async ({ baseURL }) => {
   const browser = await chromium.launch()
@@ -18,14 +18,13 @@ test('a kicked participant sees the terminal screen and does not reconnect', asy
   await guestPage.goto(`/join/${roomCode}`)
   await guestPage.getByTestId('join-name-input').fill('Guest')
   await guestPage.getByTestId('join-submit').click()
-  // Wait for both participants to show on the host's roster (one "Remove"
-  // button each, host included) before kicking — same join-race reasoning
-  // as e2e/reconnect.spec.ts.
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  // Wait for both participants to show on the host's roster before kicking
+  // — same join-race reasoning as e2e/reconnect.spec.ts.
+  await expectRosterCount(hostPage, 2)
 
-  // The host joined first (via hostClaimToken) and is admitted first, so the
-  // guest is the second "Remove" button in the roster.
-  await hostPage.getByRole('button', { name: 'Remove' }).nth(1).click()
+  // The host's own ticket carries no Remove button (a host can't kick
+  // themselves), so in a two-person room the guest's is the only one.
+  await hostPage.getByRole('button', { name: 'Remove' }).click()
 
   const terminal = guestPage.getByTestId('terminal-screen')
   await expect(terminal).toBeVisible({ timeout: 15000 })
@@ -65,7 +64,7 @@ test('remaining participants see the terminal screen when the host ends the sess
   // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an
   // in-flight navigation. See e2e/match.spec.ts, which has this same wait.
   await guestPage.waitForURL(/\/room\//)
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  await expectRosterCount(hostPage, 2)
 
   await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')

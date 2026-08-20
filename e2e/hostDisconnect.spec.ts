@@ -1,6 +1,6 @@
 // e2e/hostDisconnect.spec.ts
 import { test, expect } from '@playwright/test'
-import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
+import { expectRosterCount, pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('a guest sees the host-gone edge screen when the host drops, and it clears when the host reconnects', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
@@ -21,7 +21,7 @@ test('a guest sees the host-gone edge screen when the host drops, and it clears 
   await guestPage.getByTestId('join-name-input').fill('Guest')
   await guestPage.getByTestId('join-submit').click()
   await guestPage.waitForURL(/\/room\//)
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  await expectRosterCount(hostPage, 2)
 
   await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')

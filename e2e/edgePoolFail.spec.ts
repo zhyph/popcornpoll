@@ -2,7 +2,8 @@
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { test, expect, chromium } from '@playwright/test'
-import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
+import { E2E_DATA_DIR } from './dataDir'
+import { expectRosterCount, pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 // Both tests need a second participant: startRoom() (server/room/activeActions.ts)
 // enforces MIN_PARTICIPANTS_TO_START = 2 before it ever attempts to build the
@@ -34,7 +35,12 @@ import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
 // which does exactly this when a sync run no longer sees a title in the
 // live Plex library, rather than deleting rows outright.
 function markPlexLibraryEmpty(): void {
-  const dbPath = join(process.env.DATA_DIR ?? './data', 'popcornpoll.db')
+  // E2E_DATA_DIR, not process.env.DATA_DIR: that variable is set on the
+  // *server's* environment by playwright.config.ts's webServer block, and is
+  // not inherited by this test-runner process — reading it here would fall
+  // through to './data', i.e. the developer's own database, and leave the
+  // server's actual library untouched.
+  const dbPath = join(E2E_DATA_DIR, 'popcornpoll.db')
   const db = new Database(dbPath)
   try {
     db.prepare('UPDATE movies SET in_library = 0 WHERE plex_rating_key IS NOT NULL').run()
@@ -69,7 +75,7 @@ test('Start shows the empty-library edge screen when the plex library has no mov
     await guestPage.getByTestId('join-name-input').fill('Guest')
     await guestPage.getByTestId('join-submit').click()
     await guestPage.waitForURL(/\/room\//)
-    await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+    await expectRosterCount(hostPage, 2)
 
     await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
     await expect(hostPage.getByTestId('edge-emptylib')).toBeVisible({ timeout: 15000 })
@@ -90,8 +96,10 @@ test('Start shows the pool-fail edge screen when filters exclude every movie in 
   const hostPage = await hostContext.newPage()
   await hostPage.goto('/')
 
-  const genreInput = hostPage.getByPlaceholder('e.g. Comedy')
-  await genreInput.fill('Nonexistent Genre XYZ')
+  // Same reasoning as e2e/boxOffice.spec.ts: genre is a closed select, so
+  // the impossible filter is a "Year, from" above the fixture set's newest
+  // title (2021, server/plex/fakeClient.ts).
+  await hostPage.getByPlaceholder('1930').fill('3000')
   // Unlike e2e/boxOffice.spec.ts, deliberately do NOT clear the filter
   // before creating the room — this test needs it to carry into the
   // room's stored tmdbFilters so Start actually fails.
@@ -106,7 +114,7 @@ test('Start shows the pool-fail edge screen when filters exclude every movie in 
   await guestPage.getByTestId('join-name-input').fill('Guest')
   await guestPage.getByTestId('join-submit').click()
   await guestPage.waitForURL(/\/room\//)
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  await expectRosterCount(hostPage, 2)
 
   await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await expect(hostPage.getByTestId('edge-poolfail')).toBeVisible({ timeout: 15000 })

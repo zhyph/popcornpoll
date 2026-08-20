@@ -414,7 +414,10 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           <div className="flex flex-col gap-5">
             <div>
               <p className="font-mono text-[10.5px] uppercase tracking-[.3em] text-brass">{t('admitted')}</p>
-              <p className="mt-1 font-display text-[clamp(34px,5vw,56px)] leading-none text-ticket">
+              <p
+                className="mt-1 font-display text-[clamp(34px,5vw,56px)] leading-none text-ticket"
+                data-testid="admitted-count"
+              >
                 {participants.length}{' '}
                 <span className="text-[.4em] tracking-[.1em] text-brass">{t('ofSeatsLabel', { cap: SEATS_CAP })}</span>
               </p>

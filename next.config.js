@@ -1,29 +1,16 @@
 // next.config.js
 import createNextIntlPlugin from 'next-intl/plugin'
+import { SECURITY_HEADERS_LIST } from './lib/securityHeaders.mjs'
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
 
-// Applied to every Next-served route. The /api/* routes bypass Next entirely
-// (server/index.ts dispatches them before handleNextRequest), so they set the
-// same list themselves — SECURITY_HEADERS there is the other half of this.
-//
-// Deliberately no script-src/style-src CSP yet: this app runs GSAP,
-// framer-motion and ogl, all of which write inline styles, and Next injects
-// inline bootstrap scripts. A real policy for that needs verifying in a
-// browser against the actual animation paths, not just a green unit suite, so
-// it's left as follow-up rather than shipped half-checked. frame-ancestors is
-// safe to set now because it constrains only framing, not execution.
-const SECURITY_HEADERS = [
-  { key: 'X-Content-Type-Options', value: 'nosniff' },
-  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'X-Frame-Options', value: 'DENY' },
-  { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
-]
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Applied to every Next-served route. The /api/* routes bypass Next
+  // entirely (server/index.ts dispatches them before handleNextRequest) and
+  // apply the same shared list themselves — see lib/securityHeaders.mjs.
   async headers() {
-    return [{ source: '/:path*', headers: SECURITY_HEADERS }]
+    return [{ source: '/:path*', headers: SECURITY_HEADERS_LIST }]
   },
   experimental: {
     // TypeScript 7 (this repo's pinned devDependency, see package.json) no

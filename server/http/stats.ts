@@ -5,6 +5,15 @@ import { DecryptionError, getPlexLink } from '../plex/link'
 
 const RECENT_MATCHES_LIMIT = 12
 
+// Deliberately unauthenticated. Two callers depend on that: the landing page
+// (app/page.tsx), which is itself unauthenticated and renders recentMatches as
+// its "last week" reel, and /setup, which probes plexLinked before it has an
+// admin token to offer. So the recently-matched titles are readable by anyone
+// who can reach this instance — the same boundary as room creation, which
+// also has no login. README's "Network exposure" section states this
+// outright; the fix for an instance where that matters is access control in
+// front of the whole app, not auth on this one route.
+
 function isPlexLinked(db: Database.Database, encryptionKey: string): boolean {
   try {
     return getPlexLink(db, encryptionKey) !== null

@@ -1,6 +1,6 @@
 // e2e/exhaustion.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
+import { expectRosterCount, pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('a session with an unreachable threshold exhausts and shows the ranked fallback, even after a refresh', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
@@ -27,9 +27,9 @@ test('a session with an unreachable threshold exhausts and shows the ranked fall
   // it wins that race — the page does toast an 'error' handler now, but this
   // test doesn't assert on toasts, so waiting for both participants avoids
   // the race outright. A plain `text=Guest` wait doesn't work because the
-  // host's own default display name is also "Guest" — wait for both
-  // participants' "Remove" buttons instead.
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  // host's own default display name is also "Guest" — wait on the admitted
+  // counter instead (see expectRosterCount).
+  await expectRosterCount(hostPage, 2)
   await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 

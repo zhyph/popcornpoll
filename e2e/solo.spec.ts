@@ -13,19 +13,22 @@ test('solo: box office links to /solo, filters produce a shortlist, and a direct
   // aria-current="step" marks the active chip specifically — the header
   // renders all three step labels at once regardless of screen (only
   // styling differs), so asserting on plain text-contains would pass
-  // trivially on any solo screen; this actually verifies progression.
-  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText('Trim the bill')
+  // trivially on any solo screen; scoping to the active chip is what
+  // actually verifies progression. toContainText, not toHaveText: each chip
+  // also renders its step number (or a ✓ once passed) inside the same
+  // element, so the full text is "1Trim the bill".
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toContainText('Trim the bill')
 
   await expect(page.getByTestId('solo-eligible-count')).not.toHaveText('—', { timeout: 15000 })
   await page.getByTestId('submit-solo').click()
 
-  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText("Tonight's bill")
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toContainText("Tonight's bill")
   const cards = page.getByTestId('shortlist-card')
   await expect(cards.first()).toBeVisible({ timeout: 15000 })
 
   await cards.first().getByRole('button', { name: 'Pick this' }).click()
 
-  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toHaveText('Your pick')
+  await expect(page.locator('[data-testid="chapter-indicator"] [aria-current="step"]')).toContainText('Your pick')
   await expect(page.getByTestId('solo-room-code')).toContainText('solo-')
 })
 
@@ -53,9 +56,11 @@ test('solo: filters narrow enough to fail submission show the full-screen pool-f
   await pinEnglishLocale(context, baseURL!)
   await page.goto('/solo')
 
-  // Fixture library's titles don't clear an impossible rating bar — see
-  // server/plex/fakeClient.ts for the fixed 10-title set's actual ratings.
-  await page.getByPlaceholder('e.g. Comedy').fill('Nonexistent Genre XYZ')
+  // Genre is a closed select fed by the library's own shelf, so narrow on
+  // "Year, from" instead: the fixture set's newest title is 2021
+  // (server/plex/fakeClient.ts), and validateTmdbFilters clamps any larger
+  // year down to next year, so this empties the pool in every calendar year.
+  await page.getByPlaceholder('1930').fill('3000')
   // solo-eligible-count's DOM text is the count number concatenated with a
   // "titles" label span (no separator) — toHaveText('0') against the whole
   // testid node would never match "0titles"; target the count's own child
