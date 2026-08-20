@@ -8,6 +8,28 @@ cp .env.example .env   # fill in the values
 npm run dev
 ```
 
+### Throwaway instance
+
+`npm run dev` uses `DATA_DIR` from your environment, which normally means the
+`./data` you keep a real Plex link and a synced library in. For anything you
+would rather not do to that database — poking at a half-finished migration,
+resyncing against a different Plex server, filling up match history while
+testing a flow — run against a scratch directory instead:
+
+```bash
+npm run dev:sandbox     # same as dev, against ./data-sandbox
+npm run start:sandbox   # production mode, against ./data-sandbox
+npm run sandbox:reset   # delete it and start clean
+```
+
+Both set `DATA_DIR` inline, so they override an exported one rather than
+losing to it. `./data-sandbox` is gitignored. The first run starts from an
+empty database, so you will need to link Plex again inside it.
+
+The Playwright suite already has its own isolation and needs none of this: see
+`playwright.config.ts`, which points `DATA_DIR` at `test-results/e2e-data`,
+wipes it before every run, and serves on port 3100.
+
 ## Before opening a PR
 
 ```bash
