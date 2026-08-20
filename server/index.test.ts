@@ -106,7 +106,7 @@ describe('createApp', () => {
       { skipFrontend: true },
     )
     try {
-      upsertPlexRow(fixtureApp.db, 1, {
+      const row = upsertPlexRow(fixtureApp.db, 1, {
         plexRatingKey: 'pk-1',
         tmdbId: null,
         imdbId: null,
@@ -123,9 +123,11 @@ describe('createApp', () => {
       })
       await new Promise<void>((resolve) => fixtureApp.httpServer.listen(0, resolve))
       const port = (fixtureApp.httpServer.address() as { port: number }).port
-      const res = await fetch(`http://localhost:${port}/api/poster?movieId=1&w=185`)
+      const res = await fetch(`http://localhost:${port}/api/poster?movieId=${row.id}&w=185`)
       expect(res.status).toBe(200)
-      expect(res.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'")
+      expect(res.headers.get('content-security-policy')).toBe(
+        "sandbox; default-src 'none'; frame-ancestors 'none'",
+      )
       expect(res.headers.get('x-content-type-options')).toBe('nosniff')
       // The shared headers a poster response does NOT override still apply.
       expect(res.headers.get('x-frame-options')).toBe('DENY')

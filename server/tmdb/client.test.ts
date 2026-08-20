@@ -102,4 +102,28 @@ describe('createTmdbClient', () => {
     const client = createTmdbClient('api-key')
     await expect(client.findByImdbId('tt0111161')).rejects.toThrow(/401/)
   })
+
+  it('getPosterImage requests the stored path at the given width', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ body: null, status: 200, headers: { get: () => 'image/jpeg' } })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    const res = await client.getPosterImage('/abc123.jpg', 342)
+    expect(res.status).toBe(200)
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://image.tmdb.org/t/p/w342/abc123.jpg')
+  })
+
+  // posterPath is interpolated straight into the CDN URL and reaches this
+  // method from a DB row, so a value carrying `?` or `#` would silently
+  // change what is being asked for. Refuse rather than fetch.
+  it('getPosterImage refuses a posterPath that is not TMDB-shaped', async () => {
+    const fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const client = createTmdbClient('api-key')
+    for (const bad of ['/a.jpg?x=1', '/a.jpg#f', '/../secret', 'a.jpg', '//evil.example/a.jpg', '']) {
+      expect((await client.getPosterImage(bad, 342)).status).toBe(400)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

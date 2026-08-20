@@ -175,19 +175,36 @@ export function createPlexClient(clientIdentifier: string): PlexClient {
           `${serverUrl}/photo/:/transcode?width=${width}&height=${Math.round(width * THUMB_ASPECT)}` +
           `&minSize=1&upscale=1&url=${encodeURIComponent(`/library/metadata/${ratingKey}/thumb`)}` +
           `&X-Plex-Token=${authToken}`
-        const transcoded = await fetch(transcodeUrl, { signal: AbortSignal.timeout(10_000) })
-        if (transcoded.status === 200) {
-          return {
-            body: transcoded.body,
-            contentType: transcoded.headers.get('content-type'),
-            status: transcoded.status,
+        // Not every PMS install answers /photo/:/transcode — the photo
+        // transcoder can be disabled, a shared server may withhold it, and a
+        // reverse proxy in front of Plex may drop the path outright. Any of
+        // those can *reject* rather than answer non-200, so the try has to
+        // cover the fetch itself: letting it throw would take out every
+        // poster on such a deployment, which the plain thumb path below would
+        // have served fine.
+        try {
+          const transcoded = await fetch(transcodeUrl, {
+            // Half the budget, because a failure here is followed by the full
+            // original-artwork request below — otherwise one poster could
+            // hold a connection for 20s while server/index.ts buffers it.
+            signal: AbortSignal.timeout(5_000),
+          })
+          if (transcoded.status === 200) {
+            return {
+              body: transcoded.body,
+              contentType: transcoded.headers.get('content-type'),
+              status: transcoded.status,
+            }
           }
+          // A big poster still beats a broken one — drain the failed response
+          // so the socket is released, then fall through to the original.
+          await transcoded.body?.cancel().catch(() => {})
+        } catch (err) {
+          console.error(
+            `getThumb: photo transcode failed for ratingKey ${ratingKey}, falling back to original artwork`,
+            err,
+          )
         }
-        // Not every PMS install answers /photo/:/transcode (the photo
-        // transcoder can be disabled, and shared servers may withhold it).
-        // A big poster still beats a broken one — drain the failed response
-        // so the socket is released, then fall through to the original.
-        await transcoded.body?.cancel().catch(() => {})
       }
       const res = await fetch(
         `${serverUrl}/library/metadata/${ratingKey}/thumb?X-Plex-Token=${authToken}`,

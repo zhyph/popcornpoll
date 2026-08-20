@@ -175,9 +175,10 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         // a browser still holding a page from before this change keeps asking
         // for whichever old path that page was built with.
         else if (
-          url.pathname === '/api/poster' ||
-          url.pathname === '/api/plex-image' ||
-          url.pathname === '/api/tmdb-image'
+          (url.pathname === '/api/poster' ||
+            url.pathname === '/api/plex-image' ||
+            url.pathname === '/api/tmdb-image') &&
+          req.method === 'GET'
         )
           webRes = await imageProxyHandler(webReq)
         else if (url.pathname === '/api/stats' && req.method === 'GET') webRes = await statsHandler(webReq)

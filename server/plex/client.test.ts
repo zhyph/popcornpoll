@@ -211,6 +211,24 @@ describe('createPlexClient', () => {
     expect(url).toContain(`url=${encodeURIComponent('/library/metadata/100/thumb')}`)
   })
 
+  // A transcode request that *rejects* (timeout against a cold PMS, a reverse
+  // proxy dropping /photo/:/transcode, ECONNRESET) has to fall back too. When
+  // it didn't, getThumb threw, the proxy answered 502, and every poster on
+  // such a deployment broke — where the plain thumb path would have worked.
+  it('getThumb falls back to the original artwork when the transcode request rejects', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('The operation was aborted'), { name: 'TimeoutError' }))
+      .mockResolvedValueOnce({ body: null, status: 200, headers: { get: () => 'image/jpeg' } })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const client = createPlexClient('client-id')
+    const res = await client.getThumb('http://192.168.1.10:32400', 'token', '100', 342)
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]![0]).toContain('/library/metadata/100/thumb?X-Plex-Token=')
+  })
+
   // The photo transcoder can be unavailable (disabled, or withheld on a
   // shared server). An oversized poster still beats a broken one.
   it('getThumb falls back to the original artwork when the transcoder refuses', async () => {

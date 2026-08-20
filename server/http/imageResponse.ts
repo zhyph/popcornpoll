@@ -1,12 +1,12 @@
 // server/http/imageResponse.ts
 //
-// Shared by both poster proxies — /api/plex-image (http/imageProxy.ts) and
-// /api/tmdb-image (http/tmdbImageProxy.ts). They had independent copies of
-// the size cap and the content-type check, which is exactly how one copy
-// quietly drifts from the other: the svg+xml hole below was closed in the
-// Plex proxy first and was still open in the TMDB proxy, because the TMDB
-// one was written later from the same original template. One implementation
-// means a fix lands in both by construction.
+// Builds every poster response (http/imageProxy.ts, serving both the Plex and
+// TMDB sources). This started as two independent proxies with their own
+// copies of the size cap and the content-type check, which is exactly how one
+// copy quietly drifts from the other: the svg+xml hole below was closed in
+// the Plex proxy first and stayed open in the TMDB one, written later from
+// the same original template. One implementation means a fix lands on every
+// source by construction.
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
@@ -51,6 +51,9 @@ export interface UpstreamImage {
 // stream carrying the headers that make a same-origin image response inert.
 export function imageResponse(upstream: UpstreamImage): Response {
   if (upstream.status !== 200 || !upstream.body || !isSafeImageType(upstream.contentType)) {
+    // Release the upstream socket rather than leaving it held until GC — a
+    // 200 carrying a disallowed content type arrives here with a live body.
+    void upstream.body?.cancel().catch(() => {})
     return new Response(null, { status: 502 })
   }
   return new Response(capStreamSize(upstream.body, MAX_IMAGE_BYTES), {
@@ -63,8 +66,14 @@ export function imageResponse(upstream: UpstreamImage): Response {
       // treated as a document. server/index.ts sets nosniff on every /api
       // response too — repeated here so the guarantee belongs to this
       // response builder rather than to one caller's dispatch path.
+      //
+      // frame-ancestors is restated for the same reason: that merge is
+      // per-header-name, so this value *replaces* the shared
+      // "frame-ancestors 'none'" rather than intersecting with it. Omitting it
+      // here would quietly leave framing protection for poster responses
+      // resting on X-Frame-Options alone.
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "sandbox; default-src 'none'",
+      'Content-Security-Policy': "sandbox; default-src 'none'; frame-ancestors 'none'",
     },
   })
 }

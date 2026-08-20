@@ -105,8 +105,14 @@ export function createTmdbClient(apiKey: string): TmdbClient {
 
     async getPosterImage(posterPath, width) {
       // The image CDN is a different host from the JSON API and takes no
-      // api_key. posterPath comes from TMDB itself and is re-checked by the
-      // caller before it reaches here.
+      // api_key. posterPath is interpolated straight into the URL, so it is
+      // shape-checked here rather than trusted: it reaches this method from a
+      // DB row, and the caller only asserts it is non-null. A stored value
+      // carrying `?` or `#` would silently change what the CDN is asked for.
+      // TMDB's own poster_path is always /<base62>.<ext>.
+      if (!/^\/[A-Za-z0-9._-]+$/.test(posterPath)) {
+        return { body: null, contentType: null, status: 400 }
+      }
       const res = await fetch(`https://image.tmdb.org/t/p/w${width}${posterPath}`, {
         signal: AbortSignal.timeout(10_000),
       })
