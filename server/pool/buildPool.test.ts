@@ -46,6 +46,7 @@ const noOpTmdb: TmdbClient = {
   discoverMovies: vi.fn().mockResolvedValue([]),
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
+  getPosterImage: vi.fn(),
 }
 
 describe('buildPool', () => {
@@ -95,6 +96,7 @@ describe('buildPool', () => {
       ),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     expect(result.tooSmall).toBe(false)
@@ -120,6 +122,7 @@ describe('buildPool', () => {
       ]),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     const matchingIds = result.pool.filter((e) => e.title === 'Movie 0')
@@ -144,6 +147,7 @@ describe('buildPool', () => {
       ),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     // 3 Plex + up to 40 TMDB should backfill toward the 100 cap, not stay
@@ -168,6 +172,7 @@ describe('buildPool', () => {
       ),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     const plexCount = result.pool.filter((e) => e.posterSource === 'plex').length
@@ -180,7 +185,7 @@ describe('buildPool', () => {
   it('resolves the free-text genre filter into a numeric TMDB genre id before calling discoverMovies', async () => {
     seedPlexRows(10)
     const discoverMovies = vi.fn().mockResolvedValue([])
-    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn(), getPosterImage: vi.fn() }
     await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Sci-Fi' }, 1)
     expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: 878 }), expect.any(Number))
   })
@@ -188,7 +193,7 @@ describe('buildPool', () => {
   it('omits genreId (rather than failing) when the free-text genre has no TMDB mapping', async () => {
     seedPlexRows(10)
     const discoverMovies = vi.fn().mockResolvedValue([])
-    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn(), getPosterImage: vi.fn() }
     await buildPool(db, tmdb, 'plex+tmdb', { genre: 'Not A Real Genre' }, 1)
     expect(discoverMovies).toHaveBeenCalledWith(expect.objectContaining({ genreId: undefined }), expect.any(Number))
   })
@@ -199,7 +204,7 @@ describe('buildPool', () => {
       tmdbId: 42, title: 'Dup', overview: '', posterPath: null, year: 2000, genreIds: [], rating: 7, voteCount: 1000,
     }
     const discoverMovies = vi.fn().mockResolvedValue([dup, dup])
-    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn() }
+    const tmdb: TmdbClient = { discoverMovies, getMovieDetails: vi.fn(), findByImdbId: vi.fn(), getPosterImage: vi.fn() }
     const result = await buildPool(db, tmdb, 'plex+tmdb', {}, 1)
     expect(result.pool.filter((e) => e.title === 'Dup')).toHaveLength(1)
   })
@@ -217,6 +222,7 @@ describe('buildPool', () => {
       discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
     const result = await buildPool(db, failingTmdb, 'plex+tmdb', {}, 1)
     expect(result.degraded).toBe(true)

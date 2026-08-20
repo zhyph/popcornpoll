@@ -17,7 +17,6 @@ import { attachWebSocketServer } from './ws/server'
 import { createRoomsHandler } from './http/rooms'
 import { createSetupHandlers } from './http/setup'
 import { createImageProxyHandler } from './http/imageProxy'
-import { createTmdbImageProxyHandler } from './http/tmdbImageProxy'
 import { createHealthHandler } from './http/health'
 import { createStatsHandler } from './http/stats'
 import { createEligibleCountHandler } from './http/eligibleCount'
@@ -94,8 +93,7 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
 
   const roomsHandler = createRoomsHandler(store, db, config.authEncryptionKey, config, librarySync)
   const setupHandlers = createSetupHandlers(db, config.authEncryptionKey, config.adminSetupToken, plex, clientIdentifier)
-  const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex)
-  const tmdbImageProxyHandler = createTmdbImageProxyHandler(db)
+  const imageProxyHandler = createImageProxyHandler(db, config.authEncryptionKey, plex, tmdb)
   const healthHandler = createHealthHandler(config.dataDir)
   const statsHandler = createStatsHandler(db, config.authEncryptionKey, librarySync)
   const eligibleCountHandler = createEligibleCountHandler(db)
@@ -165,8 +163,17 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
               void librarySync.run().catch((err) => console.error('librarySync.run failed', err))
             }
           }
-        } else if (url.pathname === '/api/plex-image') webRes = await imageProxyHandler(webReq)
-        else if (url.pathname === '/api/tmdb-image') webRes = await tmdbImageProxyHandler(webReq)
+        }
+        // /api/plex-image and /api/tmdb-image are the pre-unification names,
+        // kept as aliases: poster responses are cached `immutable` for 24h, so
+        // a browser still holding a page from before this change keeps asking
+        // for whichever old path that page was built with.
+        else if (
+          url.pathname === '/api/poster' ||
+          url.pathname === '/api/plex-image' ||
+          url.pathname === '/api/tmdb-image'
+        )
+          webRes = await imageProxyHandler(webReq)
         else if (url.pathname === '/api/stats' && req.method === 'GET') webRes = await statsHandler(webReq)
         else if (url.pathname === '/api/eligible-count' && req.method === 'GET') webRes = await eligibleCountHandler(webReq)
         else if (url.pathname === '/api/genres' && req.method === 'GET') webRes = await genresHandler(webReq)

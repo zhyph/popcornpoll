@@ -36,6 +36,28 @@ const FAKE_DISCOVER_RESULTS: TmdbMovie[] = [
   },
 ]
 
+// A 1x1 transparent PNG. Fixture mode is network-free, but a poster
+// endpoint that can only ever 502 means dev and e2e runs render zero
+// posters — every poster-related bug is then invisible until someone
+// points the app at a real Plex server. Real bytes, no network.
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+function onePixelImage() {
+  return {
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(ONE_PIXEL_PNG))
+        controller.close()
+      },
+    }),
+    contentType: 'image/png',
+    status: 200,
+  }
+}
+
 export function createFakeTmdbClient(): TmdbClient {
   return {
     async discoverMovies() {
@@ -50,6 +72,9 @@ export function createFakeTmdbClient(): TmdbClient {
       // (see server/plex/fakeClient.ts), so this path is never exercised in
       // fixture mode.
       return null
+    },
+    async getPosterImage() {
+      return onePixelImage()
     },
   }
 }

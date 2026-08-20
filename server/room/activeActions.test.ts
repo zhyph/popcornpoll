@@ -17,6 +17,7 @@ const noOpTmdb: TmdbClient = {
   discoverMovies: vi.fn().mockResolvedValue([]),
   getMovieDetails: vi.fn(),
   findByImdbId: vi.fn(),
+  getPosterImage: vi.fn(),
 }
 const noOpLibrarySync: SyncWaiter = { async waitForCurrent() {} }
 
@@ -207,6 +208,7 @@ describe('startRoom', () => {
       discoverMovies: vi.fn().mockRejectedValue(new Error('TMDB is down')),
       getMovieDetails: vi.fn(),
       findByImdbId: vi.fn(),
+      getPosterImage: vi.fn(),
     }
 
     const result = await startRoom(store, code, true, db, failingTmdb, noOpLibrarySync)

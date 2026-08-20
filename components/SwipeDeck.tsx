@@ -127,7 +127,7 @@ export function SwipeDeck({
               <img
                 key={card.movieId}
                 className="aspect-[2/3] w-full rounded object-cover"
-                src={card.posterSource === 'plex' ? `/api/plex-image?movieId=${card.movieId}` : `/api/tmdb-image?movieId=${card.movieId}&size=w342`}
+                src={`/api/poster?movieId=${card.movieId}&w=500`}
                 alt={card.title}
                 onLoad={() => setLoadedMovieId(card.movieId)}
               />

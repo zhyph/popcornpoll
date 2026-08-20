@@ -42,8 +42,15 @@ export interface PlexClient {
     serverUrl: string,
     authToken: string,
     ratingKey: string,
+    width?: number,
   ): Promise<{ body: ReadableStream | null; contentType: string | null; status: number }>
 }
+
+// Posters are rendered between 104px and ~380px wide, so a 2:3 box at this
+// width covers even a 2x-DPR display. Plex stores whatever artwork the
+// agent downloaded, which for a poster is routinely 0.5-3.5MB — see
+// getThumb below for why that matters.
+const THUMB_ASPECT = 1.5
 
 function headers(clientIdentifier: string): Record<string, string> {
   return {
@@ -156,7 +163,32 @@ export function createPlexClient(clientIdentifier: string): PlexClient {
       }))
     },
 
-    async getThumb(serverUrl, authToken, ratingKey) {
+    async getThumb(serverUrl, authToken, ratingKey, width) {
+      // /library/metadata/<key>/thumb streams the *original* artwork Plex's
+      // agent downloaded — measured at 0.4-3.4MB per poster on a real
+      // library, for images the UI paints ~150px tall. A 24-card grid cost
+      // 37MB that way. Plex's own photo transcoder resizes server-side
+      // (same poster: 3293KB -> 47KB at width=342), so ask for the size
+      // actually being rendered instead of the master.
+      if (width) {
+        const transcodeUrl =
+          `${serverUrl}/photo/:/transcode?width=${width}&height=${Math.round(width * THUMB_ASPECT)}` +
+          `&minSize=1&upscale=1&url=${encodeURIComponent(`/library/metadata/${ratingKey}/thumb`)}` +
+          `&X-Plex-Token=${authToken}`
+        const transcoded = await fetch(transcodeUrl, { signal: AbortSignal.timeout(10_000) })
+        if (transcoded.status === 200) {
+          return {
+            body: transcoded.body,
+            contentType: transcoded.headers.get('content-type'),
+            status: transcoded.status,
+          }
+        }
+        // Not every PMS install answers /photo/:/transcode (the photo
+        // transcoder can be disabled, and shared servers may withhold it).
+        // A big poster still beats a broken one — drain the failed response
+        // so the socket is released, then fall through to the original.
+        await transcoded.body?.cancel().catch(() => {})
+      }
       const res = await fetch(
         `${serverUrl}/library/metadata/${ratingKey}/thumb?X-Plex-Token=${authToken}`,
         { signal: AbortSignal.timeout(10_000) },

@@ -395,11 +395,7 @@ export default function CreateRoomPage() {
                     <div key={i} className="flex w-[104px] flex-none flex-col gap-1.5 pr-3.5">
                       {hasRealImage ? (
                         <img
-                          src={
-                            m.posterSource === 'plex'
-                              ? `/api/plex-image?movieId=${m.movieId}`
-                              : `/api/tmdb-image?movieId=${m.movieId}&size=w185`
-                          }
+                          src={`/api/poster?movieId=${m.movieId}&w=185`}
                           alt={m.title}
                           className="h-[150px] w-[104px] border border-brass/35 object-cover"
                           onError={() => setFailedPosterIds((prev) => new Set(prev).add(m.movieId))}
