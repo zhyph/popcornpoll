@@ -359,12 +359,25 @@ export default function CreateRoomPage() {
             </div>
           </div>
 
-          {stats && stats.recentMatches.length > 0 && (
+          {stats && stats.recentMatches.length > 0 && (() => {
+            // Doubling the list is only a seamless-loop trick for a strip
+            // that's actually wider than its container and needs to scroll
+            // — with only a handful of real matches (the common case for a
+            // fresh or lightly-used instance) the un-doubled list already
+            // fits, so doubling it just renders the same poster(s) twice
+            // side by side with nothing to scroll, which reads as a
+            // duplicate-render bug rather than a loop. 4 is a rough floor
+            // for "wide enough to bother": at ~118px per card (104px +
+            // trailing gap) even the narrowest right-column layout
+            // (minmax(280px,...)) fits 2, so 3 already crowds it.
+            const shouldLoop = stats.recentMatches.length > 3
+            const strip = shouldLoop ? [...stats.recentMatches, ...stats.recentMatches] : stats.recentMatches
+            return (
             <div className="relative overflow-hidden border border-brass/40 bg-[#17110E] py-4">
               <p className="mb-3 px-4 font-mono text-[10.5px] uppercase tracking-[.24em] text-brass sm:px-6">{t('lastWeekLabel')}</p>
               <div
                 className="flex w-max"
-                style={{ animation: 'marqueeSlide 32s linear infinite' }}
+                style={shouldLoop ? { animation: 'marqueeSlide 32s linear infinite' } : undefined}
               >
                 {/* Trailing pr-3.5 on every item (not a container `gap`) is
                     deliberate: a CSS `gap` only puts space *between* items,
@@ -374,7 +387,7 @@ export default function CreateRoomPage() {
                     strip stuttering/resetting at each loop. Padding on every
                     item (including the last of each copy) makes both halves
                     exactly periodic, so -50% is a seamless cut. */}
-                {[...stats.recentMatches, ...stats.recentMatches].map((m, i) => {
+                {strip.map((m, i) => {
                   const hasRealImage =
                     (m.posterSource === 'plex' || (m.posterSource === 'tmdb' && m.posterPath !== null)) &&
                     !failedPosterIds.has(m.movieId)
@@ -410,7 +423,8 @@ export default function CreateRoomPage() {
                 style={{ animation: 'sprocket 1.1s linear infinite' }}
               />
             </div>
-          )}
+            )
+          })()}
 
           <div className="flex flex-wrap items-center gap-2.5 border border-dashed border-brass/45 px-[18px] py-3.5 font-mono text-[11px] tracking-wider text-ticket/65">
             <span
