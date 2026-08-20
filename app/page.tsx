@@ -398,7 +398,7 @@ export default function CreateRoomPage() {
                           src={
                             m.posterSource === 'plex'
                               ? `/api/plex-image?movieId=${m.movieId}`
-                              : `https://image.tmdb.org/t/p/w185${m.posterPath}`
+                              : `/api/tmdb-image?movieId=${m.movieId}&size=w185`
                           }
                           alt={m.title}
                           className="h-[150px] w-[104px] border border-brass/35 object-cover"
