@@ -164,6 +164,9 @@
     "rate_limited": "Too many requests. Wait a moment and try again.",
     "generic": "Something went wrong."
   },
+  "notices": {
+    "degraded_to_plex_only": "TMDB is unavailable right now — this round uses your Plex library only."
+  },
   "kicked": {
     "kicked": "The host removed you from the room.",
     "excluded_at_start": "You were excluded because you were disconnected when the session started."

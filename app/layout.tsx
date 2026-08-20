@@ -5,6 +5,7 @@ import { Anton, JetBrains_Mono, Work_Sans } from 'next/font/google'
 import { AtmosphereLayer } from '../components/chrome/AtmosphereLayer'
 import { ClickSparkProvider } from '../components/chrome/ClickSparkProvider'
 import { CurtainOverlay } from '../components/chrome/CurtainOverlay'
+import { CurtainProvider } from '../components/chrome/CurtainContext'
 import { PictureBoothFooter } from '../components/chrome/PictureBoothFooter'
 import { PictureBoothHeader } from '../components/chrome/PictureBoothHeader'
 import { RoomStatusProvider } from '../components/chrome/RoomStatusContext'
@@ -24,15 +25,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <NextIntlClientProvider>
           <RoomStatusProvider>
-            <AtmosphereLayer />
-            <CurtainOverlay open countdownNumber={null} />
-            <ClickSparkProvider>
-              <div className="flex min-h-screen flex-col">
-                <PictureBoothHeader />
-                <div className="flex flex-1 flex-col">{children}</div>
-                <PictureBoothFooter />
-              </div>
-            </ClickSparkProvider>
+            <CurtainProvider>
+              <AtmosphereLayer />
+              <CurtainOverlay />
+              <ClickSparkProvider>
+                <div className="flex min-h-screen flex-col">
+                  <PictureBoothHeader />
+                  <div className="flex flex-1 flex-col">{children}</div>
+                  <PictureBoothFooter />
+                </div>
+              </ClickSparkProvider>
+            </CurtainProvider>
           </RoomStatusProvider>
           <Toaster />
         </NextIntlClientProvider>

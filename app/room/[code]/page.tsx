@@ -6,6 +6,7 @@ import { use, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { createWsClient, type WsClient } from '../../../lib/wsClient'
 import { useSetRoomStep, type ChapterStep } from '../../../components/chrome/RoomStatusContext'
+import { usePlayCurtainReveal } from '../../../components/chrome/CurtainContext'
 import { EdgeState, type EdgeKind } from '../../../components/EdgeState'
 import { MarqueeReveal } from '../../../components/MarqueeReveal'
 import { RoomShare } from '../../../components/RoomShare'
@@ -36,6 +37,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const router = useRouter()
   const t = useTranslations('room')
   const tErrors = useTranslations('errors')
+  const tNotices = useTranslations('notices')
   const tKicked = useTranslations('kicked')
   const tRoomEnded = useTranslations('roomEnded')
   const tEdge = useTranslations('edgeState')
@@ -60,6 +62,19 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const lastSeqRef = useRef<number | null>(null)
   const confirmRestartTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const attemptingStartRef = useRef(false)
+  const playCurtainReveal = usePlayCurtainReveal()
+  // The first 'room_started' this client ever receives is always the real
+  // lobby->active transition — a later one (restart_reel, already active)
+  // shouldn't replay the close-curtain/countdown/reveal cinematic. A
+  // reconnect into an already-active room never fires 'room_started' at all
+  // (that goes through 'joined' instead), so this can't misfire there.
+  const firstActivationRef = useRef(true)
+  // Stays true once the curtain sequence has swapped the screen for the
+  // first activation — while false, the lobby branch below keeps rendering
+  // (hidden behind the closed curtain) even though snapshot.status has
+  // already flipped to 'active', so the deck doesn't flash into view ahead
+  // of the reveal.
+  const [revealed, setRevealed] = useState(true)
 
   function onRestartReel() {
     if ((snapshot?.totalVotes ?? 0) === 0) {
@@ -151,6 +166,11 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       // Without this reset, latestMatchId === dismissedMatchId would still
       // hold for that id and the reveal would never show for the new match.
       setDismissedMatchId(null)
+      if (firstActivationRef.current) {
+        firstActivationRef.current = false
+        setRevealed(false)
+        playCurtainReveal(() => setRevealed(true))
+      }
     })
     const unsubNextCard = ws.on('next_card', (msg) => setPendingCardId(msg.movieId))
     const unsubMatch = ws.on('match', (msg) => {
@@ -169,6 +189,14 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         return
       }
       toast(tErrors.has(msg.code) ? tErrors(msg.code) : tErrors('generic'))
+    })
+    const unsubNotice = ws.on('notice', (msg) => {
+      // Server already sends real degraded-pool warnings (e.g. TMDB down/
+      // misconfigured -> 'degraded_to_plex_only') on 'start' and
+      // 'restart_reel' — this client just never listened for them, so a
+      // TMDB outage/401/bad key looked like TMDB "silently doing nothing"
+      // instead of a visible notice explaining why the round is Plex-only.
+      toast(tNotices.has(msg.code) ? tNotices(msg.code) : msg.message)
     })
     const unsubKicked = ws.on('kicked', (msg) => setTerminal({ type: 'kicked', reason: msg.reason }))
     const unsubRoomEnded = ws.on('room_ended', (msg) => setTerminal({ type: 'room_ended', reason: msg.reason }))
@@ -211,6 +239,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       unsubMatch()
       unsubExhausted()
       unsubError()
+      unsubNotice()
       unsubKicked()
       unsubRoomEnded()
       unsubSeqOnRoomEnded()
@@ -341,7 +370,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     )
   }
 
-  if (snapshot.status === 'lobby' || snapshot.status === 'starting') {
+  if (snapshot.status === 'lobby' || snapshot.status === 'starting' || !revealed) {
     const ruleLabel =
       snapshot.matchThreshold.kind === 'all'
         ? tCreateRoom('matchRuleAll')

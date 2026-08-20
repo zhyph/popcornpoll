@@ -164,6 +164,9 @@
     "rate_limited": "Muitas requisições. Espere um instante e tente de novo.",
     "generic": "Algo deu errado."
   },
+  "notices": {
+    "degraded_to_plex_only": "O TMDB está indisponível agora — esta rodada usa somente a sua biblioteca do Plex."
+  },
   "kicked": {
     "kicked": "O anfitrião te removeu da sala.",
     "excluded_at_start": "Você foi excluído porque estava desconectado quando a sessão começou."
