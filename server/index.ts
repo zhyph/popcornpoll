@@ -39,11 +39,17 @@ const MAX_REQUEST_BODY_BYTES = 256 * 1024
 // dispatched below without ever reaching Next, so its headers() never runs for
 // them. Kept in sync by hand; both lists are short and each is commented to
 // point at the other.
+// Keys are lowercase on purpose. They are merged below with the header names
+// a Response yields, and `Headers.forEach` always lowercases — with Title-Case
+// keys here the two spellings are distinct properties of the same object, so
+// Node emits BOTH and a handler's own value never actually replaces the
+// default. That was observable on /api/poster, which answered with its
+// `sandbox; default-src 'none'` CSP *and* this frame-ancestors one.
 const SECURITY_HEADERS: Record<string, string> = {
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'x-frame-options': 'DENY',
+  'content-security-policy': "frame-ancestors 'none'",
 }
 
 // getPlexLink throws DecryptionError when AUTH_ENCRYPTION_KEY has changed
@@ -189,10 +195,11 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
         }
         // /api/* never reaches Next, so next.config.js's headers() can't cover
         // it — the same list is applied here instead. Spread first so a
-        // handler that sets its own (imageProxy's stricter CSP) wins.
+        // handler that sets its own (imageProxy's stricter CSP) wins; see
+        // SECURITY_HEADERS above for why that only works in lowercase.
         const responseHeaders: Record<string, string> = { ...SECURITY_HEADERS }
         webRes.headers.forEach((value, key) => {
-          responseHeaders[key] = value
+          responseHeaders[key.toLowerCase()] = value
         })
         res.writeHead(webRes.status, responseHeaders)
         res.end(webRes.body ? Buffer.from(await webRes.arrayBuffer()) : undefined)
