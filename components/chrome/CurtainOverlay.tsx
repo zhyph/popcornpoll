@@ -2,15 +2,15 @@
 'use client'
 
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
-
-export interface CurtainOverlayProps {
-  open: boolean
-  countdownNumber: number | null
-}
+import { useCurtain } from './CurtainContext'
 
 // Values (colors, timing, dial layout) match the approved mockup
-// (PopcornPoll Reimagined.dc.html) verbatim, not reinvented here.
-export function CurtainOverlay({ open, countdownNumber }: CurtainOverlayProps) {
+// (PopcornPoll Reimagined.dc.html) verbatim, not reinvented here. Reads its
+// open/countdown state from CurtainContext rather than taking props — it's
+// mounted once at the root layout, above whichever room page is actually
+// driving the reveal (see usePlayCurtainReveal in CurtainContext.tsx).
+export function CurtainOverlay() {
+  const { curtainOpen: open, countdownNumber } = useCurtain()
   const reducedMotion = usePrefersReducedMotion()
   const transition = reducedMotion ? 'none' : 'transform 1.5s cubic-bezier(.66,0,.2,1)'
 
@@ -51,12 +51,19 @@ export function CurtainOverlay({ open, countdownNumber }: CurtainOverlayProps) {
             }}
           >
             <span
+              // Reduced motion: skip the zoom-in flourish (a static digit
+              // swap is enough of a signal) rather than force a
+              // now-invisible animation to still run.
+              key={countdownNumber}
               className="font-display"
               style={{
                 fontSize: 'clamp(90px, 22vmin, 200px)',
                 lineHeight: 1,
                 color: '#F3E9D2',
                 textShadow: '0 0 40px rgba(245,166,35,.5)',
+                animation: reducedMotion
+                  ? undefined
+                  : `${countdownNumber % 2 === 0 ? 'countdownZoomA' : 'countdownZoomB'} 1000ms ease-out both`,
               }}
             >
               {countdownNumber}

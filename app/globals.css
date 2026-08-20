@@ -124,6 +124,21 @@ body {
   100% { background-position: 200% 0; }
 }
 
+/* Curtain reveal countdown digit (CurtainOverlay). Two identical keyframes,
+   alternated by parity per tick — reusing one name on the same DOM node
+   wouldn't restart a completed animation when the digit changes underneath
+   it, since the animation-name property value wouldn't actually change. */
+@keyframes countdownZoomA {
+  0% { transform: scale(2.6); opacity: 0; }
+  30% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(.94); opacity: 1; }
+}
+@keyframes countdownZoomB {
+  0% { transform: scale(2.6); opacity: 0; }
+  30% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(.94); opacity: 1; }
+}
+
 /* mockup's "now"/current-step pulsing bulb, used by SetupStepTracker */
 @keyframes bulb {
   0%, 100% { opacity: 0.28; box-shadow: 0 0 0 rgba(245, 166, 35, 0); }
