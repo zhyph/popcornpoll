@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-label="PopcornPoll">
+  <defs>
+    <clipPath id="box">
+      <path d="M10 28 H54 L48.5 58 H15.5 Z"></path>
+    </clipPath>
+  </defs>
+  <rect width="64" height="64" rx="13" fill="#100C09"></rect>
+  <g fill="#F5A623">
+    <circle cx="32" cy="15" r="7.5"></circle>
+    <circle cx="21" cy="21" r="6.5"></circle>
+    <circle cx="43" cy="21" r="6.5"></circle>
+    <circle cx="27" cy="25" r="5.5"></circle>
+    <circle cx="38" cy="25" r="5.5"></circle>
+  </g>
+  <g clip-path="url(#box)">
+    <rect x="10" y="28" width="44" height="30" fill="#F3E9D2"></rect>
+    <g fill="#CF4436">
+      <rect x="10" y="28" width="9" height="30"></rect>
+      <rect x="28" y="28" width="9" height="30"></rect>
+      <rect x="46" y="28" width="9" height="30"></rect>
+    </g>
+  </g>
+  <rect x="8" y="25.5" width="48" height="5" rx="1" fill="#F3E9D2"></rect>
+</svg>
