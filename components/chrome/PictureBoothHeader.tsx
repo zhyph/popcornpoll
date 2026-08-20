@@ -58,6 +58,8 @@ export function PictureBoothHeader() {
   return (
     <header className="relative z-20 flex flex-wrap items-center justify-between gap-4 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-3.5 backdrop-blur-sm sm:px-10">
       <div className="flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element -- static brand mark, no next/image optimization needed */}
+        <img src="/logo.svg" alt="" aria-hidden className="h-7 w-7 shrink-0" />
         <span className="flex gap-1.5" aria-hidden>
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee" />
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee [animation-delay:140ms]" />
