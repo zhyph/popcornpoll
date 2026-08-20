@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu \
 RUN groupadd -r -g 999 popcornpoll && useradd -r -u 999 -g popcornpoll popcornpoll
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.js ./next.config.js
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
