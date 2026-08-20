@@ -8,6 +8,8 @@
 // the same original template. One implementation means a fix lands on every
 // source by construction.
 
+import type { CachedImage } from './imageCache'
+
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 // `image/svg+xml` passes a naive startsWith('image/') check but is a
@@ -24,20 +26,44 @@ export function isSafeImageType(contentType: string | null): boolean {
   return ALLOWED_IMAGE_TYPES.has(mediaType.trim().toLowerCase())
 }
 
-function capStreamSize(stream: ReadableStream<Uint8Array>, maxBytes: number): ReadableStream<Uint8Array> {
+/**
+ * Reads an upstream body into memory, refusing anything past the size cap.
+ *
+ * This replaced a streaming pass-through when poster caching landed: bytes
+ * that are never held cannot be cached, and a poster is tens of kilobytes
+ * against a 5MB ceiling, so the streaming was buying nothing that the cache
+ * does not now repay many times over. The cap is enforced as the body
+ * arrives, not after, so an upstream lying about its length still cannot
+ * make this process buffer more than MAX_IMAGE_BYTES.
+ */
+async function readCapped(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
   let total = 0
-  return stream.pipeThrough(
-    new TransformStream({
-      transform(chunk: Uint8Array, controller) {
-        total += chunk.byteLength
-        if (total > maxBytes) {
-          controller.error(new Error('Image exceeds size cap'))
-          return
-        }
-        controller.enqueue(chunk)
-      },
-    }),
-  )
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {})
+        return null
+      }
+      chunks.push(value)
+    }
+  } catch {
+    return null
+  } finally {
+    reader.releaseLock()
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out
 }
 
 export interface UpstreamImage {
@@ -46,20 +72,27 @@ export interface UpstreamImage {
   status: number
 }
 
-// Turns an upstream poster response into the response this server sends back:
-// 502 for anything that isn't a usable, safe image, otherwise a size-capped
-// stream carrying the headers that make a same-origin image response inert.
-export function imageResponse(upstream: UpstreamImage): Response {
+export async function bufferUpstreamImage(upstream: UpstreamImage): Promise<CachedImage | null> {
   if (upstream.status !== 200 || !upstream.body || !isSafeImageType(upstream.contentType)) {
     // Release the upstream socket rather than leaving it held until GC — a
     // 200 carrying a disallowed content type arrives here with a live body.
     void upstream.body?.cancel().catch(() => {})
-    return new Response(null, { status: 502 })
+    return null
   }
-  return new Response(capStreamSize(upstream.body, MAX_IMAGE_BYTES), {
+  const bytes = await readCapped(upstream.body, MAX_IMAGE_BYTES)
+  if (!bytes) return null
+  return { bytes, contentType: upstream.contentType as string }
+}
+
+/**
+ * The single place poster response headers are written, so a cache hit and a
+ * cache miss cannot answer with different headers.
+ */
+export function imageResponseFromBytes(image: CachedImage): Response {
+  return new Response(image.bytes as unknown as BodyInit, {
     status: 200,
     headers: {
-      'Content-Type': upstream.contentType as string,
+      'Content-Type': image.contentType,
       'Cache-Control': 'public, max-age=86400, immutable',
       // nosniff stops a browser re-interpreting a mislabeled body as HTML;
       // the sandbox CSP neutralizes scripting for anything that still ends up

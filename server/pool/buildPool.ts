@@ -1,6 +1,13 @@
 // server/pool/buildPool.ts
 import type Database from 'better-sqlite3'
-import { findByTmdbId, findEligiblePlexRows, mergeTmdbOnlyIntoPlexRow, stampLastUsed, upsertTmdbOnlyRow } from '../db/movies'
+import {
+  countEligiblePlexRows,
+  findByTmdbId,
+  findEligiblePlexRows,
+  mergeTmdbOnlyIntoPlexRow,
+  stampLastUsed,
+  upsertTmdbOnlyRow,
+} from '../db/movies'
 import type { MovieRow } from '../db/movies'
 import { computeCAndM, reputationScore } from '../ranking/reputation'
 import { createRng, weightedSampleWithoutReplacement } from '../ranking/rng'
@@ -181,7 +188,7 @@ export async function buildPool(
     // everything". Only a hard 0 counts as library_empty; a non-empty but
     // sparse library still gets the generic pool_too_small treatment (its
     // advice — widen filters, add TMDB — still applies).
-    const unfilteredCount = findEligiblePlexRows(db, {}).length
+    const unfilteredCount = countEligiblePlexRows(db, {})
     if (unfilteredCount === 0) tooSmallReason = 'library_empty'
   }
 

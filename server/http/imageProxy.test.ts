@@ -6,6 +6,7 @@ import { openDb } from '../db'
 import { upsertPlexRow, upsertTmdbOnlyRow } from '../db/movies'
 import { savePlexLink } from '../plex/link'
 import { createImageProxyHandler } from './imageProxy'
+import { createImageCache } from './imageCache'
 import type Database from 'better-sqlite3'
 import type { PlexClient } from '../plex/client'
 import type { TmdbClient } from '../tmdb/client'
@@ -65,8 +66,23 @@ function addTmdbRow(tmdbId: number, posterPath: string | null) {
   })
 }
 
-function okImage() {
-  return { body: new ReadableStream(), contentType: 'image/jpeg', status: 200 }
+// Real bytes that actually terminate. The proxy buffers upstream bodies now
+// (that is what makes them cacheable), so a ReadableStream with no source —
+// which never enqueues and never closes — hangs the handler instead of
+// standing in for a poster. No real HTTP body behaves that way.
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9])
+
+function okImage(bytes: Uint8Array = JPEG_BYTES) {
+  return {
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
+    contentType: 'image/jpeg',
+    status: 200,
+  }
 }
 
 function fakeStreamOfSize(totalBytes: number): ReadableStream {
@@ -213,16 +229,99 @@ describe('createImageProxyHandler', () => {
       db,
       KEY,
       {
-        getThumb: vi.fn().mockResolvedValue({
-          body: new ReadableStream(),
+        getThumb: vi.fn().mockImplementation(async () => ({
+          ...okImage(),
           contentType: 'image/jpeg; charset=binary',
-          status: 200,
-        }),
+        })),
       } as unknown as PlexClient,
       {} as TmdbClient,
     )
     const res = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
     expect(res.status).toBe(200)
+  })
+
+  // Every assertion below fails against the uncached proxy: it called the
+  // upstream once per request, so the fetch counts were 2, 4, and 2.
+  describe('caching', () => {
+    it('serves a repeat request for the same poster without touching the upstream', async () => {
+      const row = addPlexRow('pk-cache')
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      const first = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`))
+      const second = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`))
+
+      expect(first.status).toBe(200)
+      expect(second.status).toBe(200)
+      expect(new Uint8Array(await second.arrayBuffer())).toEqual(JPEG_BYTES)
+      expect(second.headers.get('Content-Type')).toBe('image/jpeg')
+      expect(second.headers.get('Cache-Control')).toBe('public, max-age=86400, immutable')
+      expect(getThumb).toHaveBeenCalledTimes(1)
+    })
+
+    it('collapses concurrent requests for one poster into a single upstream fetch', async () => {
+      const row = addPlexRow('pk-stampede')
+      let release: (() => void) | undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const getThumb = vi.fn().mockImplementation(async () => {
+        await gate
+        return okImage()
+      })
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      const inFlight = [0, 1, 2, 3].map(() =>
+        handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`)),
+      )
+      release?.()
+      const responses = await Promise.all(inFlight)
+
+      expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 200])
+      expect(getThumb).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats each allowed width as its own entry', async () => {
+      const row = addPlexRow('pk-widths')
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=185`))
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=500`))
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=185`))
+
+      expect(getThumb).toHaveBeenCalledTimes(2)
+      expect(getThumb.mock.calls.map((c) => c[3])).toEqual([185, 500])
+    })
+
+    it('does not cache a failure, so a sleeping Plex server is retried', async () => {
+      const row = addPlexRow('pk-retry')
+      const getThumb = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      expect((await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))).status).toBe(502)
+      expect((await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))).status).toBe(200)
+      expect(getThumb).toHaveBeenCalledTimes(2)
+    })
+
+    it('re-fetches once an entry has expired', async () => {
+      const row = addPlexRow('pk-ttl')
+      let clock = 0
+      const cache = createImageCache({ ttlMs: 1000, now: () => clock })
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient, cache)
+
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      clock = 999
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      expect(getThumb).toHaveBeenCalledTimes(1)
+      clock = 1000
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      expect(getThumb).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('refuses to relay a non-image body from either upstream', async () => {

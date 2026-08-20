@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createAmbientFrameGate } from '../../lib/ambientFrameRate';
 import { Renderer, Program, Mesh, Color, Triangle } from 'ogl';
 
 const VERT = `#version 300 es
@@ -176,8 +177,12 @@ export default function Aurora(props: AuroraProps) {
     ctn.appendChild(gl.canvas);
 
     let animateId = 0;
+    // Ambient wash, not content: draw on a fixed budget rather than once per
+    // display refresh. See lib/ambientFrameRate.ts for the measurements.
+    const shouldDrawFrame = createAmbientFrameGate();
     const update = (t: number) => {
       animateId = requestAnimationFrame(update);
+      if (!shouldDrawFrame(t)) return;
       const { time = t * 0.01, speed = 1.0 } = propsRef.current;
       if (program) {
         program.uniforms.uTime.value = time * speed * 0.1;

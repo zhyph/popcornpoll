@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { findEligiblePlexRows } from '../db/movies'
+import { countEligiblePlexRows } from '../db/movies'
 import { getPoolCap } from '../pool/buildPool'
 import { validateTmdbFilters } from '../room/tmdbFilters'
 import type { TmdbFilters } from '../room/types'
@@ -36,7 +36,7 @@ export function createEligibleCountHandler(db: Database.Database): (req: Request
     // count elsewhere (server/http/stats.ts) — without the cap the two
     // numbers are identical whenever the filtered library is smaller than
     // the cap, which is the common case, making the distinction invisible.
-    const count = Math.min(findEligiblePlexRows(db, result.filters).length, getPoolCap())
+    const count = Math.min(countEligiblePlexRows(db, result.filters), getPoolCap())
     return Response.json({ count })
   }
 }
