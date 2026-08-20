@@ -1,6 +1,6 @@
 // e2e/reconnect.spec.ts
 import { expect, test, chromium } from '@playwright/test'
-import { pinEnglishLocale, seedFakeLibrary } from './fixtures'
+import { expectRosterCount, pinEnglishLocale, seedFakeLibrary } from './fixtures'
 
 test('participant reconnects and keeps their current pending card', async ({ baseURL }) => {
   await seedFakeLibrary(baseURL!)
@@ -24,16 +24,15 @@ test('participant reconnects and keeps their current pending card', async ({ bas
   // on guestPage (e.g. waiting for [data-testid="swipe-card"]) can race an
   // in-flight navigation. See e2e/match.spec.ts, which has this same wait.
   await guestPage.waitForURL(/\/room\//)
-  // Wait for the host's own roster to show both participants (one "Remove"
-  // button per admitted participant, host included) before starting —
-  // clicking Start immediately after the guest's client-side navigation
+  // Wait for the host's own roster to show both participants before
+  // starting — clicking Start immediately after the guest's client-side navigation
   // races the guest's WS 'join' round-trip, and Start can fail with
   // not_enough_participants if it wins that race — the page does toast an
   // 'error' handler now, but this test doesn't assert on toasts, so waiting
   // for both participants avoids the race outright. A plain `text=Guest`
   // wait doesn't work here because the host's own default display name is
   // also "Guest".
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  await expectRosterCount(hostPage, 2)
   await hostPage.getByRole('button', { name: 'DIM THE LIGHTS' }).click()
   await guestPage.waitForSelector('[data-testid="swipe-card"]')
 

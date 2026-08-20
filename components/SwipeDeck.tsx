@@ -33,6 +33,13 @@ export function SwipeDeck({
   // in flight, which otherwise looks like the swipe didn't do anything for
   // the 1-2s it takes the next poster to load.
   const [loadedMovieId, setLoadedMovieId] = useState<number | null>(null)
+  // A poster that never arrives (proxy 502, movie pulled from Plex since the
+  // pool was built) must degrade to the same posterless card the deck already
+  // renders for a movie with no artwork at all — otherwise the skeleton above
+  // pulses forever on top of a card the player can still perfectly well vote
+  // on. A Set, not a single id: the deck component stays mounted across
+  // cards, so failures from earlier cards have to stay remembered.
+  const [failedMovieIds, setFailedMovieIds] = useState<Set<number>>(new Set())
 
   async function animateDecision(vote: 'yes' | 'no') {
     if (!card || disabled) return
@@ -59,6 +66,8 @@ export function SwipeDeck({
   if (!card) {
     return <p className="font-display text-xl text-brass">{t('noMoreCards')}</p>
   }
+
+  const hasPoster = (card.posterSource === 'plex' || Boolean(card.posterPath)) && !failedMovieIds.has(card.movieId)
 
   async function handleDragEnd(_: unknown, info: PanInfo) {
     if (info.offset.x > SWIPE_THRESHOLD_PX) {
@@ -121,7 +130,7 @@ export function SwipeDeck({
           {t('voidStampLabel')}
         </span>
         <div className="p-4">
-          {(card.posterSource === 'plex' || card.posterPath) && (
+          {hasPoster && (
             <div className="relative mb-3 aspect-[2/3] w-full overflow-hidden rounded bg-brass/10">
               {loadedMovieId !== card.movieId && <div className="absolute inset-0 animate-pulse bg-brass/15" />}
               <img
@@ -130,6 +139,7 @@ export function SwipeDeck({
                 src={`/api/poster?movieId=${card.movieId}&w=500`}
                 alt={card.title}
                 onLoad={() => setLoadedMovieId(card.movieId)}
+                onError={() => setFailedMovieIds((prev) => new Set(prev).add(card.movieId))}
               />
               {card.inLibrary && (
                 <span className="absolute left-3 top-3 z-10 bg-marquee px-1.5 py-1 font-mono text-[9px] font-bold uppercase tracking-widest text-ink">
@@ -150,7 +160,7 @@ export function SwipeDeck({
             </p>
           )}
           <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{card.overview}</p>
-          {card.inLibrary && !(card.posterSource === 'plex' || card.posterPath) && (
+          {card.inLibrary && !hasPoster && (
             <span className="mt-2 inline-block bg-marquee px-2 py-0.5 font-mono text-xs text-ink">{t('inLibrary')}</span>
           )}
         </div>

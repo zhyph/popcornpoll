@@ -21,11 +21,16 @@ test('box office shows real stats and a live eligible count, and still creates a
   // contains "0" — so assert the exact known value instead.)
   await expect(page.getByTestId('stat-library')).toHaveText('10', { timeout: 15000 })
 
-  // Live eligible count responds to a filter edit.
-  const genreInput = page.getByPlaceholder('e.g. Comedy')
-  await genreInput.fill('Nonexistent Genre XYZ')
+  // Live eligible count responds to a filter edit. Genre is a closed select
+  // now (its options come from the linked library), so an impossible genre
+  // can no longer be typed — narrow on "Year, from" instead. Any value above
+  // the fixture set's newest title (2021, server/plex/fakeClient.ts) empties
+  // the pool, and validateTmdbFilters clamps whatever is typed down to
+  // next year, so this stays 0 no matter what year the suite runs in.
+  const yearFrom = page.getByPlaceholder('1930')
+  await yearFrom.fill('3000')
   await expect(page.getByTestId('stat-pool')).toHaveText('0', { timeout: 15000 })
-  await genreInput.fill('')
+  await yearFrom.fill('')
 
   // The restyled CTA still creates a room.
   await page.getByTestId('create-room').click()

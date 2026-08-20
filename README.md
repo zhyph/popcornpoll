@@ -78,6 +78,16 @@ you expose it beyond that, put it behind your own access control (a
 reverse-proxy with basic auth, an authenticating gateway, etc.) — this is
 your responsibility, not something the app does for you.
 
+The landing page's stats — how many titles are on the shelf, how many
+movie nights have been settled, and the "last week" strip of recently
+matched titles — come from an unauthenticated `GET /api/stats`, because
+that page is itself unauthenticated. **Anyone who can reach your instance
+can see what your group recently matched on**, without creating a room.
+That is the same trust boundary as everything else here, stated
+explicitly rather than left implied: if that list is something you'd
+rather not show, the app is not the place to fix it — put access control
+in front of the whole instance, as above.
+
 Room creation, the WebSocket connection, and the solo pool endpoint are
 all rate-limited **per client IP**. If your whole group joins from behind
 the same NAT (one home network, campus wifi, a shared office), they

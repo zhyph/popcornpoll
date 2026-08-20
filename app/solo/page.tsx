@@ -45,6 +45,14 @@ export default function SoloPage() {
   const [surpriseCard, setSurpriseCard] = useState<PoolEntry | null>(null)
 
   const [pickedCard, setPickedCard] = useState<PoolEntry | null>(null)
+  // Posters that 502 out of the proxy (upstream hiccup, movie pulled from
+  // Plex since the pool was built) fall back to the same bare frame a
+  // posterless entry already gets, instead of leaving a permanently broken
+  // <img> over the rank number. Keyed by movieId because the shortlist grid
+  // and the pick screen render the same movies. Cleared whenever a new
+  // shortlist is built (and on reset), so a one-off upstream hiccup doesn't
+  // keep a title posterless for the rest of the session.
+  const [failedPosterIds, setFailedPosterIds] = useState<Set<number>>(new Set())
   const [roomCode, setRoomCode] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
 
@@ -85,6 +93,7 @@ export default function SoloPage() {
     setEligibleCount(null)
     setSubmitError(null)
     setShortlist([])
+    setFailedPosterIds(new Set())
     setSeen([])
     setSurpriseVisible(false)
     setSurpriseSpinning(false)
@@ -123,6 +132,7 @@ export default function SoloPage() {
       setShortlist(body.pool)
       setDegraded(body.degraded)
       setSeen([])
+      setFailedPosterIds(new Set())
       setScreen('shortlist')
     } catch {
       toast(tErrors('generic'))
@@ -390,12 +400,13 @@ export default function SoloPage() {
           {shortlist.slice(0, 24).map((entry, i) => (
             <div key={entry.movieId} className="flex flex-col border border-brass/35 bg-ink" data-testid="shortlist-card">
               <div className="relative box-border flex aspect-[2/3] items-end bg-velvet/40 p-2.5">
-                {(entry.posterSource === 'plex' || entry.posterPath) && (
+                {(entry.posterSource === 'plex' || entry.posterPath) && !failedPosterIds.has(entry.movieId) && (
                   <img
                     className="absolute inset-0 h-full w-full object-cover"
                     src={`/api/poster?movieId=${entry.movieId}&w=342`}
                     alt={entry.title}
                     loading="lazy"
+                    onError={() => setFailedPosterIds((prev) => new Set(prev).add(entry.movieId))}
                   />
                 )}
                 <span className="absolute left-0 top-0 bg-marquee px-2.5 py-1 font-display text-[15px] text-ink">
@@ -459,11 +470,12 @@ export default function SoloPage() {
       </div>
       <div className="flex w-full flex-wrap items-start justify-center gap-6 border-2 border-brass/60 bg-gradient-to-b from-velvet/70 to-ink/92 p-6 text-left sm:p-8">
         <div className="aspect-[2/3] w-[clamp(150px,22vw,200px)] flex-none bg-velvet/40">
-          {(picked.posterSource === 'plex' || picked.posterPath) && (
+          {(picked.posterSource === 'plex' || picked.posterPath) && !failedPosterIds.has(picked.movieId) && (
             <img
               className="h-full w-full object-cover"
               src={`/api/poster?movieId=${picked.movieId}&w=342`}
               alt={picked.title}
+              onError={() => setFailedPosterIds((prev) => new Set(prev).add(picked.movieId))}
             />
           )}
         </div>

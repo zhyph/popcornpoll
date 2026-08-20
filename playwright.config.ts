@@ -1,19 +1,20 @@
 // playwright.config.ts
 import { defineConfig, devices } from '@playwright/test'
+import { E2E_DATA_DIR } from './e2e/dataDir'
 
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false, // each test starts its own server on a fresh port; keep simple, no port contention
-  // All projects share the one webServer above — and that server's ./data
-  // (server/config.ts's DATA_DIR default) isn't isolated per project, so
-  // concurrent chromium/mobile-chrome workers race on the same SQLite state
-  // (movies table, room store, rate-limit buckets). fullyParallel:false only
+  // All projects share the one webServer above — one process, one SQLite
+  // file (DATA_DIR below), one room store, one set of rate-limit buckets —
+  // so concurrent chromium/mobile-chrome workers would race on all of it.
+  // Per-project isolation isn't a matter of pointing DATA_DIR somewhere
+  // else: it would need a separate webServer (and a second full `next
+  // build`) per project. fullyParallel:false only
   // serializes tests *within* a file; workers still run different files (or
   // different projects covering the same file) concurrently by default.
   // Force one worker so the whole suite — every project, every file — runs
-  // strictly serially against that one shared server. Slower, but correct;
-  // isolating ./data per project would need a separate webServer (and a
-  // second full `next build`) per project instead.
+  // strictly serially against that one shared server. Slower, but correct.
   workers: 1,
   timeout: 60_000,
   // exhaustion.spec.ts's fallback-screen wait has twice needed a bigger
@@ -23,21 +24,22 @@ export default defineConfig({
   // sensitivity, rather than guessing at a third timeout constant.
   retries: process.env.CI ? 2 : 0,
   webServer: {
-    // Run against a production build, not `next dev`. Root-caused via
-    // systematic-debugging: in this environment, Next.js dev mode's client
-    // runtime does not hydrate when the page is driven by Playwright Test's
-    // own launched Chromium — clicks never reach React's event handlers and
-    // client-side effects never fire, with no console error (confirmed by a
-    // minimal page.setContent() repro that ruled out the browser/JS engine
-    // itself: MessageChannel/rAF scheduling primitives work fine, and a
-    // plain inline onclick handler fires — so this is specific to Next dev
-    // mode's own client bundle). The same page hydrates correctly when
-    // driven interactively (e.g. via an MCP browser tool) or when served
-    // from a production build. Building first and serving with
-    // NODE_ENV=production sidesteps the dev-mode-specific failure — and is
-    // also just a better match for real deployed behavior, without dev
-    // mode's on-demand per-route compile cost or HMR-socket churn.
-    command: 'npm run build && npm run start',
+    // Run against a production build, not `next dev`. Dev mode used to be
+    // unusable here for a reason that is now fixed and understood: the room
+    // server's 'upgrade' listener destroyed every non-/ws upgrade, including
+    // Next's dev HMR socket (/_next/hmr), and without that socket Turbopack's
+    // dev client never boots — pages render server-side but never hydrate, so
+    // clicks reach no React handler and no effect ever runs. server/index.ts
+    // now hands /_next/hmr upgrades to Next's own handler in dev. The
+    // production build stays the target here anyway: it is what actually gets
+    // deployed, and it avoids dev mode's on-demand per-route compile cost and
+    // HMR-socket churn inside a timing-sensitive suite.
+    // The DATA_DIR below is wiped first so every run starts from an empty
+    // database. Without it this suite inherited server/config.ts's './data'
+    // default — i.e. the developer's own instance — which both made results
+    // depend on whatever library happened to be synced locally and let the
+    // fake-Plex resync overwrite that real library's in_library flags.
+    command: `rm -rf "${E2E_DATA_DIR}" && npm run build && npm run start`,
     port: 3100,
     reuseExistingServer: false,
     timeout: 120_000, // `next build` runs before the server starts listening
@@ -60,6 +62,8 @@ export default defineConfig({
       // 5/sec instead of the production ~0.167/sec means it recovers in
       // about 2 seconds.
       ROOM_RATE_LIMIT_REFILL_PER_SECOND: '5',
+      // Never the default './data': see the command above.
+      DATA_DIR: E2E_DATA_DIR,
     },
   },
   use: { baseURL: 'http://localhost:3100' },

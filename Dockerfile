@@ -30,6 +30,10 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.js ./next.config.js
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/server ./server
+# lib/ holds securityHeaders.mjs, imported at runtime by BOTH server/index.ts
+# and next.config.js — without it the container dies at import time with
+# ERR_MODULE_NOT_FOUND before it ever listens.
+COPY --from=builder /app/lib ./lib
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /data && chown -R popcornpoll:popcornpoll /data /app
 

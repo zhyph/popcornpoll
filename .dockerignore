@@ -4,5 +4,10 @@ data
 *.db
 .git
 e2e
+# Excluded alongside e2e/ because it imports from it (e2e/dataDir.ts): with
+# only e2e/ dropped, `npm run build`'s type-check inside the image fails on
+# a module that isn't in the build context. Nothing in the runtime image
+# runs Playwright anyway.
+playwright.config.ts
 **/*.test.ts
 .env

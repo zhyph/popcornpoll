@@ -1,6 +1,6 @@
 // e2e/authorization.spec.ts
 import { test, expect, chromium } from '@playwright/test'
-import { pinEnglishLocale } from './fixtures'
+import { expectRosterCount, pinEnglishLocale } from './fixtures'
 
 test('a non-host cannot start the room', async ({ baseURL }) => {
   const browser = await chromium.launch()
@@ -22,7 +22,7 @@ test('a non-host cannot start the room', async ({ baseURL }) => {
   // on the host's roster) before asserting Start stays invisible for the
   // guest — otherwise this could pass vacuously against a silently-failed
   // join, since a guest who never joined also never sees "Start".
-  await expect(hostPage.getByRole('button', { name: 'Remove' })).toHaveCount(2, { timeout: 15000 })
+  await expectRosterCount(hostPage, 2)
 
   await expect(guestPage.getByRole('button', { name: 'DIM THE LIGHTS' })).not.toBeVisible()
   await browser.close()

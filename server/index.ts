@@ -23,6 +23,10 @@ import { createEligibleCountHandler } from './http/eligibleCount'
 import { createGenresHandler } from './http/genres'
 import { createSoloHandlers } from './http/solo'
 import { DecryptionError, getPlexLink, savePlexLink } from './plex/link'
+// Shared with next.config.js's headers() — /api/* is dispatched below without
+// ever reaching Next, so its headers() never runs for these routes. See
+// lib/securityHeaders.mjs for why the keys are lowercase.
+import { SECURITY_HEADERS } from '../lib/securityHeaders.mjs'
 
 const SWEEP_INTERVAL_MS = 60_000
 
@@ -34,23 +38,6 @@ const SWEEP_INTERVAL_MS = 60_000
 // request (a solo/surprise movieIds array, itself capped at
 // MAX_SURPRISE_MOVIE_IDS entries).
 const MAX_REQUEST_BODY_BYTES = 256 * 1024
-
-// The /api/* half of next.config.js's SECURITY_HEADERS — those routes are
-// dispatched below without ever reaching Next, so its headers() never runs for
-// them. Kept in sync by hand; both lists are short and each is commented to
-// point at the other.
-// Keys are lowercase on purpose. They are merged below with the header names
-// a Response yields, and `Headers.forEach` always lowercases — with Title-Case
-// keys here the two spellings are distinct properties of the same object, so
-// Node emits BOTH and a handler's own value never actually replaces the
-// default. That was observable on /api/poster, which answered with its
-// `sandbox; default-src 'none'` CSP *and* this frame-ancestors one.
-const SECURITY_HEADERS: Record<string, string> = {
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-  'x-frame-options': 'DENY',
-  'content-security-policy': "frame-ancestors 'none'",
-}
 
 // getPlexLink throws DecryptionError when AUTH_ENCRYPTION_KEY has changed
 // since the stored link was encrypted. That must not take the whole
@@ -106,7 +93,8 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
   const genresHandler = createGenresHandler(db)
   const soloHandlers = createSoloHandlers(db, tmdb, config, librarySync)
 
-  const nextApp = opts.skipFrontend ? null : next({ dev: process.env.NODE_ENV !== 'production' })
+  const dev = process.env.NODE_ENV !== 'production'
+  const nextApp = opts.skipFrontend ? null : next({ dev })
   const handleNextRequest = nextApp?.getRequestHandler()
   if (nextApp) await nextApp.prepare()
 
@@ -195,9 +183,9 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
           return
         }
         // /api/* never reaches Next, so next.config.js's headers() can't cover
-        // it — the same list is applied here instead. Spread first so a
+        // it — the same shared list is applied here instead. Spread first so a
         // handler that sets its own (imageProxy's stricter CSP) wins; see
-        // SECURITY_HEADERS above for why that only works in lowercase.
+        // lib/securityHeaders.mjs for why that only works in lowercase.
         const responseHeaders: Record<string, string> = { ...SECURITY_HEADERS }
         webRes.headers.forEach((value, key) => {
           responseHeaders[key.toLowerCase()] = value
@@ -211,7 +199,22 @@ export async function createApp(config: AppConfig, opts: { skipFrontend?: boolea
     })
   })
 
-  const wsHandle = attachWebSocketServer(httpServer, store, db, tmdb, librarySync, config)
+  // Next's dev HMR runs over a WebSocket on /_next/hmr, and the room server's
+  // 'upgrade' listener is the only one on this http server — without this
+  // delegate it destroys that socket and the dev client never boots (dead,
+  // unhydrated pages). Only wired up in dev: `next start`'s handleUpgrade is
+  // an empty method, so delegating in production would just leak the socket.
+  const handleNextUpgrade = dev ? nextApp?.getUpgradeHandler() : undefined
+  const wsHandle = attachWebSocketServer(httpServer, store, db, tmdb, librarySync, config, {
+    handleForeignUpgrade: handleNextUpgrade
+      ? (req, socket, head) => {
+          void handleNextUpgrade(req, socket, head).catch((err) => {
+            console.error('Next upgrade handler failed', err)
+            socket.destroy()
+          })
+        }
+      : undefined,
+  })
 
   const sweepTimer = setInterval(() => {
     const now = Date.now()
