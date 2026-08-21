@@ -1,8 +1,20 @@
 'use client'
 
-import Aurora from '../ui/Aurora'
-import LightRays from '../ui/reactbits/LightRays'
+import dynamic from 'next/dynamic'
 import { usePrefersReducedMotion } from '../../lib/usePrefersReducedMotion'
+
+// Loaded on demand rather than imported directly. This layer sits in the root
+// layout, so a static import puts ogl — the WebGL library both effects use,
+// ~21KB gzipped — plus the two components into the first-load JS of every
+// route, including the ones that never get to show the effect because the
+// visitor has reduced motion on. Neither canvas is content: they are ambient
+// wash behind the page, so nothing about the first paint depends on them.
+//
+// ssr:false because both mount a WebGL context against a real canvas; there
+// is nothing for the server to render, and prerendering them only produces
+// markup the client immediately replaces.
+const Aurora = dynamic(() => import('../ui/Aurora'), { ssr: false })
+const LightRays = dynamic(() => import('../ui/reactbits/LightRays'), { ssr: false })
 
 // Three stacked ambient layers behind every screen: Aurora (existing colour wash),
 // LightRays (the mockup's beam-sway), and a hand-authored film-grain layer

@@ -2,6 +2,7 @@ node_modules/
 .next/
 dist/
 data/
+data-sandbox/
 *.db
 .env
 next-env.d.ts

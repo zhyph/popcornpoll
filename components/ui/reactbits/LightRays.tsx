@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import { Renderer, Program, Triangle, Mesh } from 'ogl';
+import { createAmbientFrameGate } from '../../../lib/ambientFrameRate';
 
 export type RaysOrigin =
   | 'top-center'
@@ -309,8 +310,18 @@ void main() {
         uniforms.rayDir.value = dir;
       };
 
+      // Ambient wash, not content: draw on a fixed budget rather than once per
+      // display refresh. See lib/ambientFrameRate.ts for the measurements.
+      const shouldDrawFrame = createAmbientFrameGate();
+
       const loop = (t: number) => {
         if (!rendererRef.current || !uniformsRef.current || !meshRef.current) {
+          return;
+        }
+
+        // Skipping a draw must still schedule the next tick, or the loop ends.
+        if (!shouldDrawFrame(t)) {
+          animationIdRef.current = requestAnimationFrame(loop);
           return;
         }
 

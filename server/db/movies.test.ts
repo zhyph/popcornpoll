@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from './index'
 import { insertMatch } from './matchHistory'
 import {
+  countEligiblePlexRows,
   findDistinctGenres,
   findEligiblePlexRows,
   findRowsNeedingEnrichment,
@@ -325,6 +326,62 @@ describe('findDistinctGenres', () => {
        VALUES ('pk-bad', 'Bad Row', 'plex', 1, 'not-json', '2026-01-01T00:00:00.000Z')`,
     ).run()
     expect(findDistinctGenres(db)).toEqual(['Comedy'])
+  })
+})
+
+describe('countEligiblePlexRows', () => {
+  // countEligiblePlexRows exists purely so the count-only callers stop
+  // materialising every matching row. That is only safe while it selects the
+  // exact same set findEligiblePlexRows does, so every case here asserts
+  // parity against the row query rather than a hardcoded number — a
+  // hardcoded number would keep passing if the two predicates drifted apart.
+  const base = {
+    tmdbId: null,
+    imdbId: null,
+    posterPath: null,
+    posterSource: 'plex' as const,
+    overview: null,
+    voteCount: 500,
+    lastUsedAt: null,
+  }
+
+  beforeEach(() => {
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-c1', title: 'A', genres: ['Comedy'], year: 2015, rating: 7.5, inLibrary: true })
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-c2', title: 'B', genres: ['Horror'], year: 1999, rating: 6.0, inLibrary: true })
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-c3', title: 'C', genres: ['Comedy', 'Drama'], year: 2021, rating: null, inLibrary: true })
+    upsertPlexRow(db, 1, { ...base, plexRatingKey: 'pk-c4', title: 'D', genres: ['Comedy'], year: 2015, rating: 9.0, inLibrary: false })
+    upsertTmdbOnlyRow(db, {
+      tmdbId: 4242,
+      imdbId: null,
+      title: 'TmdbOnly',
+      posterPath: null,
+      posterSource: 'tmdb',
+      overview: null,
+      year: 2015,
+      genres: ['Comedy'],
+      rating: 8.0,
+      voteCount: 10,
+      lastUsedAt: null,
+    })
+  })
+
+  it.each([
+    ['no filters', {}],
+    ['genre', { genre: 'Comedy' }],
+    ['year range', { yearMin: 2000, yearMax: 2020 }],
+    ['rating floor', { ratingMin: 7 }],
+    ['every filter at once', { genre: 'Comedy', yearMin: 2010, yearMax: 2020, ratingMin: 7 }],
+    ['a genre that matches nothing', { genre: 'Documentary' }],
+    ['LIKE wildcard as a literal', { genre: '%' }],
+    ['LIKE single-char wildcard as a literal', { genre: 'Comed_' }],
+  ])('matches findEligiblePlexRows().length for %s', (_label, filters) => {
+    expect(countEligiblePlexRows(db, filters)).toBe(findEligiblePlexRows(db, filters).length)
+  })
+
+  it('counts only in-library Plex rows, excluding TMDB-only and in_library=0 rows', () => {
+    // Guards the two exclusions the shared predicate carries: the fixture
+    // above has 4 Plex rows (one with in_library=0) plus a TMDB-only row.
+    expect(countEligiblePlexRows(db, {})).toBe(3)
   })
 })
 

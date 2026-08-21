@@ -3,7 +3,8 @@ import { findById } from '../db/movies'
 import { getPlexLink } from '../plex/link'
 import type { PlexClient } from '../plex/client'
 import type { TmdbClient } from '../tmdb/client'
-import { imageResponse, type UpstreamImage } from './imageResponse'
+import { bufferUpstreamImage, imageResponseFromBytes, type UpstreamImage } from './imageResponse'
+import { createImageCache, type ImageCache } from './imageCache'
 
 // Closed set, not an arbitrary integer: `width` reaches Plex's photo
 // transcoder, and letting a caller name any width would turn this
@@ -38,9 +39,11 @@ function parseWidth(url: URL): number {
  * same fetch in ~0.2-0.5s. Both go through here, which is also what lets the
  * client stop caring where a given poster comes from.
  *
- * Every response is built by imageResponse(), so the size cap, the
+ * Every response is built by imageResponseFromBytes(), and every upstream
+ * body goes through bufferUpstreamImage(), so the size cap, the
  * scriptable-content-type refusal and the inert-response headers stay shared
- * with nothing to drift out of sync.
+ * with nothing to drift out of sync — a cache hit and a cache miss answer
+ * with the same headers by construction.
  *
  * It stays an allowlist rather than a passthrough: the caller names a
  * `movieId` this instance already knows about, never an upstream URL.
@@ -50,6 +53,7 @@ export function createImageProxyHandler(
   encryptionKey: string,
   plex: PlexClient,
   tmdb: TmdbClient,
+  cache: ImageCache = createImageCache(),
 ): (req: Request) => Promise<Response> {
   return async (req) => {
     const url = new URL(req.url)
@@ -62,27 +66,68 @@ export function createImageProxyHandler(
 
     const width = parseWidth(url)
 
-    let upstream: UpstreamImage
-    try {
-      if (row.posterSource === 'plex') {
-        if (row.plexRatingKey === null) return new Response(null, { status: 404 })
-        const link = getPlexLink(db, encryptionKey)
-        if (!link) return new Response(null, { status: 502 })
-        upstream = await plex.getThumb(link.serverUrl, link.authToken, row.plexRatingKey, width)
-      } else {
-        if (row.posterPath === null) return new Response(null, { status: 404 })
-        upstream = await tmdb.getPosterImage(row.posterPath, width)
-      }
-    } catch (err) {
-      // Both upstreams are off-process and observably flaky — a Plex server
-      // that just went to sleep, or a TMDB CDN connection that intermittently
-      // times out from this host. That is a bad gateway, not a fault in this
-      // server: letting it throw would surface as an opaque 500 with nothing
-      // in the log to explain it.
-      console.error(`poster proxy: upstream fetch failed for movieId ${movieId}`, err)
-      return new Response(null, { status: 502 })
-    }
+    // movieId alone would be an unsafe key. `movies.id` is `INTEGER PRIMARY
+    // KEY` with no AUTOINCREMENT, so it is a bare rowid: SQLite hands out
+    // max(rowid)+1 and frees an id as soon as the highest row is deleted. Rows
+    // are deleted routinely — mergeTmdbOnlyIntoPlexRow drops a TMDB-only row
+    // whenever a Plex row later claims the same tmdb_id, and
+    // pruneStaleTmdbOnlyRows deletes in batches — so an id can be reissued to
+    // a completely different film. Keyed on the id alone, this cache would
+    // then serve the old film's poster to *every* client for the rest of the
+    // TTL. (The browser-side `immutable` header has always had a narrower
+    // version of this problem; a shared server cache would widen it from one
+    // stale browser to all of them.)
+    //
+    // So the key also carries whatever identifies the image upstream, which is
+    // stable across id reuse: the Plex rating key, or the TMDB poster path.
+    // width is in there because the three allowed widths are three images.
+    const posterIdentity = row.posterSource === 'plex' ? `plex:${row.plexRatingKey}` : `tmdb:${row.posterPath}`
+    const cacheKey = `${movieId}:${width}:${posterIdentity}`
+    const cached = cache.get(cacheKey)
+    if (cached) return imageResponseFromBytes(cached)
 
-    return imageResponse(upstream)
+    // 404s are decided before loadOnce so a missing rating key or poster path
+    // never occupies an in-flight slot.
+    if (row.posterSource === 'plex' && row.plexRatingKey === null) return new Response(null, { status: 404 })
+    if (row.posterSource !== 'plex' && row.posterPath === null) return new Response(null, { status: 404 })
+
+    const image = await cache.loadOnce(cacheKey, async () => {
+      let upstream: UpstreamImage
+      try {
+        if (row.posterSource === 'plex') {
+          const link = getPlexLink(db, encryptionKey)
+          if (!link) return null
+          upstream = await plex.getThumb(link.serverUrl, link.authToken, row.plexRatingKey as string, width)
+        } else {
+          upstream = await tmdb.getPosterImage(row.posterPath as string, width)
+        }
+      } catch (err) {
+        // Both upstreams are off-process and observably flaky — a Plex server
+        // that just went to sleep, or a TMDB CDN connection that intermittently
+        // times out from this host. That is a bad gateway, not a fault in this
+        // server: letting it throw would surface as an opaque 500 with nothing
+        // in the log to explain it.
+        console.error(`poster proxy: upstream fetch failed for movieId ${movieId}`, err)
+        return null
+      }
+      try {
+        const buffered = await bufferUpstreamImage(upstream)
+        // Only successful, validated, size-capped bytes are cached. A 502 is
+        // not stored, so a Plex server that was asleep during one request is
+        // retried on the next rather than remembered as broken for 24h.
+        if (buffered) cache.set(cacheKey, buffered)
+        return buffered
+      } catch (err) {
+        // Reading the body is inside the guarantee too. Anything thrown here
+        // would otherwise reject out of the handler and reach index.ts's bare
+        // catch as an opaque, unlogged 500 — the exact outcome the fetch
+        // branch above goes to trouble to avoid.
+        console.error(`poster proxy: reading the upstream body failed for movieId ${movieId}`, err)
+        return null
+      }
+    })
+
+    if (!image) return new Response(null, { status: 502 })
+    return imageResponseFromBytes(image)
   }
 }

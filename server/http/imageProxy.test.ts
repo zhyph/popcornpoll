@@ -6,6 +6,7 @@ import { openDb } from '../db'
 import { upsertPlexRow, upsertTmdbOnlyRow } from '../db/movies'
 import { savePlexLink } from '../plex/link'
 import { createImageProxyHandler } from './imageProxy'
+import { createImageCache } from './imageCache'
 import type Database from 'better-sqlite3'
 import type { PlexClient } from '../plex/client'
 import type { TmdbClient } from '../tmdb/client'
@@ -65,8 +66,23 @@ function addTmdbRow(tmdbId: number, posterPath: string | null) {
   })
 }
 
-function okImage() {
-  return { body: new ReadableStream(), contentType: 'image/jpeg', status: 200 }
+// Real bytes that actually terminate. The proxy buffers upstream bodies now
+// (that is what makes them cacheable), so a ReadableStream with no source —
+// which never enqueues and never closes — hangs the handler instead of
+// standing in for a poster. No real HTTP body behaves that way.
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9])
+
+function okImage(bytes: Uint8Array = JPEG_BYTES) {
+  return {
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
+    contentType: 'image/jpeg',
+    status: 200,
+  }
 }
 
 function fakeStreamOfSize(totalBytes: number): ReadableStream {
@@ -213,16 +229,132 @@ describe('createImageProxyHandler', () => {
       db,
       KEY,
       {
-        getThumb: vi.fn().mockResolvedValue({
-          body: new ReadableStream(),
+        getThumb: vi.fn().mockImplementation(async () => ({
+          ...okImage(),
           contentType: 'image/jpeg; charset=binary',
-          status: 200,
-        }),
+        })),
       } as unknown as PlexClient,
       {} as TmdbClient,
     )
     const res = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
     expect(res.status).toBe(200)
+  })
+
+  // Every assertion below fails against the uncached proxy: it called the
+  // upstream once per request, so the fetch counts were 2, 4, and 2.
+  describe('caching', () => {
+    it('serves a repeat request for the same poster without touching the upstream', async () => {
+      const row = addPlexRow('pk-cache')
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      const first = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`))
+      const second = await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`))
+
+      expect(first.status).toBe(200)
+      expect(second.status).toBe(200)
+      expect(new Uint8Array(await second.arrayBuffer())).toEqual(JPEG_BYTES)
+      expect(second.headers.get('Content-Type')).toBe('image/jpeg')
+      expect(second.headers.get('Cache-Control')).toBe('public, max-age=86400, immutable')
+      expect(getThumb).toHaveBeenCalledTimes(1)
+    })
+
+    it('collapses concurrent requests for one poster into a single upstream fetch', async () => {
+      const row = addPlexRow('pk-stampede')
+      let release: (() => void) | undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const getThumb = vi.fn().mockImplementation(async () => {
+        await gate
+        return okImage()
+      })
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      const inFlight = [0, 1, 2, 3].map(() =>
+        handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=342`)),
+      )
+      release?.()
+      const responses = await Promise.all(inFlight)
+
+      expect(responses.map((r) => r.status)).toEqual([200, 200, 200, 200])
+      expect(getThumb).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats each allowed width as its own entry', async () => {
+      const row = addPlexRow('pk-widths')
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=185`))
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=500`))
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}&w=185`))
+
+      expect(getThumb).toHaveBeenCalledTimes(2)
+      expect(getThumb.mock.calls.map((c) => c[3])).toEqual([185, 500])
+    })
+
+    it('does not cache a failure, so a sleeping Plex server is retried', async () => {
+      const row = addPlexRow('pk-retry')
+      const getThumb = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+        .mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient)
+
+      expect((await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))).status).toBe(502)
+      expect((await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))).status).toBe(200)
+      expect(getThumb).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not serve a stale poster after SQLite reissues a deleted movie id', async () => {
+      // movies.id is a bare rowid: `INTEGER PRIMARY KEY`, no AUTOINCREMENT. Delete
+      // the highest row and the next insert gets that id back — verified against
+      // SQLite directly, and both mergeTmdbOnlyIntoPlexRow and
+      // pruneStaleTmdbOnlyRows delete rows in normal operation. Keyed on the id
+      // alone, this cache would hand the old film's poster to every client for
+      // the rest of the TTL.
+      const OLD = new Uint8Array([1, 1, 1, 1])
+      const NEW = new Uint8Array([2, 2, 2, 2])
+
+      const first = addTmdbRow(9001, '/old-film.jpg')
+      const getPosterImage = vi
+        .fn()
+        .mockImplementationOnce(async () => okImage(OLD))
+        .mockImplementation(async () => okImage(NEW))
+      const handler = createImageProxyHandler(db, KEY, {} as PlexClient, {
+        getPosterImage,
+      } as unknown as TmdbClient)
+
+      const before = await handler(new Request(`http://localhost/api/poster?movieId=${first.id}&w=342`))
+      expect(new Uint8Array(await before.arrayBuffer())).toEqual(OLD)
+
+      // Free the id, then let a different film take it.
+      db.prepare('DELETE FROM movies WHERE id = ?').run(first.id)
+      const second = addTmdbRow(9002, '/new-film.jpg')
+      expect(second.id).toBe(first.id)
+
+      const after = await handler(new Request(`http://localhost/api/poster?movieId=${second.id}&w=342`))
+      expect(new Uint8Array(await after.arrayBuffer())).toEqual(NEW)
+      expect(getPosterImage).toHaveBeenCalledTimes(2)
+      expect(getPosterImage.mock.calls.map((c) => c[0])).toEqual(['/old-film.jpg', '/new-film.jpg'])
+    })
+
+    it('re-fetches once an entry has expired', async () => {
+      const row = addPlexRow('pk-ttl')
+      let clock = 0
+      const cache = createImageCache({ ttlMs: 1000, now: () => clock })
+      const getThumb = vi.fn().mockImplementation(async () => okImage())
+      const handler = createImageProxyHandler(db, KEY, { getThumb } as unknown as PlexClient, {} as TmdbClient, cache)
+
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      clock = 999
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      expect(getThumb).toHaveBeenCalledTimes(1)
+      clock = 1000
+      await handler(new Request(`http://localhost/api/poster?movieId=${row.id}`))
+      expect(getThumb).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('refuses to relay a non-image body from either upstream', async () => {
@@ -268,7 +400,7 @@ describe('createImageProxyHandler', () => {
     expect((await tmdbHandler(new Request(`http://localhost/api/poster?movieId=${tmdbRow.id}`))).status).toBe(502)
   })
 
-  it('errors the response stream once the proxied body exceeds the 5MB cap, and passes an under-cap body through untouched', async () => {
+  it('refuses an over-cap proxied body with a 502, and passes an under-cap body through untouched', async () => {
     const row = addPlexRow('pk-2')
 
     const oversizedHandler = createImageProxyHandler(
@@ -286,11 +418,13 @@ describe('createImageProxyHandler', () => {
     const oversizedRes = await oversizedHandler(
       new Request(`http://localhost/api/poster?movieId=${row.id}`),
     )
-    await expect(async () => {
-      for await (const _chunk of oversizedRes.body as unknown as AsyncIterable<Uint8Array>) {
-        // draining the stream
-      }
-    }).rejects.toThrow()
+    // The body is now read server-side rather than streamed to the client, so
+    // the cap surfaces as a refusal instead of a stream that errors mid-flight.
+    // Asserting on the status matters: the previous `rejects.toThrow()` over
+    // `res.body` is satisfied by `null` not being async-iterable, so it would
+    // pass for a 502, a 404, or any other empty response.
+    expect(oversizedRes.status).toBe(502)
+    expect(oversizedRes.body).toBeNull()
 
     const underCapHandler = createImageProxyHandler(
       db,
