@@ -307,6 +307,39 @@ describe('createImageProxyHandler', () => {
       expect(getThumb).toHaveBeenCalledTimes(2)
     })
 
+    it('does not serve a stale poster after SQLite reissues a deleted movie id', async () => {
+      // movies.id is a bare rowid: `INTEGER PRIMARY KEY`, no AUTOINCREMENT. Delete
+      // the highest row and the next insert gets that id back — verified against
+      // SQLite directly, and both mergeTmdbOnlyIntoPlexRow and
+      // pruneStaleTmdbOnlyRows delete rows in normal operation. Keyed on the id
+      // alone, this cache would hand the old film's poster to every client for
+      // the rest of the TTL.
+      const OLD = new Uint8Array([1, 1, 1, 1])
+      const NEW = new Uint8Array([2, 2, 2, 2])
+
+      const first = addTmdbRow(9001, '/old-film.jpg')
+      const getPosterImage = vi
+        .fn()
+        .mockImplementationOnce(async () => okImage(OLD))
+        .mockImplementation(async () => okImage(NEW))
+      const handler = createImageProxyHandler(db, KEY, {} as PlexClient, {
+        getPosterImage,
+      } as unknown as TmdbClient)
+
+      const before = await handler(new Request(`http://localhost/api/poster?movieId=${first.id}&w=342`))
+      expect(new Uint8Array(await before.arrayBuffer())).toEqual(OLD)
+
+      // Free the id, then let a different film take it.
+      db.prepare('DELETE FROM movies WHERE id = ?').run(first.id)
+      const second = addTmdbRow(9002, '/new-film.jpg')
+      expect(second.id).toBe(first.id)
+
+      const after = await handler(new Request(`http://localhost/api/poster?movieId=${second.id}&w=342`))
+      expect(new Uint8Array(await after.arrayBuffer())).toEqual(NEW)
+      expect(getPosterImage).toHaveBeenCalledTimes(2)
+      expect(getPosterImage.mock.calls.map((c) => c[0])).toEqual(['/old-film.jpg', '/new-film.jpg'])
+    })
+
     it('re-fetches once an entry has expired', async () => {
       const row = addPlexRow('pk-ttl')
       let clock = 0
@@ -367,7 +400,7 @@ describe('createImageProxyHandler', () => {
     expect((await tmdbHandler(new Request(`http://localhost/api/poster?movieId=${tmdbRow.id}`))).status).toBe(502)
   })
 
-  it('errors the response stream once the proxied body exceeds the 5MB cap, and passes an under-cap body through untouched', async () => {
+  it('refuses an over-cap proxied body with a 502, and passes an under-cap body through untouched', async () => {
     const row = addPlexRow('pk-2')
 
     const oversizedHandler = createImageProxyHandler(
@@ -385,11 +418,13 @@ describe('createImageProxyHandler', () => {
     const oversizedRes = await oversizedHandler(
       new Request(`http://localhost/api/poster?movieId=${row.id}`),
     )
-    await expect(async () => {
-      for await (const _chunk of oversizedRes.body as unknown as AsyncIterable<Uint8Array>) {
-        // draining the stream
-      }
-    }).rejects.toThrow()
+    // The body is now read server-side rather than streamed to the client, so
+    // the cap surfaces as a refusal instead of a stream that errors mid-flight.
+    // Asserting on the status matters: the previous `rejects.toThrow()` over
+    // `res.body` is satisfied by `null` not being async-iterable, so it would
+    // pass for a 502, a 404, or any other empty response.
+    expect(oversizedRes.status).toBe(502)
+    expect(oversizedRes.body).toBeNull()
 
     const underCapHandler = createImageProxyHandler(
       db,

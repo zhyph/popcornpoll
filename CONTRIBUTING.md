@@ -18,9 +18,13 @@ testing a flow — run against a scratch directory instead:
 
 ```bash
 npm run dev:sandbox     # same as dev, against ./data-sandbox
-npm run start:sandbox   # production mode, against ./data-sandbox
+npm run start:sandbox   # next build, then production mode, against ./data-sandbox
 npm run sandbox:reset   # delete it and start clean
 ```
+
+`start:sandbox` runs `next build` first on purpose: with `NODE_ENV=production`
+the server calls `next({dev: false})`, which throws "Could not find a
+production build" if `.next` holds nothing but dev output.
 
 Both set `DATA_DIR` inline, so they override an exported one rather than
 losing to it. `./data-sandbox` is gitignored. The first run starts from an

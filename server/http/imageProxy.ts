@@ -66,10 +66,23 @@ export function createImageProxyHandler(
 
     const width = parseWidth(url)
 
-    // Keyed on the pair the bytes actually depend on. movieId rather than the
-    // upstream URL because that is what this endpoint accepts, and width
-    // because the three allowed widths are three different images.
-    const cacheKey = `${movieId}:${width}`
+    // movieId alone would be an unsafe key. `movies.id` is `INTEGER PRIMARY
+    // KEY` with no AUTOINCREMENT, so it is a bare rowid: SQLite hands out
+    // max(rowid)+1 and frees an id as soon as the highest row is deleted. Rows
+    // are deleted routinely — mergeTmdbOnlyIntoPlexRow drops a TMDB-only row
+    // whenever a Plex row later claims the same tmdb_id, and
+    // pruneStaleTmdbOnlyRows deletes in batches — so an id can be reissued to
+    // a completely different film. Keyed on the id alone, this cache would
+    // then serve the old film's poster to *every* client for the rest of the
+    // TTL. (The browser-side `immutable` header has always had a narrower
+    // version of this problem; a shared server cache would widen it from one
+    // stale browser to all of them.)
+    //
+    // So the key also carries whatever identifies the image upstream, which is
+    // stable across id reuse: the Plex rating key, or the TMDB poster path.
+    // width is in there because the three allowed widths are three images.
+    const posterIdentity = row.posterSource === 'plex' ? `plex:${row.plexRatingKey}` : `tmdb:${row.posterPath}`
+    const cacheKey = `${movieId}:${width}:${posterIdentity}`
     const cached = cache.get(cacheKey)
     if (cached) return imageResponseFromBytes(cached)
 
@@ -97,12 +110,21 @@ export function createImageProxyHandler(
         console.error(`poster proxy: upstream fetch failed for movieId ${movieId}`, err)
         return null
       }
-      const buffered = await bufferUpstreamImage(upstream)
-      // Only successful, validated, size-capped bytes are cached. A 502 is
-      // not stored, so a Plex server that was asleep during one request is
-      // retried on the next rather than remembered as broken for 24h.
-      if (buffered) cache.set(cacheKey, buffered)
-      return buffered
+      try {
+        const buffered = await bufferUpstreamImage(upstream)
+        // Only successful, validated, size-capped bytes are cached. A 502 is
+        // not stored, so a Plex server that was asleep during one request is
+        // retried on the next rather than remembered as broken for 24h.
+        if (buffered) cache.set(cacheKey, buffered)
+        return buffered
+      } catch (err) {
+        // Reading the body is inside the guarantee too. Anything thrown here
+        // would otherwise reject out of the handler and reach index.ts's bare
+        // catch as an opaque, unlogged 500 — the exact outcome the fetch
+        // branch above goes to trouble to avoid.
+        console.error(`poster proxy: reading the upstream body failed for movieId ${movieId}`, err)
+        return null
+      }
     })
 
     if (!image) return new Response(null, { status: 502 })

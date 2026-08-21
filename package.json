@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "tsx server/index.ts",
     "dev:sandbox": "DATA_DIR=./data-sandbox tsx server/index.ts",
-    "start:sandbox": "DATA_DIR=./data-sandbox NODE_ENV=production tsx server/index.ts",
+    "start:sandbox": "next build && DATA_DIR=./data-sandbox NODE_ENV=production tsx server/index.ts",
     "sandbox:reset": "rm -rf ./data-sandbox",
     "build": "next build",
     "start": "tsx server/index.ts",

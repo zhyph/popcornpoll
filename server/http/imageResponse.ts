@@ -37,9 +37,15 @@ export function isSafeImageType(contentType: string | null): boolean {
  * make this process buffer more than MAX_IMAGE_BYTES.
  */
 async function readCapped(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
-  const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
+  let reader: ReadableStreamDefaultReader<Uint8Array>
+  try {
+    // Inside the try: getReader() throws TypeError on an already-locked body.
+    reader = stream.getReader()
+  } catch {
+    return null
+  }
   try {
     for (;;) {
       const { done, value } = await reader.read()
