@@ -304,7 +304,13 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   if (terminal?.type === 'room_ended' || snapshot.status === 'ended') {
     const reason = terminal?.type === 'room_ended' ? terminal.reason : 'host_ended'
     const message = tRoomEnded.has(reason) ? tRoomEnded(reason) : tRoomEnded('host_ended')
-    const keptMovie = latestMatchId !== null ? pool.find((e) => e.movieId === latestMatchId) : undefined
+    // Only a match still awaiting the host's decision was kept; one the host
+    // already swiped past (continuedMatchId) isn't tonight's pick even if
+    // the session ended later via End session or a timeout.
+    const keptMovie =
+      latestMatchId !== null && latestMatchId !== snapshot.continuedMatchId
+        ? pool.find((e) => e.movieId === latestMatchId)
+        : undefined
     return (
       <main
         data-testid="terminal-screen"

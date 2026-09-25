@@ -81,5 +81,11 @@ test('two participants reach a match', async ({ baseURL }) => {
   await hostPage.getByTestId('match-keep-going').click()
   await expect(hostPage.locator('[data-testid="match-banner"]')).toHaveCount(0)
   await expect(guestPage.locator('[data-testid="match-banner"]')).toHaveCount(0)
+
+  // Ending the session after passing on the match must not present that
+  // passed-on movie as tonight's pick.
+  await hostPage.getByRole('button', { name: 'End session' }).click()
+  await expect(guestPage.getByTestId('terminal-screen')).toBeVisible()
+  await expect(guestPage.getByTestId('kept-movie')).toHaveCount(0)
   await browser.close()
 })
