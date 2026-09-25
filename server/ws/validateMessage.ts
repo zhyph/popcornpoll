@@ -73,6 +73,8 @@ export function isClientMessage(value: unknown): value is ClientMessage {
         (value.candidateSource === undefined || isCandidateSource(value.candidateSource)) &&
         (value.tmdbFilters === undefined || isTmdbFilters(value.tmdbFilters))
       )
+    case 'continue_after_match':
+      return isFiniteNumber(value.movieId)
     case 'kick':
       return typeof value.participantId === 'string'
     default:

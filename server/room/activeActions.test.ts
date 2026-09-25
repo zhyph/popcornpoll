@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from '../db'
 import { upsertPlexRow } from '../db/movies'
 import { joinRoom, reconnectRoom } from './actions'
-import { restartReel, startRoom, swipeAction, type SyncWaiter } from './activeActions'
+import { continueAfterMatch, restartReel, startRoom, swipeAction, type SyncWaiter } from './activeActions'
 import { createRoomStore } from './roomStore'
 import type Database from 'better-sqlite3'
 import type { TmdbClient } from '../tmdb/client'
@@ -461,5 +461,44 @@ describe('swipeAction', () => {
     expect(room.participants.get(host.data.participantId)!.finished).toBe(true)
     expect(room.exhausted).toBe(true)
     expect(exhaustedNow).toBe(true)
+  })
+})
+
+describe('continueAfterMatch', () => {
+  async function activeRoomWithMatches(matches: number[]) {
+    const store = createRoomStore()
+    const { code, hostClaimToken } = store.create({ kind: 'all' }, 'plex', {})
+    joinRoom(store, code, 'Host', hostClaimToken)
+    joinRoom(store, code, 'Guest')
+    seedPlexRows(10)
+    await startRoom(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    const room = store.get(code)!
+    room.matches = matches
+    return { store, code, room }
+  }
+
+  it('rejects a non-host caller', async () => {
+    const { store, code, room } = await activeRoomWithMatches([7])
+    expect(continueAfterMatch(store, code, false, 7)).toEqual({ ok: false, code: 'not_host' })
+    expect(room.continuedMatchId).toBeNull()
+  })
+
+  it('marks the latest match as continued', async () => {
+    const { store, code, room } = await activeRoomWithMatches([3, 7])
+    expect(continueAfterMatch(store, code, true, 7)).toEqual({ ok: true, data: { changed: true } })
+    expect(room.continuedMatchId).toBe(7)
+  })
+
+  it('ignores a stale id so a newer match is not dismissed unseen', async () => {
+    const { store, code, room } = await activeRoomWithMatches([3, 7])
+    expect(continueAfterMatch(store, code, true, 3)).toEqual({ ok: true, data: { changed: false } })
+    expect(room.continuedMatchId).toBeNull()
+  })
+
+  it('is cleared by restartReel so a rematch of the same movie shows again', async () => {
+    const { store, code, room } = await activeRoomWithMatches([7])
+    continueAfterMatch(store, code, true, 7)
+    await restartReel(store, code, true, db, noOpTmdb, noOpLibrarySync)
+    expect(room.continuedMatchId).toBeNull()
   })
 })

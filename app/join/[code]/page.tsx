@@ -13,14 +13,14 @@ export default function JoinRoomPage({ params }: { params: Promise<{ code: strin
   const [displayName, setDisplayName] = useState('')
 
   return (
-    <main className="mx-auto flex max-w-[640px] flex-1 flex-col items-center justify-center gap-6 px-4">
+    <main className="mx-auto w-full flex max-w-[640px] flex-1 flex-col items-center justify-center gap-6 px-4 py-8">
       <p
         className="font-mono text-[11px] uppercase tracking-[.4em] text-brass"
         style={{ animation: 'revealUp .6s ease-out both' }}
       >
         {t('invitedTo')}
       </p>
-      <div style={{ animation: 'revealUp .8s ease-out both .1s' }}>
+      <div className="w-full" style={{ animation: 'revealUp .8s ease-out both .1s' }}>
         <CodeSlats code={code} />
       </div>
       <div

@@ -1,4 +1,16 @@
 @import "tailwindcss";
+
+/* Without an explicit width a text input sizes itself to ~20 characters of
+   its own font, and that intrinsic width becomes the min-content of every
+   flex/grid ancestor: the Join name field alone (display font, 28px+) made
+   the page ~345px wide, sideways-scrolling any phone narrower than that.
+   Stretching to the container is what every input here wants anyway. */
+@layer base {
+  input:where(:not([type="checkbox"], [type="radio"])) {
+    width: 100%;
+    min-width: 0;
+  }
+}
 @config "../tailwind.config.ts";
 @plugin "tailwindcss-animate";
 @custom-variant dark (&:where(.dark, .dark *));

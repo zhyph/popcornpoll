@@ -62,7 +62,7 @@ export function EdgeState({
   const accent = edgeAccentClasses(kind)
   const Icon = ICON[kind]
   return (
-    <main data-testid={testId} className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center px-4 py-10">
+    <main data-testid={testId} className="mx-auto w-full flex flex-1 max-w-md flex-col items-center justify-center px-4 py-10">
       <div
         className={`flex w-full flex-col items-center gap-4 border-2 ${accent.border} bg-gradient-to-b from-velvet/70 to-ink/95 px-6 py-10 text-center sm:px-10`}
       >

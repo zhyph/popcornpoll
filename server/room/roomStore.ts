@@ -65,6 +65,7 @@ export function createRoomStore(codeGenerator: () => string = generateRoomCode):
         pool: [],
         matches: [],
         matchedMovieIds: new Set(),
+        continuedMatchId: null,
         exhausted: false,
         genreTally: emptyTally(),
         totalVotes: 0,

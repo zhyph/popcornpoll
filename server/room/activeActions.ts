@@ -166,6 +166,7 @@ export async function restartReel(
   room.reputationM = m
   room.matches = []
   room.matchedMovieIds = new Set()
+  room.continuedMatchId = null
   room.genreTally = emptyTally()
   room.totalVotes = 0
   room.lastActivityAt = Date.now()
@@ -223,4 +224,24 @@ export function swipeAction(
   room.lastActivityAt = Date.now()
 
   return ok({ consumed: true, newMatches, nextCardForParticipant, exhaustedNow })
+}
+
+// Host's "keep going" on a match reveal. Takes the movieId the host was
+// looking at so a click racing a newer match can't dismiss that newer one
+// unseen: a stale id is a silent no-op (changed: false), the newer reveal
+// simply stays up for the host to decide on.
+export function continueAfterMatch(
+  store: RoomStore,
+  code: string,
+  callerIsHost: boolean,
+  movieId: number,
+): ActionResult<{ changed: boolean }> {
+  if (!callerIsHost) return err('not_host')
+  const room = store.get(code)
+  if (!room) return err('room_not_found')
+  if (room.status !== 'active') return err('room_not_active')
+  if (room.matches[room.matches.length - 1] !== movieId) return ok({ changed: false })
+  room.continuedMatchId = movieId
+  room.lastActivityAt = Date.now()
+  return ok({ changed: true })
 }

@@ -63,19 +63,32 @@ export default function CodeSlats({
   const maxHeight = size === 'default' ? Math.round((maxWidth * 90) / 68) : 34
   const maxFont = size === 'default' ? Math.round((maxWidth * 64) / 68) : 22
 
+  // Groups wrap between each other but never inside, so on a phone the
+  // longest group alone has to fit the row. Size off this component's own
+  // width (cqw, the root is an inline-size container) rather than the
+  // viewport: the same component sits inside very different paddings (Join
+  // page vs. the Match reveal's framed card), which a vw floor can't know
+  // about. The old 27px vw floor pushed a 13-letter title or an 11-tile
+  // room code past a 360px screen.
+  const longestGroup = Math.max(...groups.map((g) => g.length), 1)
+  const fitPx = `((100cqw - ${(longestGroup - 1) * GAP_BUDGET_PX}px) / ${longestGroup})`
   const tileStyle =
     size === 'small'
       ? { width: 26, height: 34 }
       : {
-          width: `clamp(27px, 6.4vw, ${maxWidth}px)`,
-          height: `clamp(37px, 8.4vw, ${maxHeight}px)`,
-          fontSize: `clamp(24px, 6vw, ${maxFont}px)`,
+          width: `min(${maxWidth}px, calc(${fitPx}))`,
+          height: `min(${maxHeight}px, calc(${fitPx} * 90 / 68))`,
+          fontSize: `min(${maxFont}px, calc(${fitPx} * 64 / 68))`,
         }
   const gap = size === 'small' ? 'gap-1' : 'gap-1.5 sm:gap-3'
   const innerGap = size === 'small' ? 'gap-0.5' : 'gap-1 sm:gap-1.5'
 
   return (
-    <div className={`flex flex-wrap items-center justify-center ${gap}`} role="img" aria-label={code}>
+    <div
+      className={`flex w-full flex-wrap items-center justify-center [container-type:inline-size] ${gap}`}
+      role="img"
+      aria-label={code}
+    >
       {groups.map((letters, gi) => (
         <div key={gi} className={`flex ${innerGap}`}>
           {letters.map(({ letter, delay }, li) => (

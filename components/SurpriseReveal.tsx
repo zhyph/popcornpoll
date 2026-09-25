@@ -73,7 +73,7 @@ export function SurpriseReveal({ visible, spinning, card, seenCount, totalCount,
         )}
 
         {!spinning && card && (
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex w-full flex-col items-center gap-4">
             <CodeSlats code={card.title.toUpperCase()} splitOn="space" />
             {metaParts.length > 0 && (
               <p className="font-mono text-xs uppercase tracking-widest text-ticket/70">{metaParts.join(' · ')}</p>
