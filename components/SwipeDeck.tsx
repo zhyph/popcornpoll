@@ -81,25 +81,24 @@ export function SwipeDeck({
   }
 
   return (
-    <div className="flex items-center gap-2 sm:gap-6" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
+    <div className="flex w-full items-center justify-center gap-2 sm:w-auto sm:gap-6" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'none' }}>
       <button
         type="button"
         onClick={() => animateDecision('no')}
         aria-label={t('noAriaLabel')}
         // 2 rails + card + gaps must fit inside the narrowest real phone
-        // viewport (~360px, minus the page's own px-4 padding), not just
-        // look fine at sm: and up — the previous w-16/w-64/gap-3 base sizes
-        // summed to 408px, wider than any phone, so this row silently
-        // pushed the whole page into horizontal scroll below ~440px.
-        className="flex h-28 w-10 flex-col items-center justify-center gap-1 border border-exit-red text-exit-red hover:bg-exit-red/10 sm:h-44 sm:w-20"
+        // (320px, minus the page's px-4). Below sm: the rails are fixed
+        // (wide enough for "ADMITIR") and the card takes whatever is left,
+        // so no phone width pushes the row into horizontal scroll.
+        className="flex h-28 w-12 shrink-0 flex-col items-center justify-center gap-1 border border-exit-red text-exit-red hover:bg-exit-red/10 sm:h-44 sm:w-20"
       >
-        <span className="font-display text-sm tracking-widest sm:text-lg">{t('passLabel')}</span>
-        <span className="font-mono text-[8px] uppercase tracking-widest opacity-70 sm:hidden">{t('passHintMobile')}</span>
+        <span className="font-display text-xs tracking-normal sm:text-lg sm:tracking-widest">{t('passLabel')}</span>
+        <span className="font-mono text-[8px] uppercase leading-tight tracking-normal opacity-70 sm:hidden">{t('passHintMobile')}</span>
         <span className="hidden font-mono text-[9px] uppercase tracking-widest opacity-70 sm:inline">{t('passHintDesktop')}</span>
       </button>
 
       <motion.div
-        className="ticket-edge relative w-56 origin-bottom overflow-hidden rounded bg-velvet shadow-xl sm:w-80"
+        className="ticket-edge relative min-w-0 max-w-64 flex-1 origin-bottom sm:w-80 sm:max-w-none sm:flex-none overflow-hidden rounded bg-velvet shadow-xl"
         style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%, 12px 100%, 0 calc(100% - 12px))' }}
         drag="x"
         animate={controls}
@@ -170,10 +169,10 @@ export function SwipeDeck({
         type="button"
         onClick={() => animateDecision('yes')}
         aria-label={t('yesAriaLabel')}
-        className="flex h-28 w-10 flex-col items-center justify-center gap-1 border border-admit-teal text-admit-teal hover:bg-admit-teal/10 sm:h-44 sm:w-20"
+        className="flex h-28 w-12 shrink-0 flex-col items-center justify-center gap-1 border border-admit-teal text-admit-teal hover:bg-admit-teal/10 sm:h-44 sm:w-20"
       >
-        <span className="font-display text-sm tracking-widest sm:text-lg">{t('admitLabel')}</span>
-        <span className="font-mono text-[8px] uppercase tracking-widest opacity-70 sm:hidden">{t('admitHintMobile')}</span>
+        <span className="font-display text-xs tracking-normal sm:text-lg sm:tracking-widest">{t('admitLabel')}</span>
+        <span className="font-mono text-[8px] uppercase leading-tight tracking-normal opacity-70 sm:hidden">{t('admitHintMobile')}</span>
         <span className="hidden font-mono text-[9px] uppercase tracking-widest opacity-70 sm:inline">{t('admitHintDesktop')}</span>
       </button>
     </div>

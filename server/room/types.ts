@@ -40,6 +40,10 @@ export interface RoomState {
   pool: PoolEntry[]
   matches: number[]
   matchedMovieIds: Set<number>
+  // Latest match the host chose to swipe past. While matches' last entry
+  // differs from this, every client holds on the match reveal waiting for
+  // the host's keep/continue decision.
+  continuedMatchId: number | null
   exhausted: boolean
   genreTally: GenreTally
   totalVotes: number

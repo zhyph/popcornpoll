@@ -17,6 +17,7 @@ export type ClientMessage =
   | { type: 'start' }
   | { type: 'end_room' }
   | { type: 'restart_reel' }
+  | { type: 'continue_after_match'; movieId: number }
   | {
       type: 'update_settings'
       matchThreshold?: MatchThreshold
@@ -51,6 +52,7 @@ export interface RoomSnapshot {
   mySwipes: Record<number, 'yes' | 'no'>
   participants: ParticipantView[]
   matches: number[]
+  continuedMatchId: number | null
   exhausted: boolean
   matchThreshold: MatchThreshold
   candidateSource: CandidateSource
@@ -77,6 +79,7 @@ export type ServerMessage =
       participants: ParticipantView[]
       status: RoomStatus
       matches: number[]
+      continuedMatchId: number | null
       exhausted: boolean
       matchThreshold: MatchThreshold
       candidateSource: CandidateSource

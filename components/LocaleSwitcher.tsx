@@ -20,15 +20,17 @@ export function LocaleSwitcher() {
   }
 
   return (
-    <div className="flex gap-1 font-mono text-[10px] uppercase tracking-widest text-brass sm:text-xs">
+    <div className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-brass sm:text-xs">
       <Button
         variant="ghost"
         size="sm"
         disabled={isPending}
         className={locale === 'pt-br' ? 'text-marquee' : 'text-brass'}
         onClick={() => switchTo('pt-br')}
+        aria-label={t('portuguese')}
       >
-        {t('portuguese')}
+        <span className="sm:hidden">PT</span>
+        <span className="hidden sm:inline">{t('portuguese')}</span>
       </Button>
       <span>/</span>
       <Button
@@ -37,8 +39,10 @@ export function LocaleSwitcher() {
         disabled={isPending}
         className={locale === 'en-us' ? 'text-marquee' : 'text-brass'}
         onClick={() => switchTo('en-us')}
+        aria-label={t('english')}
       >
-        {t('english')}
+        <span className="sm:hidden">EN</span>
+        <span className="hidden sm:inline">{t('english')}</span>
       </Button>
     </div>
   )

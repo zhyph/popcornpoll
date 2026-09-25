@@ -70,9 +70,16 @@ test('two participants reach a match', async ({ baseURL }) => {
   // Assert on the overlay itself, not on the [data-testid] wrapper: that
   // wrapper's only child is `fixed inset-0` (components/MarqueeReveal.tsx),
   // so the wrapper has a zero-size box of its own and Playwright reports it
-  // as hidden even while the reveal is plainly on screen. The reveal
-  // auto-dismisses after MATCH_REVEAL_MS (8s, app/room/[code]/page.tsx), and
-  // the loop above stops on the first match, so this runs well inside it.
+  // as hidden even while the reveal is plainly on screen.
   await expect(hostPage.locator('[data-testid="match-banner"] [role="alert"]')).toBeVisible()
+  await expect(guestPage.locator('[data-testid="match-banner"] [role="alert"]')).toBeVisible()
+
+  // No timer: the reveal holds for everyone until the host decides, and
+  // only the host gets the keep / keep going choice.
+  await expect(guestPage.getByTestId('match-waiting')).toBeVisible()
+  await expect(guestPage.getByTestId('match-keep-going')).toHaveCount(0)
+  await hostPage.getByTestId('match-keep-going').click()
+  await expect(hostPage.locator('[data-testid="match-banner"]')).toHaveCount(0)
+  await expect(guestPage.locator('[data-testid="match-banner"]')).toHaveCount(0)
   await browser.close()
 })

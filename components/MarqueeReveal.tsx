@@ -11,16 +11,14 @@ const BULB_COUNT = 28
 export function MarqueeReveal({
   movie,
   matchRuleLabel,
-  secondsLeft,
   isHost,
-  onDismiss,
+  onContinue,
   onEndSession,
 }: {
   movie: PoolEntry
   matchRuleLabel: string
-  secondsLeft: number
   isHost: boolean
-  onDismiss: () => void
+  onContinue: () => void
   onEndSession: () => void
 }) {
   const t = useTranslations('marqueeReveal')
@@ -32,8 +30,8 @@ export function MarqueeReveal({
   ].filter((part): part is string => part !== null)
 
   return (
-    // Timed overlay, not a destination — dismisses back to the deck
-    // underneath, same as the mockup's own doc comment describes it. A
+    // Holds until the host decides: keep (ends the session on this movie)
+    // or keep going (back to the deck underneath, for everyone). A
     // full-viewport takeover (not an inline banner stacked above the still-
     // swipeable deck) so the reveal is a genuine pause, not something you
     // can swipe straight through.
@@ -61,27 +59,30 @@ export function MarqueeReveal({
           <p className="font-mono text-xs uppercase tracking-wider text-ticket/70">{metaParts.join(' · ')}</p>
         )}
         {movie.inLibrary && <p className="mt-2 text-sm text-marquee">{t('readyInLibrary')}</p>}
-        <p className="mt-4 font-mono text-[11px] uppercase tracking-widest text-brass/80">
-          {t('backToDeckIn', { seconds: secondsLeft })}
-        </p>
-        <div className="mt-4 flex flex-wrap justify-center gap-2.5">
-          {isHost && (
+        {isHost ? (
+          <div className="mt-6 flex flex-col gap-2.5 sm:flex-row sm:justify-center">
             <button
               type="button"
+              data-testid="match-keep"
               onClick={onEndSession}
-              className="bg-exit-red px-5 py-3 font-display text-sm text-ticket hover:bg-exit-red/90"
+              className="bg-marquee px-5 py-3.5 font-display text-base text-ink hover:bg-marquee/90"
             >
-              {t('rollItEndSession')}
+              {t('keepIt')}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="border border-brass/55 px-5 py-3 font-mono text-[11px] uppercase tracking-widest text-ticket hover:border-marquee hover:text-marquee"
-          >
-            {t('keepSwiping')}
-          </button>
-        </div>
+            <button
+              type="button"
+              data-testid="match-keep-going"
+              onClick={onContinue}
+              className="border border-brass/55 px-5 py-3.5 font-mono text-[11px] uppercase tracking-widest text-ticket hover:border-marquee hover:text-marquee"
+            >
+              {t('keepGoing')}
+            </button>
+          </div>
+        ) : (
+          <p data-testid="match-waiting" className="mt-6 font-mono text-[11px] uppercase tracking-widest text-brass/80">
+            {t('waitingForHost')}
+          </p>
+        )}
       </motion.div>
     </div>
   )

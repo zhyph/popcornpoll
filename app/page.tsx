@@ -116,7 +116,7 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <main className="mx-auto flex flex-1 max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6">
+    <main className="mx-auto w-full flex flex-1 max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6">
       <div className="relative flex flex-col items-center gap-4 border-2 border-brass/75 bg-gradient-to-b from-velvet/85 to-ink/90 px-6 py-8 shadow-[0_30px_80px_-30px_rgba(0,0,0,.9)] sm:px-10 sm:py-11">
         <BulbFrame count={28} />
         <p className="font-mono text-[11px] uppercase tracking-[.42em] text-brass">{t('performancesTag')}</p>

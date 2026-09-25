@@ -222,7 +222,7 @@ export default function SoloPage() {
     // imported here since that module drags server-only deps into the bundle.
     const blocked = eligibleCount !== null && eligibleCount < 5
     return (
-      <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10 text-center sm:gap-7">
+      <main className="mx-auto w-full flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10 text-center sm:gap-7">
         <div className="flex flex-col items-center gap-2.5">
           <p className="font-mono text-[10.5px] uppercase tracking-[.4em] text-brass">{t('kicker')}</p>
           <h2 className="font-display text-[clamp(30px,6.4vw,58px)] leading-[.98] tracking-wide text-ticket">{t('title')}</h2>
@@ -363,7 +363,7 @@ export default function SoloPage() {
 
   if (screen === 'shortlist') {
     return (
-      <main className="mx-auto flex flex-1 max-w-6xl flex-col gap-6 px-4 py-10 sm:px-6">
+      <main className="mx-auto w-full flex flex-1 max-w-6xl flex-col gap-6 px-4 py-10 sm:px-6">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-brass/35 pb-4">
           <div className="flex flex-col gap-1.5">
             <p className="font-mono text-[10.5px] uppercase tracking-[.34em] text-brass">{t('shortlistKicker')}</p>
@@ -396,7 +396,7 @@ export default function SoloPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(178px,1fr))] gap-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(178px,1fr))] sm:gap-4">
           {shortlist.slice(0, 24).map((entry, i) => (
             <div key={entry.movieId} className="flex flex-col border border-brass/35 bg-ink" data-testid="shortlist-card">
               <div className="relative box-border flex aspect-[2/3] items-end bg-velvet/40 p-2.5">
@@ -463,9 +463,9 @@ export default function SoloPage() {
   ].filter((part): part is string => part !== null)
 
   return (
-    <main className="mx-auto flex flex-1 max-w-3xl flex-col items-center gap-6 px-4 py-10 text-center">
+    <main className="mx-auto w-full flex flex-1 max-w-3xl flex-col items-center gap-6 px-4 py-10 text-center">
       <p className="font-mono text-[11px] uppercase tracking-[.45em] text-brass">{t('pickDimLabel')}</p>
-      <div className="my-1">
+      <div className="my-1 w-full">
         <CodeSlats code={picked.title.toUpperCase()} splitOn="space" />
       </div>
       <div className="flex w-full flex-wrap items-start justify-center gap-6 border-2 border-brass/60 bg-gradient-to-b from-velvet/70 to-ink/92 p-6 text-left sm:p-8">

@@ -232,7 +232,7 @@ function SetupFlow() {
   }
 
   return (
-    <main className="mx-auto grid max-w-4xl flex-1 grid-cols-1 gap-8 px-4 py-10 sm:grid-cols-2 sm:items-start">
+    <main className="mx-auto w-full grid max-w-4xl flex-1 grid-cols-1 gap-8 px-4 py-10 sm:grid-cols-2 sm:items-start">
       <div className="flex flex-col gap-4">
         <p className="font-mono text-[10.5px] uppercase tracking-[.3em] text-brass">{t('kickerLabel')}</p>
         <h1 className="font-display text-4xl text-ticket sm:text-5xl">{t('title')}</h1>

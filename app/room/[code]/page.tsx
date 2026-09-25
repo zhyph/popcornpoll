@@ -17,15 +17,6 @@ import type { PoolEntry } from '../../../server/pool/buildPool'
 
 type TerminalState = { type: 'kicked'; reason: 'kicked' | 'excluded_at_start' } | { type: 'room_ended'; reason: string }
 
-// How long a match reveal stays on screen before it's dismissed and the
-// swipe deck resumes. Was 4000 (and briefly, per the mockup's own demo
-// value, 6000) — real usage showed both were too fast to actually read the
-// title/genres/rating before it vanished. The overlay is also no longer a
-// swipe-through inline banner (it fully blocks the deck) and now has a
-// manual "Keep swiping" dismiss and a live countdown, so there's no longer
-// a swiping-momentum cost to letting it sit for a while.
-const MATCH_REVEAL_MS = 8000
-
 // Mirrors server/room/actions.ts's MAX_PARTICIPANTS_PER_ROOM — duplicated
 // rather than imported since that module pulls in server-only code
 // (token generation, node:crypto) that shouldn't end up in the client
@@ -50,7 +41,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const [isHost, setIsHost] = useState(false)
   const [client, setClient] = useState<WsClient | null>(null)
   const [terminal, setTerminal] = useState<TerminalState | null>(null)
-  const [dismissedMatchId, setDismissedMatchId] = useState<number | null>(null)
   // Bumped on every room_started (start and restart_reel alike) purely to
   // key SwipeDeck — see the room_started handler below.
   const [reelId, setReelId] = useState(0)
@@ -150,6 +140,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           status: msg.status,
           participants: msg.participants,
           matches: msg.matches,
+          continuedMatchId: msg.continuedMatchId,
           exhausted: msg.exhausted,
           matchThreshold: msg.matchThreshold,
           candidateSource: msg.candidateSource,
@@ -167,12 +158,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       // deck, so per-card state it accumulates — notably which posters have
       // failed to load — must not carry over from the previous one.
       setReelId((n) => n + 1)
-      // room_started fires for both 'start' and 'restart_reel' — the latter
-      // rebuilds the pool and clears server-side matches, so a movie that
-      // was previously matched (and dismissed) can legitimately match again.
-      // Without this reset, latestMatchId === dismissedMatchId would still
-      // hold for that id and the reveal would never show for the new match.
-      setDismissedMatchId(null)
       if (firstActivationRef.current) {
         firstActivationRef.current = false
         setRevealed(false)
@@ -277,17 +262,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   }, [code])
 
   const latestMatchId = snapshot && snapshot.matches.length > 0 ? snapshot.matches[snapshot.matches.length - 1]! : null
-  const [matchSecondsLeft, setMatchSecondsLeft] = useState(Math.ceil(MATCH_REVEAL_MS / 1000))
-  useEffect(() => {
-    if (latestMatchId === null || latestMatchId === dismissedMatchId) return
-    setMatchSecondsLeft(Math.ceil(MATCH_REVEAL_MS / 1000))
-    const timer = setTimeout(() => setDismissedMatchId(latestMatchId), MATCH_REVEAL_MS)
-    const ticker = setInterval(() => setMatchSecondsLeft((s) => Math.max(0, s - 1)), 1000)
-    return () => {
-      clearTimeout(timer)
-      clearInterval(ticker)
-    }
-  }, [latestMatchId, dismissedMatchId])
 
   // Computed before any early return (Rules of Hooks: useSetRoomStep must
   // run every render). Both the exhausted-no-match branch and the terminal
@@ -330,10 +304,11 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   if (terminal?.type === 'room_ended' || snapshot.status === 'ended') {
     const reason = terminal?.type === 'room_ended' ? terminal.reason : 'host_ended'
     const message = tRoomEnded.has(reason) ? tRoomEnded(reason) : tRoomEnded('host_ended')
+    const keptMovie = latestMatchId !== null ? pool.find((e) => e.movieId === latestMatchId) : undefined
     return (
       <main
         data-testid="terminal-screen"
-        className="mx-auto flex flex-1 max-w-md flex-col items-center justify-center gap-5 px-4 py-10 text-center"
+        className="mx-auto w-full flex flex-1 max-w-md flex-col items-center justify-center gap-5 px-4 py-10 text-center"
       >
         <p className="font-mono text-[11px] uppercase tracking-[.45em] text-brass">{t('houseLightsUp')}</p>
         <h2
@@ -342,6 +317,11 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         >
           {t('endOfShowTitle')}
         </h2>
+        {keptMovie && (
+          <p data-testid="kept-movie" className="font-display text-3xl text-marquee">
+            {t('keptMovie', { title: keptMovie.title })}
+          </p>
+        )}
         <p className="font-display text-xl text-ticket">{message}</p>
         <button
           type="button"
@@ -404,7 +384,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     const sourceLabel =
       snapshot.candidateSource === 'plex' ? t('infoStripSourcePlex') : t('infoStripSourceTmdb')
     return (
-      <main className="mx-auto max-w-5xl flex-1 px-4 py-10">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
         {/* The mockup's Lobby is a genuine 2-column grid (door code + info
             strip on the left, admitted-count/strip/stats/CTA on the right),
             not a single stacked column — a prior pass here missed that
@@ -451,18 +431,18 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="border border-brass/35 bg-velvet/45 p-4">
-                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('poolBuiltLabel')}</p>
-                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('poolBuiltUnknown')}</p>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <div className="border border-brass/35 bg-velvet/45 p-2.5 sm:p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.08em] break-words sm:tracking-[.2em] text-brass">{t('poolBuiltLabel')}</p>
+                <p className="mt-1.5 font-display text-xl leading-none whitespace-nowrap sm:text-2xl text-marquee">{t('poolBuiltUnknown')}</p>
               </div>
-              <div className="border border-brass/35 bg-velvet/45 p-4">
-                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('runtimeTonightLabel')}</p>
-                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('runtimeTonightValue')}</p>
+              <div className="border border-brass/35 bg-velvet/45 p-2.5 sm:p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.08em] break-words sm:tracking-[.2em] text-brass">{t('runtimeTonightLabel')}</p>
+                <p className="mt-1.5 font-display text-xl leading-none whitespace-nowrap sm:text-2xl text-marquee">{t('runtimeTonightValue')}</p>
               </div>
-              <div className="border border-brass/35 bg-velvet/45 p-4">
-                <p className="font-mono text-[9.5px] uppercase tracking-[.2em] text-brass">{t('concessionsLabel')}</p>
-                <p className="mt-1.5 font-display text-2xl leading-none text-marquee">{t('concessionsValue')}</p>
+              <div className="border border-brass/35 bg-velvet/45 p-2.5 sm:p-4">
+                <p className="font-mono text-[9.5px] uppercase tracking-[.08em] break-words sm:tracking-[.2em] text-brass">{t('concessionsLabel')}</p>
+                <p className="mt-1.5 font-display text-xl leading-none whitespace-nowrap sm:text-2xl text-marquee">{t('concessionsValue')}</p>
               </div>
             </div>
 
@@ -502,14 +482,16 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   }
 
   const currentCard = pool.find((entry) => entry.movieId === pendingCardId) ?? null
+  // Server-owned: the reveal stays up for everyone until the host picks
+  // keep (end_room) or keep going (continue_after_match).
   const latestMatch =
-    latestMatchId !== null && latestMatchId !== dismissedMatchId
+    latestMatchId !== null && latestMatchId !== snapshot.continuedMatchId
       ? (pool.find((e) => e.movieId === latestMatchId) ?? null)
       : null
 
   if (snapshot.exhausted && snapshot.matches.length === 0) {
     return (
-      <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10">
+      <main className="mx-auto w-full flex flex-1 max-w-2xl flex-col items-center gap-6 px-4 py-10">
         <div data-testid="fallback" className="w-full border-2 border-brass/60 bg-ink p-6 sm:p-9">
           <div className="mb-5 flex items-baseline justify-between gap-3 border-b border-brass/40 pb-3.5">
             <p className="font-display text-2xl text-ticket sm:text-3xl">{t('noUnanimousPick')}</p>
@@ -562,15 +544,14 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         : tMarquee('matchRuleAtLeastLabel', { n: snapshot.matchThreshold.n })
 
   return (
-    <main className="mx-auto flex flex-1 max-w-2xl flex-col items-center justify-center gap-6 px-4 py-10">
+    <main className="mx-auto w-full flex flex-1 max-w-2xl flex-col items-center justify-center gap-6 px-4 py-10">
       {latestMatch && (
         <div data-testid="match-banner">
           <MarqueeReveal
             movie={latestMatch}
             matchRuleLabel={matchRuleLabel}
-            secondsLeft={matchSecondsLeft}
             isHost={isHost}
-            onDismiss={() => setDismissedMatchId(latestMatchId)}
+            onContinue={() => client?.send({ type: 'continue_after_match', movieId: latestMatch.movieId })}
             onEndSession={() => client?.send({ type: 'end_room' })}
           />
         </div>

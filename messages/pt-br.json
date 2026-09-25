@@ -105,7 +105,8 @@
     "houseLightsUp": "As luzes da casa se acendem",
     "endOfShowTitle": "FIM DA SESSÃO",
     "reelChangeFooter": "troca de rolo · obrigado por não conversar durante o filme",
-    "backToBoxOffice": "VOLTAR PARA A BILHETERIA"
+    "backToBoxOffice": "VOLTAR PARA A BILHETERIA",
+    "keptMovie": "Hoje: {title}"
   },
   "swipeDeck": {
     "inLibrary": "Na sua biblioteca",
@@ -123,12 +124,12 @@
   "marqueeReveal": {
     "kicker": "A sessão de hoje",
     "readyInLibrary": "Pronto para assistir na sua biblioteca",
-    "backToDeckIn": "De volta em {seconds}s",
-    "rollItEndSession": "BATE O SINO · ENCERRAR SESSÃO",
-    "keepSwiping": "Continuar deslizando",
     "matchRuleAllLabel": "unânime",
     "matchRuleMajorityLabel": "maioria",
-    "matchRuleAtLeastLabel": "{n} disseram sim"
+    "matchRuleAtLeastLabel": "{n} disseram sim",
+    "keepIt": "Fica esse · rodar o filme",
+    "keepGoing": "Continuar",
+    "waitingForHost": "Esperando o anfitrião decidir se fica ou continua…"
   },
   "roomShare": {
     "copyLink": "Copiar link",

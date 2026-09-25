@@ -2,7 +2,7 @@
 import type Database from 'better-sqlite3'
 import { insertMatch } from '../db/matchHistory'
 import { joinRoom, kickParticipant, reconnectRoom, updateSettings } from '../room/actions'
-import { restartReel, startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
+import { continueAfterMatch, restartReel, startRoom, swipeAction, type SyncWaiter } from '../room/activeActions'
 import { endRoom, touchActivity } from '../room/lifecycle'
 import type { RoomStore } from '../room/roomStore'
 import type { Participant, RoomState } from '../room/types'
@@ -44,6 +44,7 @@ export function stateUpdate(room: RoomState): Extract<ServerMessage, { type: 'st
     participants: participantViews(room),
     status: room.status,
     matches: room.matches,
+    continuedMatchId: room.continuedMatchId,
     exhausted: room.exhausted,
     matchThreshold: room.matchThreshold,
     candidateSource: room.candidateSource,
@@ -68,6 +69,7 @@ function snapshotFor(room: RoomState, participant: Participant): RoomSnapshot {
     mySwipes: Object.fromEntries(participant.swipes),
     participants: participantViews(room),
     matches: room.matches,
+    continuedMatchId: room.continuedMatchId,
     exhausted: room.exhausted,
     matchThreshold: room.matchThreshold,
     candidateSource: room.candidateSource,
@@ -332,6 +334,16 @@ export async function handleMessage(
         ...emptyOutput(state),
         toRoom: [{ type: 'room_ended', reason: 'host_ended', seq: update.seq }, update],
       }
+    }
+
+    case 'continue_after_match': {
+      if (!state.roomCode) return emptyOutput(state)
+      const result = continueAfterMatch(store, state.roomCode, state.isHost, message.movieId)
+      if (!result.ok) {
+        return { ...emptyOutput(state), toSender: [{ type: 'error', code: result.code, message: result.code }] }
+      }
+      if (!result.data.changed) return emptyOutput(state)
+      return { ...emptyOutput(state), toRoom: [stateUpdate(store.get(state.roomCode)!)] }
     }
 
     case 'restart_reel': {

@@ -56,23 +56,23 @@ export function PictureBoothHeader() {
   const labels: Partial<Record<ChapterStep, string>> = isSoloFlow ? soloLabels : isGuestFlow ? guestLabels : hostLabels
 
   return (
-    <header className="relative z-20 flex flex-wrap items-center justify-between gap-4 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-3.5 backdrop-blur-sm sm:px-10">
+    <header className="relative z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-brass/35 bg-gradient-to-b from-velvet/90 to-ink/70 px-4 py-2.5 backdrop-blur-sm sm:px-10 sm:py-3.5">
       <div className="flex items-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element -- static brand mark, no next/image optimization needed */}
         <img src="/logo.svg" alt="" aria-hidden className="h-7 w-7 shrink-0" />
-        <span className="flex gap-1.5" aria-hidden>
+        <span className="hidden gap-1.5 sm:flex" aria-hidden>
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee" />
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee [animation-delay:140ms]" />
           <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-marquee [animation-delay:280ms]" />
         </span>
         <span className="font-display text-xl uppercase tracking-wide text-ticket">{t('appName')}</span>
-        <span className="border border-brass/50 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-brass">
+        <span className="hidden border border-brass/50 px-1.5 py-0.5 font-mono sm:inline text-[10px] uppercase tracking-widest text-brass">
           {tChrome('estYear')}
         </span>
       </div>
 
       {currentStep !== null && (
-        <nav className="flex flex-wrap items-center justify-center gap-0" data-testid="chapter-indicator" aria-label="Progress">
+        <nav className="order-last flex w-full items-center justify-center gap-0 sm:order-none sm:w-auto sm:flex-wrap" data-testid="chapter-indicator" aria-label="Progress">
           {STEPS.map((step, i) => {
             const isCurrent = step === currentStep
             const isPast = STEPS.indexOf(currentStep) > i
@@ -98,11 +98,13 @@ export function PictureBoothHeader() {
                   >
                     {isPast ? '✓' : i + 1}
                   </span>
-                  {labels[step]}
+                  {/* Phones: only the current step keeps its label, the rest
+                      collapse to their numbered dot so the tracker fits one row. */}
+                  <span className={isCurrent ? undefined : 'hidden sm:inline'}>{labels[step]}</span>
                 </span>
                 {i < STEPS.length - 1 && (
                   <span
-                    className="h-px w-[18px]"
+                    className="h-px w-2.5 sm:w-[18px]"
                     style={{ background: isPast ? 'rgba(245,166,35,.6)' : 'rgba(154,122,83,.3)' }}
                   />
                 )}
@@ -113,7 +115,7 @@ export function PictureBoothHeader() {
       )}
 
       <div className="flex items-center gap-2.5 font-mono text-[10px] uppercase tracking-widest text-brass">
-        <span>{tChrome('selfHosted')}</span>
+        <span className="hidden sm:inline">{tChrome('selfHosted')}</span>
         <LocaleSwitcher />
       </div>
     </header>

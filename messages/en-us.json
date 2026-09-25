@@ -105,7 +105,8 @@
     "houseLightsUp": "The house lights come up",
     "endOfShowTitle": "END OF SHOW",
     "reelChangeFooter": "reel change · thank you for not talking during the picture",
-    "backToBoxOffice": "BACK TO THE BOX OFFICE"
+    "backToBoxOffice": "BACK TO THE BOX OFFICE",
+    "keptMovie": "Tonight: {title}"
   },
   "swipeDeck": {
     "inLibrary": "In your library",
@@ -123,12 +124,12 @@
   "marqueeReveal": {
     "kicker": "Tonight's feature",
     "readyInLibrary": "Ready to watch in your library",
-    "backToDeckIn": "Back to the deck in {seconds}s",
-    "rollItEndSession": "ROLL IT · END SESSION",
-    "keepSwiping": "Keep swiping",
     "matchRuleAllLabel": "unanimous",
     "matchRuleMajorityLabel": "majority",
-    "matchRuleAtLeastLabel": "{n} said yes"
+    "matchRuleAtLeastLabel": "{n} said yes",
+    "keepIt": "Keep it · roll the film",
+    "keepGoing": "Keep going",
+    "waitingForHost": "Waiting for the host to keep it or keep going…"
   },
   "roomShare": {
     "copyLink": "Copy link",
